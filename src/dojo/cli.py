@@ -6,6 +6,8 @@
   dojo warmup [--user NAME]     run due warm-up retrievals only
   dojo check [SLUG]             visible tests on the current workbench
   dojo profile [--user NAME]    your attempt history
+  dojo history [--user NAME]    attempts, newest first (see `show <id>`)
+  dojo show ATTEMPT_ID          full detail of one attempt (hints, code, review)
   dojo progress [--user NAME]   per-pattern proficiency + card schedule
 """
 
@@ -15,12 +17,21 @@ import argparse
 import sys
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from dojo import scheduler
 from dojo.bank import seed_problems
 from dojo.config import DB_PATH, PROBLEMS_DIR
-from dojo.db import connect, get_or_create_user, init_db, now
+from dojo.db import (
+    connect,
+    get_attempt,
+    get_or_create_user,
+    init_db,
+    list_attempts,
+    loads_json,
+    now,
+)
 
 
 def _resolve_user(conn, name: str | None) -> str:
@@ -211,6 +222,142 @@ def _cmd_profile(args) -> int:
     return 0
 
 
+def _cmd_history(args) -> int:
+    console = Console()
+    with connect(DB_PATH) as conn:
+        try:
+            user = _resolve_user(conn, args.user)
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 1
+        user_id = get_or_create_user(conn, user)
+        rows = list_attempts(conn, user_id, slug=args.slug, limit=args.limit)
+    table = Table(title=f"Attempts — {user}")
+    for col in (
+        "id", "problem", "kind", "status", "hints",
+        "claimed", "measured", "r²", "submitted",
+    ):
+        table.add_column(col)
+    for r in rows:
+        claimed = " / ".join(
+            x for x in (r["self_reported_time"], r["self_reported_space"]) if x
+        )
+        table.add_row(
+            str(r["id"]),
+            f"{r['title']} [dim]({r['slug']})[/dim]",
+            r["kind"],
+            r["status"],
+            str(r["hint_count"]),
+            (claimed or "—")[:40],
+            r["measured_time_class"] or "—",
+            str(r["measured_time_r2"]) if r["measured_time_r2"] is not None else "—",
+            (r["submitted_at"] or r["started_at"])[:19],
+        )
+    console.print(table)
+    if rows:
+        console.print(
+            "[dim]`dojo show <id>` for the full attempt: hints, code, review, "
+            "reflection.[/dim]"
+        )
+    else:
+        console.print("[dim]No attempts yet — solve something with `dojo day`.[/dim]")
+    return 0
+
+
+def _measured_cell(row, axis: str) -> str:
+    cls = row[f"measured_{axis}_class"]
+    if not cls:
+        return "—"
+    r2 = row[f"measured_{axis}_r2"]
+    return f"{cls} (r²={round(r2, 3)})" if r2 is not None else cls
+
+
+def _format_review(review: dict) -> str:
+    from dojo.tutor import de_markdown
+
+    lines = []
+    for dim in (
+        "correctness",
+        "approach_quality",
+        "style_idiom",
+        "naming",
+        "edge_cases",
+        "complexity_claim_check",
+    ):
+        entry = review.get(dim, {})
+        if isinstance(entry, dict):
+            lines.append(
+                f"{dim.replace('_', ' ')}: {entry.get('score', '?')}/5 — "
+                f"{de_markdown(str(entry.get('comment', '')))}"
+            )
+    if review.get("broader_picture"):
+        lines.append("")
+        lines.append(f"Broader picture: {de_markdown(str(review['broader_picture']))}")
+    if review.get("overall_comment"):
+        lines.append("")
+        lines.append(f"Overall: {de_markdown(str(review['overall_comment']))}")
+    return "\n".join(lines)
+
+
+def _cmd_show(args) -> int:
+    from dojo.tutor import de_markdown
+
+    console = Console()
+    with connect(DB_PATH) as conn:
+        row = get_attempt(conn, args.attempt_id)
+    if row is None:
+        console.print(
+            f"[red]No attempt with id {args.attempt_id}. Try `dojo history`.[/red]"
+        )
+        return 1
+    if args.code:
+        console.print(row["code"] or "(no code recorded)")
+        return 0
+
+    console.print(
+        Panel(
+            f"[bold]{row['title']}[/bold] [{row['difficulty']}] — "
+            f"{row['pattern']}\n\n{row['statement']}",
+            title=f"Attempt {row['id']} — {row['kind']}",
+        )
+    )
+    console.print(
+        f"[dim]status: {row['status']} · started: {row['started_at']} · "
+        f"submitted: {row['submitted_at'] or '—'} · "
+        f"duration: {row['duration_seconds'] or '—'}s · "
+        f"hints: {row['hint_count']}[/dim]"
+    )
+    table = Table(title="Complexity: claimed vs. measured")
+    table.add_column("")
+    table.add_column("You claimed")
+    table.add_column("Measured")
+    table.add_row("Time", row["self_reported_time"] or "—", _measured_cell(row, "time"))
+    table.add_row("Space", row["self_reported_space"] or "—", _measured_cell(row, "space"))
+    console.print(table)
+
+    hints = loads_json(row["hints"], [])
+    if hints:
+        hint_table = Table(title="Hint transcript")
+        hint_table.add_column("tier")
+        hint_table.add_column("you asked")
+        hint_table.add_column("tutor said")
+        for h in hints:
+            hint_table.add_row(
+                str(h.get("tier", "?")),
+                de_markdown(str(h.get("user", ""))),
+                de_markdown(str(h.get("hint", ""))),
+            )
+        console.print(hint_table)
+    if row["code"]:
+        console.print(Panel(row["code"], title="Code", border_style="blue"))
+    review = loads_json(row["review"], {})
+    if review:
+        console.print(Panel(_format_review(review), title="AI review", border_style="green"))
+    if row["reflection"]:
+        console.print(Panel(row["reflection"], title="Reflection", border_style="cyan"))
+    return 0
+
+
 def _cmd_progress(args) -> int:
     console = Console()
     with connect(DB_PATH) as conn:
@@ -302,8 +449,21 @@ def main(argv: list[str] | None = None) -> int:
     p_check.set_defaults(func=_cmd_check)
 
     p_profile = sub.add_parser("profile", help="show attempt history")
-    p_profile.add_argument("--user", help="whose profile (default: 'default')")
+    p_profile.add_argument("--user", help="whose profile (default: the sole DB user)")
     p_profile.set_defaults(func=_cmd_profile)
+
+    p_history = sub.add_parser("history", help="list your attempts, newest first")
+    p_history.add_argument("--user", help="whose history (default: the sole DB user)")
+    p_history.add_argument("--slug", help="filter to one problem")
+    p_history.add_argument("--limit", type=int, help="show only the last N attempts")
+    p_history.set_defaults(func=_cmd_history)
+
+    p_show = sub.add_parser("show", help="full detail of one attempt")
+    p_show.add_argument("attempt_id", type=int, help="attempt id from `dojo history`")
+    p_show.add_argument(
+        "--code", action="store_true", help="print only the submitted code"
+    )
+    p_show.set_defaults(func=_cmd_show)
 
     p_progress = sub.add_parser("progress", help="per-pattern proficiency + card schedule")
     p_progress.add_argument("--user", help="whose progress (default: 'default')")

@@ -35,7 +35,7 @@ dojo day
 9. **Review** — the AI reviewer scores a rubric (correctness, approach, idiom, naming, edge cases, complexity claim) and writes a "broader picture" note connecting the problem to its pattern family and your ML background.
 10. **Reflect** — one prompt feeds the pattern card: what was the key insight, and when would you reach for this again?
 
-Everything lands on an `attempts` row in SQLite (kind = `solve` or `warmup`); new solves create/refresh the pattern's card. Each `dojo day` invocation is exactly one attempt row: quitting saves your code *and* hint history to that row (status `unsolved`) and the next session starts fresh with a reset hint ladder. The command list (`check · hint <text> · open · submit · quit`) is reprinted after every output, so it's always at the bottom of your screen. `dojo warmup` runs due retrievals on their own; `dojo progress` shows per-pattern proficiency and the card schedule.
+Everything lands on an `attempts` row in SQLite (kind = `solve` or `warmup`); new solves create/refresh the pattern's card. Each `dojo day` invocation is exactly one attempt row: quitting saves your code *and* hint history to that row (status `unsolved`) and the next session starts fresh with a reset hint ladder. Every session also starts from a **blank template** — previous solutions live on attempt rows, not in the workbench file. Revisit them with `dojo history` (attempts, newest first) and `dojo show <id>` (statement, hint transcript, code, review, reflection; `--code` prints just the code). The command list (`check · hint <text> · open · submit · quit`) is reprinted after every output, so it's always at the bottom of your screen. `dojo warmup` runs due retrievals on their own; `dojo progress` shows per-pattern proficiency and the card schedule.
 
 ## The retention engine (v0.2)
 
@@ -91,10 +91,12 @@ Two build-time lessons are baked into the tests: CPython 3.12+ resizes unshared 
 
 ```
 src/dojo/
-  cli.py            # init / list / day / warmup / check / profile / progress
+  cli.py            # init / list / day / warmup / check / profile /
+                    # history / show / progress
   config.py         # paths, env, backend selection (DEEPSEEK_API_KEY, DOJO_AI_BACKEND)
   editor.py         # $EDITOR launching: detached GUI, tmux/macOS windows for terminal editors
-  db.py             # SQLite schema (users, problems, attempts, pattern_cards) + migrations
+  db.py             # SQLite schema (users, problems, attempts, pattern_cards) +
+                    # migrations + attempt-history queries (history / show)
   bank.py           # seed importer: problems/**/*.py docstrings -> problems
   complexity.py     # O(...) normalization + mismatch logic
   scheduler.py      # FSRS-lite cards, due reviews, warm-up + new-problem picks
@@ -104,9 +106,10 @@ src/dojo/
   session/          # workbench state + the day flow (solve & warmup modes)
 problems/           # the seed corpus: one problem per file, prompt in the module
                     # docstring, organized by pattern (arrays_and_hashing, stack,
-                    # two_pointers, interview/...) — your original solving files
+                    # two_pointers, trees, heap, binary_search, greedy,
+                    # dynamic_programming, math) — your original solving files
 data/problem_overrides.json   # curated metadata: function names + visible tests
-tests/                        # 45 tests, no network, mock backend
+tests/                        # offline; mock backend
 workbench/                    # scratch space (gitignored); attempt code lives in the DB
 Makefile                      # sandbox-friendly entry points (workspace-local uv cache)
 ```
@@ -119,6 +122,8 @@ export DEEPSEEK_API_KEY=...      # or put it in a gitignored .env
 uv run dojo init --user andy     # create DB, seed the bank from problems/
 uv run dojo list --user andy     # catalog with solved status
 uv run dojo day --user andy      # warm-ups (if due) + scheduler-picked problem
+uv run dojo history              # your attempts, newest first
+uv run dojo show 12              # full detail of attempt 12 (--code for just the code)
 ```
 
 **The uv cache note.** uv writes its package cache to `~/.cache/uv` by default, which is outside this repo. If you run inside a sandbox (CI, an agent harness, a container), use `make sync` / `make test` — the Makefile sets `UV_CACHE_DIR=.uv-cache`, keeping everything inside the workspace so no permission escalation is ever needed.
@@ -142,7 +147,7 @@ Commands that need a user resolve `--user` against the DB's single existing user
 uv run pytest
 ```
 
-45 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import, judge correctness/crash/timeout, hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), and full mocked day flows. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
+58 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout, hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
 
 ## Roadmap
 
@@ -152,7 +157,7 @@ uv run pytest
 
 ## Known limitations (v0)
 
-- One fully curated solve path (`valid_parentheses`); `two_sum` is seeded as a fixture. Every other problem waits for curation (function name + visible tests).
+- One fully curated solve path (`valid_parentheses`); `two_sum` is seeded as a fixture. Every other problem (31 seeded across 9 patterns) waits for curation (function name + visible tests).
 - A warm-up card needs at least one *solved* problem in its pattern to re-solve; cards without one are deferred a day.
 - Same-day reviews yield no stability growth (R ≈ 1 at t ≈ 0) — schedule your warm-ups a day or more after solving, which is exactly what the due dates do.
 - Terminal editors detach only inside tmux or on macOS (Terminal/iTerm via osascript); elsewhere `open` falls back to blocking with a warning. Unrecognized editors are treated as blocking — add them to `GUI_EDITORS` in `src/dojo/editor.py` if they can detach.

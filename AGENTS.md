@@ -10,12 +10,13 @@ dojo is an AI-guided interview-prep trainer: a CLI (`dojo`) that runs a daily lo
 
 ```
 src/dojo/
-  cli.py            # argparse entry: init / list / day / warmup / check / profile / progress
+  cli.py            # argparse entry: init / list / day / warmup / check / profile /
+                    # history / show / progress
   config.py         # paths + env (DEEPSEEK_API_KEY, DOJO_AI_BACKEND=mock|deepseek)
   editor.py         # $EDITOR launching: GUI -> detached process; terminal ->
                     # tmux new-window / macOS osascript; unknown -> blocking
   db.py             # schema (users, problems, attempts, pattern_cards) +
-                    # migrate(); MIGRATIONS MUST BE ADDITIVE
+                    # migrate() + attempt-history queries; MIGRATIONS MUST BE ADDITIVE
   bank.py           # problems/**/*.py docstring -> problems importer (upsert on slug)
   complexity.py     # O(...) canonicalization; only KNOWN_CLASSES participate in mismatch()
   scheduler.py      # FSRS-lite (stability/difficulty/forgetting curve), due cards,
@@ -35,8 +36,10 @@ src/dojo/
     state.py        # workbench/<slug>.state.json (tier, hints, attempt id, kind)
     flow.py         # run_day (solve & warmup modes) + run_warmups
 data/problem_overrides.json   # curated metadata: function_name + visible tests
-problems/           # seed corpus: one problem per file, prompt in module docstring
-tests/              # 45 tests; offline; mock backend
+problems/           # seed corpus: one problem per file, prompt in module docstring,
+                    # grouped by pattern (arrays_and_hashing, stack, two_pointers,
+                    # trees, heap, binary_search, greedy, dynamic_programming, math)
+tests/              # offline; mock backend
 workbench/          # gitignored scratch; attempt code persists in the DB, not here
 Makefile            # sync/test/demo targets with a workspace-local UV_CACHE_DIR
 ```
@@ -71,11 +74,11 @@ Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by ha
 - **Measurement protocol:** one timed call per subprocess; GC disabled around the call; tracemalloc started after module import; median across repeats. The subprocess boundary exists to contain hangs — don't replace it with in-process timing.
 - **Curating a new problem:** add `function_name` + `visible_tests` to `data/problem_overrides.json`, a signature to `SIGNATURES` in `session/flow.py` (until signatures move into overrides in v0.3), and a generator/oracle pair in `judge/registry.py`. Then `dojo init` re-seeds (an upsert, so it never deletes rows attempts reference).
 - **Scheduler:** the FSRS-lite model lives entirely in `scheduler.py` with documented constants (FACTOR/DECAY/S0/D0/TARGET_R). Grades are 1-4 (Anki convention). Don't swap in a scheduler library without porting `tests/test_scheduler.py`; same-day reviews legitimately yield no stability growth (R ≈ 1).
-- **Warm-up semantics:** `run_warmups` forces a fresh template (re-solve from scratch), creates an attempt with `kind='warmup'`, skips reflection (the recall grade replaces it), and quits record a lapse. Workbench state is per (slug, kind) and lasts exactly one session: it is retired (deleted) on submit and on quit, so every `dojo day` invocation gets a fresh attempt row — a warm-up never reuses a solve session's tier/hints, and repeat sessions never overwrite earlier attempt rows. Quitting persists code + hints to the abandoned attempt row.
+- **Warm-up semantics:** `run_warmups` forces a fresh template (re-solve from scratch), creates an attempt with `kind='warmup'`, skips reflection (the recall grade replaces it), and quits record a lapse. Workbench state is per (slug, kind) and lasts exactly one session: it is retired (deleted) on submit and on quit, so every `dojo day` invocation gets a fresh attempt row — a warm-up never reuses a solve session's tier/hints, and repeat sessions never overwrite earlier attempt rows. Quitting persists code + hints to the abandoned attempt row. **Every new session writes a blank template over the workbench file** (solves and warm-ups alike); previous solutions live on attempt rows and are recoverable via `dojo history` / `dojo show <id>`.
 - **Terminal-safe AI output:** tutor and reviewer prompts instruct plain text (no Markdown); `de_markdown` in `tutor/tutor.py` is the belt-and-braces cleanup applied at display time. Underscores are never stripped (they may be identifiers like `two_sum`); pin this with tests in `tests/test_tutor.py`.
 - **Editor launching:** all `$EDITOR` behavior lives in `editor.py` — GUI editors detach via `Popen(start_new_session=True)`, terminal editors go through tmux/osascript, unknown editors block. Don't call subprocess directly from `flow.py`; tests cover the pure classification helpers only, never process spawning.
 - **SQLite:** `db.py` owns schema and connection. Keep `sqlite3.Row` access by name. JSON columns go through `dumps_json`/`loads_json`.
-- **CLI:** argparse subcommands in `cli.py`; each returns an exit code. Interactive flows read from `console.input` — tests use the `FakeConsole` fixture rather than real stdin. Commands that need a user resolve `--user` against the DB's single existing user and error otherwise — never invent a `default` user.
+- **CLI:** argparse subcommands in `cli.py`; each returns an exit code. Interactive flows read from `console.input` — tests use the `FakeConsole` fixture (its `actions` hook simulates editing the workbench mid-session) rather than real stdin. Commands that need a user resolve `--user` against the DB's single existing user and error otherwise — never invent a `default` user. `history` (list attempts, newest first) and `show <id>` (full attempt detail, `--code` for code only) render rows fetched by `db.list_attempts` / `db.get_attempt`.
 
 ## Definition of done
 

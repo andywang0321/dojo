@@ -24,10 +24,15 @@ def db(tmp_path):
 
 
 class FakeConsole:
-    """Console stand-in: records prints, serves canned inputs."""
+    """Console stand-in: records prints, serves canned inputs.
 
-    def __init__(self, answers: list[str] | None = None):
+    ``actions`` maps a canned answer to a callback fired when that answer is
+    popped — the way tests simulate the user editing the workbench file
+    during a session (e.g. writing the solution right before "submit")."""
+
+    def __init__(self, answers: list[str] | None = None, actions: dict | None = None):
         self.answers = list(answers or [])
+        self.actions = dict(actions or {})
         self.out: list[str] = []
 
     def print(self, *args, **kwargs):
@@ -35,7 +40,11 @@ class FakeConsole:
 
     def input(self, prompt: str = "") -> str:
         self.out.append(str(prompt))
-        return self.answers.pop(0) if self.answers else "quit"
+        answer = self.answers.pop(0) if self.answers else "quit"
+        action = self.actions.get(answer)
+        if action:
+            action()
+        return answer
 
     @property
     def text(self) -> str:
@@ -44,7 +53,7 @@ class FakeConsole:
 
 @pytest.fixture()
 def fake_console():
-    def make(answers=None):
-        return FakeConsole(answers)
+    def make(answers=None, actions=None):
+        return FakeConsole(answers, actions)
 
     return make

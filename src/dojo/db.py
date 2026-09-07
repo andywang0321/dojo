@@ -121,6 +121,47 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def list_attempts(
+    conn: sqlite3.Connection,
+    user_id: int,
+    slug: str | None = None,
+    limit: int | None = None,
+) -> list[sqlite3.Row]:
+    """Attempt history for one user, newest first, optionally filtered to
+    one problem slug and capped. Backs `dojo history`."""
+    query = """
+        SELECT a.id, a.kind, a.status, a.hint_count, a.started_at,
+               a.submitted_at, a.duration_seconds,
+               a.self_reported_time, a.self_reported_space,
+               a.measured_time_class, a.measured_time_r2,
+               a.measured_space_class, a.measured_space_r2,
+               a.reflection, p.slug, p.title, p.difficulty, p.pattern
+        FROM attempts a JOIN problems p ON p.id = a.problem_id
+        WHERE a.user_id = ?
+    """
+    params: list = [user_id]
+    if slug:
+        query += " AND p.slug = ?"
+        params.append(slug)
+    query += " ORDER BY a.id DESC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(query, params).fetchall()
+
+
+def get_attempt(conn: sqlite3.Connection, attempt_id: int) -> sqlite3.Row | None:
+    """One attempt joined with its problem, for `dojo show`."""
+    return conn.execute(
+        """
+        SELECT a.*, p.slug, p.title, p.difficulty, p.pattern, p.statement
+        FROM attempts a JOIN problems p ON p.id = a.problem_id
+        WHERE a.id = ?
+        """,
+        (attempt_id,),
+    ).fetchone()
+
+
 def dumps_json(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 

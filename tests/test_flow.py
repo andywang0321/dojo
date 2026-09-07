@@ -76,7 +76,6 @@ def test_full_day_flow(db, fake_console, monkeypatch, tmp_path):
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
-    (workbench / "valid_parentheses.py").write_text(SOLUTION)
 
     console = fake_console(
         [
@@ -84,7 +83,11 @@ def test_full_day_flow(db, fake_console, monkeypatch, tmp_path):
             "O(n) because one pass over the string",
             "O(n) for the stack",
             "The key insight: the stack mirrors the opening order.",
-        ]
+        ],
+        actions={
+            # Sessions start blank now; "editing" happens during the session.
+            "submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)
+        },
     )
 
     outcome = run_day(
@@ -117,16 +120,20 @@ def test_wrong_solution_keeps_session_open(db, fake_console, monkeypatch, tmp_pa
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
-    (workbench / "valid_parentheses.py").write_text(
-        textwrap.dedent(
-            """
-            def is_valid(s: str) -> bool:
-                return s.count("(") == s.count(")")
-            """
-        )
-    )
 
-    console = fake_console(["submit", "quit"])
+    console = fake_console(
+        ["submit", "quit"],
+        actions={
+            "submit": lambda: (workbench / "valid_parentheses.py").write_text(
+                textwrap.dedent(
+                    """
+                    def is_valid(s: str) -> bool:
+                        return s.count("(") == s.count(")")
+                    """
+                )
+            )
+        },
+    )
     outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
     assert outcome == "quit"
 
@@ -142,7 +149,6 @@ def test_open_command_and_commands_hint(db, fake_console, monkeypatch, tmp_path)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
-    (workbench / "valid_parentheses.py").write_text(SOLUTION)
 
     calls: list[str] = []
     monkeypatch.setattr(
@@ -170,7 +176,6 @@ def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
-    (workbench / "valid_parentheses.py").write_text(SOLUTION)
 
     console = fake_console(
         [
@@ -178,7 +183,8 @@ def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
             "O(n) because one pass over the string",
             "O(n) for the stack",
             "The key insight: the stack mirrors the opening order.",
-        ]
+        ],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
     )
     outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
     assert outcome == "solved"
@@ -222,10 +228,10 @@ def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
-    (workbench / "valid_parentheses.py").write_text(SOLUTION)
 
     console = fake_console(
-        ["submit", "O(n) one pass", "O(n) stack", "3"]
+        ["submit", "O(n) one pass", "O(n) stack", "3"],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
     )
     outcome = run_day(
         db, console, MockBackend(), "valid_parentheses", "andy",
@@ -279,11 +285,11 @@ def test_repeated_solves_create_distinct_attempts(db, fake_console, monkeypatch,
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
-    (workbench / "valid_parentheses.py").write_text(SOLUTION)
 
     answers = ["submit", "O(n) one pass", "O(n) stack", "The key insight: the stack."]
-    assert run_day(db, fake_console(answers), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
-    assert run_day(db, fake_console(answers), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+    write_solution = lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)
+    assert run_day(db, fake_console(answers, actions={"submit": write_solution}), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+    assert run_day(db, fake_console(answers, actions={"submit": write_solution}), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
 
     rows = db.execute("SELECT id, kind, status FROM attempts ORDER BY id").fetchall()
     assert len(rows) == 2
@@ -307,16 +313,16 @@ def test_repeated_warmups_create_distinct_attempts(db, fake_console, monkeypatch
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
-    (workbench / "valid_parentheses.py").write_text(SOLUTION)
 
+    write_solution = lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)
     first = run_day(
-        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "3"]),
+        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "3"], actions={"submit": write_solution}),
         MockBackend(), "valid_parentheses", "andy", warmup=True, card=card,
     )
     assert first == "warmup_done"
     card = db.execute("SELECT * FROM pattern_cards WHERE pattern = 'stack'").fetchone()
     second = run_day(
-        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "4"]),
+        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "4"], actions={"submit": write_solution}),
         MockBackend(), "valid_parentheses", "andy", warmup=True, card=card,
     )
     assert second == "warmup_done"
@@ -337,7 +343,6 @@ def test_quit_persists_hints_and_retires_state(db, fake_console, monkeypatch, tm
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
-    (workbench / "valid_parentheses.py").write_text(SOLUTION)
 
     # One hint (vague message → tier 0), then quit.
     assert run_day(db, fake_console(["hint stuck", "quit"]), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
@@ -353,3 +358,25 @@ def test_quit_persists_hints_and_retires_state(db, fake_console, monkeypatch, tm
     attempts = db.execute("SELECT id FROM attempts ORDER BY id").fetchall()
     assert len(attempts) == 2
     assert attempts[0]["id"] != attempts[1]["id"]
+
+
+def test_new_session_starts_from_blank_template(db, fake_console, monkeypatch, tmp_path):
+    """Every new session overwrites the workbench with a blank template —
+    previous solutions live on attempt rows, not in the workbench file."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    path = workbench / "valid_parentheses.py"
+    path.write_text(SOLUTION)  # leftover from a previous session
+
+    assert run_day(db, fake_console(["quit"]), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+
+    content = path.read_text()
+    assert "raise NotImplementedError" in content
+    assert "def is_valid(s: str) -> bool:" in content  # template stub signature
+    assert "pairs = {" not in content  # the old solution is gone
+    row = db.execute("SELECT code FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert "raise NotImplementedError" in row["code"]  # blank start is recorded

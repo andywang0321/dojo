@@ -385,7 +385,8 @@ def run_day(
     user_id = get_or_create_user(conn, user_name)
     kind = "warmup" if warmup else "solve"
     state = load_state(slug)
-    if state is None or state.user_id != user_id or state.kind != kind:
+    is_new_session = state is None or state.user_id != user_id or state.kind != kind
+    if is_new_session:
         cur = conn.execute(
             "INSERT INTO attempts (user_id, problem_id, kind, status, started_at) "
             "VALUES (?, ?, ?, 'unsolved', ?)",
@@ -401,7 +402,11 @@ def run_day(
         )
         save_state(state)
 
-    _write_template(problem)
+    # Every new session starts from a blank template — previous solutions
+    # live on attempt rows (`dojo history` / `dojo show <id>`), not in the
+    # workbench. A session that resumes existing state (crash recovery)
+    # keeps whatever is in the file.
+    _write_template(problem, force=is_new_session)
     if warmup:
         console.print(
             Panel(

@@ -81,3 +81,12 @@ def test_load_overrides_from_repo():
     ov = overrides["valid_parentheses"]
     assert ov.function_name == "is_valid"
     assert len(ov.visible_tests) >= 3
+
+
+def test_repo_corpus_parses():
+    """The seed corpus itself must conform to the prompt format — a problem
+    file that fails to parse is invisible to `dojo list` and `dojo day`."""
+    problems = discover_problems()
+    assert len(problems) >= 30
+    for p in problems:
+        assert p.slug and p.title and p.difficulty and p.pattern and p.statement

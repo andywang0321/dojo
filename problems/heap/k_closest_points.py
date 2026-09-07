@@ -1,4 +1,22 @@
-# Facebook: Given a list of coordinates, write a function to find the k closest points (measured by Euclidean distance) to the origin. For example, if k = 3, and the points are [[2, -1], [3, 2], [4, 1], [-1, -1], [-2, 2]], then return [[-1, -1], [2, -1], [-2, 2]].
+"""
+K Closest Points to Origin [Easy]
+
+Given a list of points on the 2D plane and an integer k, return the k points
+closest to the origin (0, 0), measured by Euclidean distance. Ties may be
+broken in any order.
+
+Example 1:
+Input: k = 3, points = [[2, -1], [3, 2], [4, 1], [-1, -1], [-2, 2]]
+Output: [[-1, -1], [2, -1], [-2, 2]]
+Explanation: these are the three points with the smallest distance from the
+origin.
+
+Constraints:
+1 <= k <= number of points
+
+You should aim for a solution with O(n log n) time and O(k) space, where n
+is the number of points. (A size-k heap gives O(n log k) time.)
+"""
 
 from typing import List
 from heapq import heappush, heappop
