@@ -1,0 +1,435 @@
+"""The daily flow: one problem, end to end.
+
+  solve in $EDITOR (via `open`, non-blocking) → check (visible tests)
+  → hint ladder → submit → judge (visible + generated + oracle)
+  → self-report complexity → empirical profiler → three-way complexity table
+  → AI review → reflection → persist attempt
+
+Every pedagogical signal lands on the attempt row: hint count and
+transcript, self-reported vs. measured vs. expected complexity, the review,
+and the reflection.
+"""
+
+from __future__ import annotations
+
+import random
+import sqlite3
+import time
+from pathlib import Path
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from dojo import complexity
+from dojo.config import WORKBENCH_DIR
+from dojo.db import dumps_json, loads_json, now
+from dojo.editor import launch as launch_editor
+from dojo.judge import JUDGE_CASES, PROFILER_INPUTS, run_cases
+from dojo.profiler import classify, measure
+from dojo.session.state import WorkbenchState, load_state, save_state
+from dojo.tutor import TIER_NAMES, ask_tutor, de_markdown, review
+
+GENERATED_CASES = 30
+
+COMMANDS_HINT = (
+    "[dim]Commands: [b]check[/b] · [b]hint <text>[/b] · "
+    "[b]open[/b] · [b]submit[/b] · [b]quit[/b][/dim]"
+)
+
+TEMPLATE_HEADER = '''"""
+{statement}
+"""
+
+
+def {function_name}{signature}:
+    # Solve it. Use `dojo check` / `dojo hint` from a second terminal.
+    raise NotImplementedError
+'''
+
+# v0: signatures for curated problems live here; move into
+# data/problem_overrides.json when the bank grows.
+SIGNATURES = {
+    "valid_parentheses": "(s: str) -> bool",
+    "two_sum": "(nums: list[int], target: int) -> list[int]",
+}
+
+
+def _get_or_create_user(conn: sqlite3.Connection, name: str) -> int:
+    row = conn.execute("SELECT id FROM users WHERE name = ?", (name,)).fetchone()
+    if row:
+        return row["id"]
+    cur = conn.execute(
+        "INSERT INTO users (name, created_at) VALUES (?, ?)", (name, now())
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def _get_problem(conn: sqlite3.Connection, slug: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM problems WHERE slug = ?", (slug,)).fetchone()
+
+
+def _build_cases(problem: sqlite3.Row, rng: random.Random) -> list[dict]:
+    cases = [
+        {**c, "label": f"visible {i + 1}"}
+        for i, c in enumerate(loads_json(problem["visible_tests"], []) or [])
+    ]
+    generator = JUDGE_CASES.get(problem["slug"])
+    if generator:
+        for i in range(GENERATED_CASES):
+            n = rng.randint(0, 12)
+            args, expected = generator(n, rng)
+            cases.append({"args": args, "expected": expected, "label": f"generated {i + 1}"})
+    return cases
+
+
+def _show_case_failures(console: Console, report) -> None:
+    table = Table(title="Failed cases")
+    table.add_column("Case")
+    table.add_column("Expected")
+    table.add_column("Got")
+    table.add_column("Error")
+    for r in report.results:
+        if r.passed:
+            continue
+        table.add_row(
+            r.label,
+            str(r.expected)[:60],
+            str(r.got)[:60],
+            (r.error or "")[:60],
+        )
+    console.print(table)
+
+
+def _show_complexity_table(
+    console: Console,
+    expected_time: str | None,
+    expected_space: str | None,
+    claimed_time: str | None,
+    claimed_space: str | None,
+    measured_time: str | None,
+    measured_space: str | None,
+) -> None:
+    table = Table(title="Complexity: expected vs. claimed vs. measured")
+    table.add_column("")
+    table.add_column("Expected")
+    table.add_column("You claimed")
+    table.add_column("Measured")
+    table.add_column("Flag")
+    time_flag = "ok"
+    space_flag = "ok"
+    notes = []
+    if complexity.mismatch(claimed_time, expected_time):
+        notes.append("time: claim vs expected")
+    if complexity.mismatch(claimed_time, measured_time):
+        notes.append("time: claim vs measurement")
+    if complexity.mismatch(expected_time, measured_time):
+        notes.append("time: expected vs measurement")
+    if complexity.mismatch(claimed_space, expected_space):
+        notes.append("space: claim vs expected")
+    if complexity.mismatch(claimed_space, measured_space):
+        notes.append("space: claim vs measurement")
+    if complexity.mismatch(expected_space, measured_space):
+        notes.append("space: expected vs measurement")
+    time_flag = "⚠ " + ", ".join(n for n in notes if n.startswith("time")) if any(
+        n.startswith("time") for n in notes
+    ) else "ok"
+    space_flag = "⚠ " + ", ".join(n for n in notes if n.startswith("space")) if any(
+        n.startswith("space") for n in notes
+    ) else "ok"
+    table.add_row("Time", expected_time or "-", claimed_time or "-", measured_time or "-", time_flag)
+    table.add_row("Space", expected_space or "-", claimed_space or "-", measured_space or "-", space_flag)
+    console.print(table)
+    if notes:
+        console.print(
+            "[yellow]Mismatches are evidence, not verdicts — investigate whether "
+            "it's the algorithm, the claim, or measurement noise.[/yellow]"
+        )
+
+
+def _write_template(problem: sqlite3.Row) -> None:
+    WORKBENCH_DIR.mkdir(parents=True, exist_ok=True)
+    path = WORKBENCH_DIR / f"{problem['slug']}.py"
+    if path.exists():
+        return
+    path.write_text(
+        TEMPLATE_HEADER.format(
+            statement=problem["statement"],
+            function_name=problem["function_name"],
+            signature=SIGNATURES.get(problem["slug"], ""),
+        )
+    )
+
+
+def _check(console: Console, problem: sqlite3.Row, code_path: Path) -> bool:
+    cases = [
+        {**c, "label": f"visible {i + 1}"}
+        for i, c in enumerate(loads_json(problem["visible_tests"], []) or [])
+    ]
+    report = run_cases(code_path, problem["function_name"], cases)
+    if report.all_passed:
+        console.print(f"[green]✓ {report.passed}/{report.total} visible cases passed[/green]")
+        return True
+    _show_case_failures(console, report)
+    return False
+
+
+def _submit(
+    conn: sqlite3.Connection,
+    console: Console,
+    backend,
+    problem: sqlite3.Row,
+    state: WorkbenchState,
+) -> str:
+    code_path = state.code_path
+    rng = random.Random(f"dojo-{problem['slug']}")
+    cases = _build_cases(problem, rng)
+    console.print(f"[bold]Judging {len(cases)} cases[/bold] (visible + generated + oracle-checked)...")
+    report = run_cases(code_path, problem["function_name"], cases)
+    if not report.all_passed:
+        console.print(
+            f"[red]✗ {report.passed}/{report.total} passed[/red]"
+            + (f" — status: {report.status}" if report.status != "wrong_answer" else "")
+        )
+        _show_case_failures(console, report)
+        return "keep_going"
+
+    console.print(f"[green]✓ All {report.total} cases passed[/green]")
+
+    claimed_time_raw = console.input("State your time complexity and why (e.g. 'O(n) because one pass'): ")
+    claimed_space_raw = console.input("State your space complexity and why: ")
+    claimed_time = complexity.parse(claimed_time_raw)
+    claimed_space = complexity.parse(claimed_space_raw)
+
+    measured_time = measured_space = time_r2 = space_r2 = None
+    if problem["slug"] in PROFILER_INPUTS:
+        console.print("[bold]Measuring empirical complexity[/bold] (doubling input sizes, median of repeats)...")
+        m = measure(
+            code_path,
+            problem["function_name"],
+            PROFILER_INPUTS[problem["slug"]],
+        )
+        if m.time_points:
+            fit = classify([n for n, _ in m.time_points], [t for _, t in m.time_points])
+            measured_time, time_r2 = fit.best_class, round(fit.r2, 3)
+        if m.space_points:
+            sfit = classify([n for n, _ in m.space_points], [s for _, s in m.space_points])
+            measured_space, space_r2 = sfit.best_class, round(sfit.r2, 3)
+        if m.dropped:
+            console.print(f"[dim](dropped sizes: {', '.join(m.dropped)})[/dim]")
+    else:
+        console.print("[dim]No profiler input generator registered for this problem — skipping measurement.[/dim]")
+
+    _show_complexity_table(
+        console,
+        problem["expected_time"],
+        problem["expected_space"],
+        claimed_time,
+        claimed_space,
+        measured_time,
+        measured_space,
+    )
+
+    console.print("[bold]AI review[/bold] (post-submission; the reviewer critiques, it never repairs)...")
+    code = code_path.read_text()
+    review_json = review(
+        backend,
+        problem["statement"],
+        code,
+        claimed_time_raw,
+        claimed_space_raw,
+        measured_time,
+        measured_space,
+        problem["expected_time"],
+        problem["expected_space"],
+    )
+    if "error" in review_json:
+        console.print("[yellow]Reviewer unavailable (non-JSON response) — review skipped.[/yellow]")
+        review_json = {}
+    else:
+        _show_review(console, review_json)
+
+    reflection = console.input(
+        "Reflection — what was the key insight, and when would you reach for this again? "
+    )
+
+    conn.execute(
+        """
+        UPDATE attempts SET
+            code = ?, status = 'correct', submitted_at = ?,
+            duration_seconds = ?,
+            hint_count = ?, hints = ?,
+            self_reported_time = ?, self_reported_space = ?,
+            measured_time_class = ?, measured_time_r2 = ?,
+            measured_space_class = ?, measured_space_r2 = ?,
+            review = ?, reflection = ?
+        WHERE id = ?
+        """,
+        (
+            code,
+            now(),
+            round(time.time() - state.started_epoch, 1),
+            len(state.hints),
+            dumps_json(state.hints),
+            claimed_time_raw,
+            claimed_space_raw,
+            measured_time,
+            time_r2,
+            measured_space,
+            space_r2,
+            dumps_json(review_json) if review_json else None,
+            reflection,
+            state.attempt_id,
+        ),
+    )
+    conn.commit()
+    console.print(
+        Panel(
+            f"[bold green]Solved:[/bold green] {problem['title']} — attempt recorded.\n"
+            f"Claimed: {claimed_time or '?'} / {claimed_space or '?'}  ·  "
+            f"Measured: {measured_time or '—'} / {measured_space or '—'}  ·  "
+            f"Hints used: {len(state.hints)}",
+            title="Session complete",
+        )
+    )
+    return "solved"
+
+
+def _show_review(console: Console, review_json: dict) -> None:
+    table = Table(title="AI review")
+    table.add_column("Dimension")
+    table.add_column("Score")
+    table.add_column("Comment")
+    dims = [
+        "correctness",
+        "approach_quality",
+        "style_idiom",
+        "naming",
+        "edge_cases",
+        "complexity_claim_check",
+    ]
+    for dim in dims:
+        entry = review_json.get(dim, {})
+        if isinstance(entry, dict):
+            table.add_row(
+                dim.replace("_", " "),
+                str(entry.get("score", "?")),
+                de_markdown(str(entry.get("comment", ""))),
+            )
+    console.print(table)
+    if review_json.get("broader_picture"):
+        console.print(Panel(de_markdown(str(review_json["broader_picture"])), title="Broader picture"))
+    if review_json.get("overall_comment"):
+        console.print(f"[italic]{de_markdown(str(review_json['overall_comment']))}[/italic]")
+
+
+def run_day(
+    conn: sqlite3.Connection,
+    console: Console,
+    backend,
+    slug: str,
+    user_name: str,
+    open_editor: bool = False,
+) -> str:
+    problem = _get_problem(conn, slug)
+    if problem is None:
+        console.print(f"[red]Unknown problem '{slug}'. Try `dojo list`.[/red]")
+        return "error"
+    if not problem["function_name"] or not problem["visible_tests"]:
+        console.print(
+            f"[red]'{slug}' is not curated yet (missing function name or visible "
+            "tests in data/problem_overrides.json).[/red]"
+        )
+        return "error"
+
+    user_id = _get_or_create_user(conn, user_name)
+    state = load_state(slug)
+    if state is None or state.user_id != user_id:
+        cur = conn.execute(
+            "INSERT INTO attempts (user_id, problem_id, status, started_at) VALUES (?, ?, 'unsolved', ?)",
+            (user_id, problem["id"], now()),
+        )
+        conn.commit()
+        state = WorkbenchState(
+            slug=slug,
+            attempt_id=cur.lastrowid,
+            user_id=user_id,
+            started_epoch=time.time(),
+        )
+        save_state(state)
+
+    _write_template(problem)
+    console.print(
+        Panel(
+            f"[bold]{problem['title']}[/bold] [{problem['difficulty']}] — {problem['pattern']}\n\n"
+            f"{problem['statement']}\n\n"
+            f"Workbench: {state.code_path}",
+            title="dojo",
+        )
+    )
+
+    if open_editor:
+        console.print(launch_editor(state.code_path))
+
+    while True:
+        console.print(COMMANDS_HINT)
+        raw = console.input("[bold cyan]dojo ›[/bold cyan] ").strip()
+        if not raw:
+            continue
+        cmd, _, rest = raw.partition(" ")
+        if cmd in ("q", "quit"):
+            conn.execute(
+                "UPDATE attempts SET code = ?, status = 'unsolved' WHERE id = ?",
+                (state.code_path.read_text(), state.attempt_id),
+            )
+            conn.commit()
+            console.print("[dim]Progress saved; attempt stays 'unsolved'.[/dim]")
+            return "quit"
+        if cmd in ("c", "check"):
+            _check(console, problem, state.code_path)
+        elif cmd in ("o", "open"):
+            console.print(launch_editor(state.code_path))
+        elif cmd in ("h", "hint"):
+            result = ask_tutor(
+                backend,
+                problem["statement"],
+                state.code_path.read_text(),
+                state.tier,
+                rest or "I'm stuck",
+                state.hints,
+            )
+            cleaned = de_markdown(result.text)
+            state.hints.append(
+                {"tier": result.tier, "user": rest or "I'm stuck", "hint": cleaned}
+            )
+            state.tier = min(result.tier + 1, 5)
+            save_state(state)
+            console.print(
+                Panel(
+                    cleaned,
+                    title=f"hint · tier {result.tier} ({TIER_NAMES[result.tier]})"
+                    + (f" · leak rating {result.leak_rating}" if result.leak_rating >= 3 else ""),
+                    border_style="blue",
+                )
+            )
+            console.print(f"[dim]Next hint will be tier {state.tier} ({TIER_NAMES[state.tier]}).[/dim]")
+        elif cmd in ("s", "submit"):
+            outcome = _submit(conn, console, backend, problem, state)
+            if outcome == "solved":
+                return "solved"
+        else:
+            console.print("[dim]Unknown command.[/dim]")
+
+
+def run_check(conn: sqlite3.Connection, console: Console, slug: str) -> str:
+    problem = _get_problem(conn, slug)
+    if problem is None:
+        console.print(f"[red]Unknown problem '{slug}'.[/red]")
+        return "error"
+    state = load_state(slug)
+    if state is None or not state.code_path.exists():
+        console.print(f"[red]No active session for '{slug}'. Start one with `dojo day {slug}`.[/red]")
+        return "error"
+    _check(console, problem, state.code_path)
+    return "ok"

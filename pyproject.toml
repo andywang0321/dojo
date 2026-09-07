@@ -1,0 +1,21 @@
+[project]
+name = "dojo"
+version = "0.1.0"
+description = "AI-guided interview prep: a never-solve tutor, an empirical complexity grader, and a qualitative code reviewer."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "openai>=3.8.0",
+    "rich>=15.0.0",
+]
+
+[project.scripts]
+dojo = "dojo.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.uv]
+package = true

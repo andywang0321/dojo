@@ -1,0 +1,26 @@
+{
+  "valid_parentheses": {
+    "function_name": "is_valid",
+    "visible_tests": [
+      {"args": ["[]"], "expected": true},
+      {"args": ["([{}])"], "expected": true},
+      {"args": ["[(])"], "expected": false},
+      {"args": ["("], "expected": false},
+      {"args": [")"], "expected": false},
+      {"args": ["()"], "expected": true},
+      {"args": [""], "expected": true},
+      {"args": ["((((((("], "expected": false},
+      {"args": ["]]]]"], "expected": false},
+      {"args": ["([)]"], "expected": false}
+    ]
+  },
+  "two_sum": {
+    "function_name": "twosum",
+    "visible_tests": [
+      {"args": [[3, 4, 5, 6], 7], "expected": [0, 1]},
+      {"args": [[4, 5, 6], 10], "expected": [0, 2]},
+      {"args": [[5, 5], 10], "expected": [0, 1]},
+      {"args": [[1, 2, 5, 5], 10], "expected": [2, 3]}
+    ]
+  }
+}
