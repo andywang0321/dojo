@@ -23,6 +23,22 @@ from dojo.config import DB_PATH, PROBLEMS_DIR
 from dojo.db import connect, get_or_create_user, init_db, now
 
 
+def _resolve_user(conn, name: str | None) -> str:
+    """The user for commands that need one. An explicit --user always wins;
+    otherwise the DB's single existing user; otherwise an error — never
+    silently invent a user and split the learner's history."""
+    if name:
+        return name
+    rows = conn.execute("SELECT name FROM users ORDER BY name").fetchall()
+    if len(rows) == 1:
+        return rows[0]["name"]
+    if not rows:
+        raise RuntimeError(
+            "No users yet — run `dojo init --user NAME` first, or pass --user."
+        )
+    raise RuntimeError("Multiple users in the DB — pass --user to say who is practicing.")
+
+
 def _cmd_init(args) -> int:
     init_db(DB_PATH)
     n = seed_problems(connect(DB_PATH), PROBLEMS_DIR)
@@ -31,13 +47,13 @@ def _cmd_init(args) -> int:
     with connect(DB_PATH) as conn:
         for name in args.user or []:
             conn.execute(
-                "INSERT OR IGNORE INTO users (name, created_at) VALUES (?, datetime('now'))",
-                (name,),
+                "INSERT OR IGNORE INTO users (name, created_at) VALUES (?, ?)",
+                (name, now()),
             )
         conn.commit()
         n_cards = scheduler.backfill_cards(conn)
         users = [r["name"] for r in conn.execute("SELECT name FROM users")]
-    console.print(f"Users: {', '.join(users) or '(none yet — `dojo day` creates them on the fly)'}")
+    console.print(f"Users: {', '.join(users) or '(none yet — run `dojo init --user NAME`)'}")
     if n_cards:
         console.print(f"[dim]Backfilled {n_cards} pattern card(s) from solved attempts (due now).[/dim]")
     return 0
@@ -90,9 +106,9 @@ def _cmd_day(args) -> int:
     from dojo.tutor import get_backend
 
     console = Console()
-    user = args.user or "default"
     with connect(DB_PATH) as conn:
         try:
+            user = _resolve_user(conn, args.user)
             backend = get_backend()
         except RuntimeError as exc:
             console.print(f"[red]{exc}[/red]")
@@ -125,11 +141,12 @@ def _cmd_warmup(args) -> int:
     console = Console()
     with connect(DB_PATH) as conn:
         try:
+            user = _resolve_user(conn, args.user)
             backend = get_backend()
         except RuntimeError as exc:
             console.print(f"[red]{exc}[/red]")
             return 1
-        run_warmups(conn, console, backend, args.user or "default", limit=3)
+        run_warmups(conn, console, backend, user, limit=3)
     return 0
 
 
@@ -155,6 +172,11 @@ def _cmd_check(args) -> int:
 def _cmd_profile(args) -> int:
     console = Console()
     with connect(DB_PATH) as conn:
+        try:
+            user = _resolve_user(conn, args.user)
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 1
         rows = conn.execute(
             """
             SELECT p.slug, p.title, p.difficulty, a.status, a.hint_count,
@@ -164,9 +186,9 @@ def _cmd_profile(args) -> int:
             WHERE a.user_id = (SELECT id FROM users WHERE name = ?)
             ORDER BY a.id
             """,
-            (args.user or "default",),
+            (user,),
         ).fetchall()
-    table = Table(title=f"Attempts — {args.user or 'default'}")
+    table = Table(title=f"Attempts — {user}")
     for col in (
         "Problem", "Difficulty", "Status", "Hints", "Claimed time", "Measured time",
         "r²", "Claimed space", "Measured space", "Submitted",
@@ -191,8 +213,12 @@ def _cmd_profile(args) -> int:
 
 def _cmd_progress(args) -> int:
     console = Console()
-    user = args.user or "default"
     with connect(DB_PATH) as conn:
+        try:
+            user = _resolve_user(conn, args.user)
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 1
         user_id = get_or_create_user(conn, user)
         attempt_rows = conn.execute(
             """

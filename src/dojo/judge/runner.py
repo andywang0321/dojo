@@ -33,8 +33,11 @@ def main():
         try:
             got = fn(*case["args"])
             elapsed_ms = (time.perf_counter() - t0) * 1000
-            passed = json.dumps(got, sort_keys=True, default=str) == json.dumps(
-                expected, sort_keys=True, default=str
+            # Strict JSON equality, as documented: no default=str leniency.
+            # A non-JSON-serializable return value fails this case (the
+            # TypeError lands in the except branch below as the case error).
+            passed = json.dumps(got, sort_keys=True) == json.dumps(
+                expected, sort_keys=True
             )
             results.append(
                 {

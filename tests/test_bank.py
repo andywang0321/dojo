@@ -21,6 +21,13 @@ Merge Sort Implementation
 
 NOT_A_DOCSTRING = "# Amazon: intersection of two arrays\n"
 
+SINGLE_QUOTED = """'''
+Two Sum [Easy]
+
+You should aim for a solution with O(n) time and O(n) space.
+'''
+"""
+
 
 def test_parse_problem_file(tmp_path: Path):
     path = tmp_path / "valid_parentheses.py"
@@ -39,6 +46,16 @@ def test_parse_skips_nonconforming(tmp_path: Path):
         path = tmp_path / name
         path.write_text(content)
         assert parse_problem_file(path) is None
+
+
+def test_parse_single_quoted_docstring(tmp_path: Path):
+    path = tmp_path / "two_sum.py"
+    path.write_text(SINGLE_QUOTED)
+    parsed = parse_problem_file(path)
+    assert parsed is not None
+    assert parsed.slug == "two_sum"
+    assert parsed.title == "Two Sum"
+    assert parsed.expected_time == "O(n)"
 
 
 def test_discover_and_seed(db, tmp_path: Path):

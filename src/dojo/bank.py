@@ -64,9 +64,10 @@ def parse_problem_file(path: Path) -> ParsedProblem | None:
     """Parse a ``problems/**/*.py`` file into a ParsedProblem, or None if it
     doesn't match the expected shape (no docstring / no [Difficulty])."""
     text = path.read_text()
-    if not text.lstrip().startswith(('"""', "'''")):
+    if not text.startswith(('"""', "'''")):
         return None
-    end = text.find('"""', 3)
+    quote = text[:3]
+    end = text.find(quote, 3)
     if end == -1:
         return None
     statement = text[3:end].strip()

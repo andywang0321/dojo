@@ -27,7 +27,12 @@ from dojo.db import dumps_json, get_or_create_user, loads_json, now
 from dojo.editor import launch as launch_editor
 from dojo.judge import JUDGE_CASES, PROFILER_INPUTS, run_cases
 from dojo.profiler import classify, measure
-from dojo.session.state import WorkbenchState, load_state, save_state
+from dojo.session.state import (
+    WorkbenchState,
+    load_state,
+    retire_state,
+    save_state,
+)
 from dojo.tutor import TIER_NAMES, ask_tutor, de_markdown, review
 
 GENERATED_CASES = 30
@@ -428,14 +433,27 @@ def run_day(
         cmd, _, rest = raw.partition(" ")
         if cmd in ("q", "quit"):
             conn.execute(
-                "UPDATE attempts SET code = ?, status = 'unsolved' WHERE id = ?",
-                (state.code_path.read_text(), state.attempt_id),
+                """
+                UPDATE attempts SET
+                    code = ?, status = 'unsolved', hint_count = ?, hints = ?
+                WHERE id = ?
+                """,
+                (
+                    state.code_path.read_text(),
+                    len(state.hints),
+                    dumps_json(state.hints),
+                    state.attempt_id,
+                ),
             )
             conn.commit()
-            console.print("[dim]Progress saved; attempt stays 'unsolved'.[/dim]")
+            console.print(
+                "[dim]Progress saved; attempt stays 'unsolved'. Next session "
+                "starts fresh.[/dim]"
+            )
             if warmup and card is not None:
                 summary = scheduler.record_grade(conn, card, 1)
                 _show_card_update(console, card, summary, lapse=True)
+            retire_state(state.slug)
             return "quit"
         if cmd in ("c", "check"):
             _check(console, problem, state.code_path)
@@ -474,10 +492,12 @@ def run_day(
                     grade = _ask_grade(console, len(state.hints))
                     summary = scheduler.record_grade(conn, card, grade)
                     _show_card_update(console, card, summary, lapse=(grade == 1))
+                    retire_state(state.slug)
                     return "warmup_done"
                 scheduler.ensure_card(
                     conn, user_id, problem["pattern"], reflection=reflection
                 )
+                retire_state(state.slug)
                 return "solved"
         else:
             console.print("[dim]Unknown command.[/dim]")

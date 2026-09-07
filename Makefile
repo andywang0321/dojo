@@ -4,11 +4,11 @@ UV = UV_CACHE_DIR=$(CURDIR)/.uv-cache uv
 
 .PHONY: sync test seed demo day
 
-sync: ## install deps + editable dojo
-	$(UV) sync
+sync: ## install deps + editable dojo (incl. dev group for pytest)
+	$(UV) sync --group dev
 
 test: ## run the full test suite (offline, mock AI backend)
-	$(UV) run pytest -q
+	$(UV) run python -m pytest -q
 
 seed: ## create DB and seed the problem bank from dsa/
 	$(UV) run dojo init --user andy

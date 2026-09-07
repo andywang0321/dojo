@@ -35,7 +35,7 @@ dojo day
 9. **Review** — the AI reviewer scores a rubric (correctness, approach, idiom, naming, edge cases, complexity claim) and writes a "broader picture" note connecting the problem to its pattern family and your ML background.
 10. **Reflect** — one prompt feeds the pattern card: what was the key insight, and when would you reach for this again?
 
-Everything lands on an `attempts` row in SQLite (kind = `solve` or `warmup`); new solves create/refresh the pattern's card. The command list (`check · hint <text> · open · submit · quit`) is reprinted after every output, so it's always at the bottom of your screen. `dojo warmup` runs due retrievals on their own; `dojo progress` shows per-pattern proficiency and the card schedule.
+Everything lands on an `attempts` row in SQLite (kind = `solve` or `warmup`); new solves create/refresh the pattern's card. Each `dojo day` invocation is exactly one attempt row: quitting saves your code *and* hint history to that row (status `unsolved`) and the next session starts fresh with a reset hint ladder. The command list (`check · hint <text> · open · submit · quit`) is reprinted after every output, so it's always at the bottom of your screen. `dojo warmup` runs due retrievals on their own; `dojo progress` shows per-pattern proficiency and the card schedule.
 
 ## The retention engine (v0.2)
 
@@ -125,6 +125,8 @@ uv run dojo day --user andy      # warm-ups (if due) + scheduler-picked problem
 
 No API key? `DOJO_AI_BACKEND=mock` runs the whole pipeline with canned responses — everything except real AI text works. `dojo check` and `dojo hint` also work standalone against the active workbench.
 
+Commands that need a user resolve `--user` against the DB's single existing user when the flag is omitted; with no users or several, pass `--user` explicitly (a forgotten flag should never split your history).
+
 ## Data model
 
 - `users(name)` — one row per person; all data is per-user from day one.
@@ -156,4 +158,4 @@ uv run pytest
 - Terminal editors detach only inside tmux or on macOS (Terminal/iTerm via osascript); elsewhere `open` falls back to blocking with a warning. Unrecognized editors are treated as blocking — add them to `GUI_EDITORS` in `src/dojo/editor.py` if they can detach.
 - The profiler models polynomial-ish growth only; exponential/constant-factor pathologies show as low-R² reports.
 - The judge compares by strict JSON equality (float `1.0` vs `1` mismatch); oracle-generated cases exist only where a brute-force reference is registered.
-- Session duration is measured from session start, not across editor time, and one attempt row = one session.
+- Session duration is measured from session start, not across editor time.

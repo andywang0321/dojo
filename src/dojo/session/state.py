@@ -44,3 +44,11 @@ def load_state(slug: str) -> WorkbenchState | None:
 def save_state(state: WorkbenchState) -> None:
     WORKBENCH_DIR.mkdir(parents=True, exist_ok=True)
     state_path(state.slug).write_text(json.dumps(asdict(state), indent=2))
+
+
+def retire_state(slug: str) -> None:
+    """End the active session for ``slug``: delete its state file so the next
+    ``dojo day <slug>`` starts a fresh attempt (one invocation = one attempt
+    row). The workbench code file is left in place; attempt code lives in the
+    DB."""
+    state_path(slug).unlink(missing_ok=True)

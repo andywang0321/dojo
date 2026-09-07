@@ -267,3 +267,89 @@ def test_warmup_quit_records_lapse(db, fake_console, monkeypatch, tmp_path):
     updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
     assert updated["lapses"] == 1
     assert updated["stability"] < 1.0
+
+
+def test_repeated_solves_create_distinct_attempts(db, fake_console, monkeypatch, tmp_path):
+    """Regression: state is retired on submit, so re-solving a slug must
+    create a new attempt row instead of overwriting the previous one."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    (workbench / "valid_parentheses.py").write_text(SOLUTION)
+
+    answers = ["submit", "O(n) one pass", "O(n) stack", "The key insight: the stack."]
+    assert run_day(db, fake_console(answers), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+    assert run_day(db, fake_console(answers), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    rows = db.execute("SELECT id, kind, status FROM attempts ORDER BY id").fetchall()
+    assert len(rows) == 2
+    assert rows[0]["id"] != rows[1]["id"]
+    assert all(r["kind"] == "solve" and r["status"] == "correct" for r in rows)
+    assert not (workbench / "valid_parentheses.state.json").exists()
+
+
+def test_repeated_warmups_create_distinct_attempts(db, fake_console, monkeypatch, tmp_path):
+    """Regression: consecutive warm-ups of the same slug must not clobber
+    the previous warm-up's attempt row (the original data-loss bug)."""
+    from dojo import scheduler
+    from dojo.db import get_or_create_user
+
+    _seed_problem(db)
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    (workbench / "valid_parentheses.py").write_text(SOLUTION)
+
+    first = run_day(
+        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "3"]),
+        MockBackend(), "valid_parentheses", "andy", warmup=True, card=card,
+    )
+    assert first == "warmup_done"
+    card = db.execute("SELECT * FROM pattern_cards WHERE pattern = 'stack'").fetchone()
+    second = run_day(
+        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "4"]),
+        MockBackend(), "valid_parentheses", "andy", warmup=True, card=card,
+    )
+    assert second == "warmup_done"
+
+    rows = db.execute("SELECT id, kind, status FROM attempts ORDER BY id").fetchall()
+    assert len(rows) == 2
+    assert rows[0]["id"] != rows[1]["id"]
+    assert all(r["kind"] == "warmup" and r["status"] == "correct" for r in rows)
+    assert not (workbench / "valid_parentheses.state.json").exists()
+
+
+def test_quit_persists_hints_and_retires_state(db, fake_console, monkeypatch, tmp_path):
+    """Quitting ends the session: code and hints land on the abandoned
+    attempt row, the state file is retired, and the next run starts fresh."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    (workbench / "valid_parentheses.py").write_text(SOLUTION)
+
+    # One hint (vague message → tier 0), then quit.
+    assert run_day(db, fake_console(["hint stuck", "quit"]), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["status"] == "unsolved"
+    assert row["hint_count"] == 1
+    assert json.loads(row["hints"])[0]["tier"] == 0
+    assert not (workbench / "valid_parentheses.state.json").exists()
+
+    # Next session is a fresh attempt, not a resume.
+    assert run_day(db, fake_console(["quit"]), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    attempts = db.execute("SELECT id FROM attempts ORDER BY id").fetchall()
+    assert len(attempts) == 2
+    assert attempts[0]["id"] != attempts[1]["id"]

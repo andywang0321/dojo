@@ -47,6 +47,13 @@ SLEEPING = textwrap.dedent(
     """
 )
 
+NON_SERIALIZABLE = textwrap.dedent(
+    """
+    def is_valid(s: str) -> set:
+        return {1, 2}
+    """
+)
+
 
 def _write(tmp_path, code):
     path = tmp_path / "solution.py"
@@ -85,3 +92,11 @@ def test_import_error_is_reported(tmp_path):
     )
     assert report.status == "wrong_answer"
     assert report.results[0].error
+
+
+def test_non_json_serializable_return_fails(tmp_path):
+    """Strict JSON equality: a return value json.dumps can't serialize is a
+    failed case with an error, never a lenient string-compare pass."""
+    report = run_cases(_write(tmp_path, NON_SERIALIZABLE), "is_valid", CASES)
+    assert report.status == "wrong_answer"
+    assert all(not r.passed and r.error for r in report.results)
