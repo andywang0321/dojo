@@ -4,19 +4,22 @@ Guidance for humans and AI agents working on this repository.
 
 ## What this is
 
-dojo is an AI-guided interview-prep trainer: a CLI (`dojo`) that runs a daily loop of solve → judge → self-report complexity → empirical profiler → AI review → reflection, persisted to SQLite. Its defining constraint is the **never-solve rule**: the tutor agent guides, it never solves. Read `README.md` first; everything below assumes it.
+dojo is an AI-guided interview-prep trainer: a CLI (`dojo`) that runs a daily loop of warm-up retrievals → solve → judge → self-report complexity → empirical profiler → AI review → reflection, persisted to SQLite, with FSRS-lite spaced repetition deciding what comes back when. Its defining constraint is the **never-solve rule**: the tutor agent guides, it never solves. Read `README.md` first; everything below assumes it.
 
 ## Layout map
 
 ```
 src/dojo/
-  cli.py            # argparse entry: init / list / day / check / profile
+  cli.py            # argparse entry: init / list / day / warmup / check / profile / progress
   config.py         # paths + env (DEEPSEEK_API_KEY, DOJO_AI_BACKEND=mock|deepseek)
   editor.py         # $EDITOR launching: GUI -> detached process; terminal ->
                     # tmux new-window / macOS osascript; unknown -> blocking
-  db.py             # schema (users, problems, attempts) — MIGRATIONS MUST BE ADDITIVE
-  bank.py           # dsa/**/*.py docstring -> problems importer
+  db.py             # schema (users, problems, attempts, pattern_cards) +
+                    # migrate(); MIGRATIONS MUST BE ADDITIVE
+  bank.py           # dsa/**/*.py docstring -> problems importer (upsert on slug)
   complexity.py     # O(...) canonicalization; only KNOWN_CLASSES participate in mismatch()
+  scheduler.py      # FSRS-lite (stability/difficulty/forgetting curve), due cards,
+                    # record_grade, warmup + new-problem picks, backfill
   judge/
     registry.py     # oracles + test generators + profiler inputs (per-slug registries)
     runner.py       # subprocess isolation; JSON protocol; strict JSON-equality compare
@@ -29,11 +32,11 @@ src/dojo/
     tutor.py        # hint ladder (tiers 0-5), leak audit, de_markdown terminal cleanup
     reviewer.py     # post-submission rubric review
   session/
-    state.py        # workbench/<slug>.state.json (tier, hints, attempt id)
-    flow.py         # run_day: the whole session orchestration
+    state.py        # workbench/<slug>.state.json (tier, hints, attempt id, kind)
+    flow.py         # run_day (solve & warmup modes) + run_warmups
 data/problem_overrides.json   # curated metadata: function_name + visible tests
 dsa/                # seed corpus: one problem per file, prompt in module docstring
-tests/              # 33 tests; offline; mock backend
+tests/              # 45 tests; offline; mock backend
 workbench/          # gitignored scratch; attempt code persists in the DB, not here
 Makefile            # sync/test/demo targets with a workspace-local UV_CACHE_DIR
 ```
@@ -43,8 +46,10 @@ Makefile            # sync/test/demo targets with a workspace-local UV_CACHE_DIR
 ```bash
 make sync                  # uv sync with UV_CACHE_DIR=.uv-cache (sandbox-safe)
 make test                  # uv run pytest -q
-uv run dojo init --user X  # create DB + seed bank (idempotent: INSERT OR REPLACE)
-DOJO_AI_BACKEND=mock uv run dojo day <slug> --user X   # offline demo
+uv run dojo init --user X  # create DB + seed bank + backfill cards (idempotent)
+DOJO_AI_BACKEND=mock uv run dojo day --user X      # offline demo (warm-ups + scheduler pick)
+DOJO_AI_BACKEND=mock uv run dojo warmup --user X   # due retrievals only
+uv run dojo progress --user X                      # per-pattern proficiency + cards
 ```
 
 Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by hand-editing the lockfile. **Always route uv through `make` targets or set `UV_CACHE_DIR=$(pwd)/.uv-cache` yourself** — the default uv cache lives outside the workspace and trips sandbox file policies.
@@ -64,7 +69,9 @@ Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by ha
 - **Judge protocol:** `runner.py` writes `solution.py` + `cases.json` + a harness into a temp dir and executes it with a timeout. Case dicts: `{"args": [...], "expected": any, "label": str}`. Comparison is strict JSON equality with `sort_keys` — don't "fix" it to approximate float equality without updating README and tests.
 - **Registries:** per-slug decorators in `judge/registry.py`: `@oracle(slug)` (correctness reference), `@judge_case(slug)` (small random cases with expected values), `@profiler_input(slug)` (worst-case-shaped inputs of size n — never early-exit inputs; see the random-bracket lesson in README).
 - **Measurement protocol:** one timed call per subprocess; GC disabled around the call; tracemalloc started after module import; median across repeats. The subprocess boundary exists to contain hangs — don't replace it with in-process timing.
-- **Curating a new problem:** add `function_name` + `visible_tests` to `data/problem_overrides.json`, a signature to `SIGNATURES` in `session/flow.py` (until signatures move into overrides in v0.3), and a generator/oracle pair in `judge/registry.py`. Then `dojo init` re-seeds.
+- **Curating a new problem:** add `function_name` + `visible_tests` to `data/problem_overrides.json`, a signature to `SIGNATURES` in `session/flow.py` (until signatures move into overrides in v0.3), and a generator/oracle pair in `judge/registry.py`. Then `dojo init` re-seeds (an upsert, so it never deletes rows attempts reference).
+- **Scheduler:** the FSRS-lite model lives entirely in `scheduler.py` with documented constants (FACTOR/DECAY/S0/D0/TARGET_R). Grades are 1-4 (Anki convention). Don't swap in a scheduler library without porting `tests/test_scheduler.py`; same-day reviews legitimately yield no stability growth (R ≈ 1).
+- **Warm-up semantics:** `run_warmups` forces a fresh template (re-solve from scratch), creates an attempt with `kind='warmup'`, skips reflection (the recall grade replaces it), and quits record a lapse. Workbench state is per (slug, kind) — a warm-up never reuses a solve session's tier/hints.
 - **Terminal-safe AI output:** tutor and reviewer prompts instruct plain text (no Markdown); `de_markdown` in `tutor/tutor.py` is the belt-and-braces cleanup applied at display time. Underscores are never stripped (they may be identifiers like `two_sum`); pin this with tests in `tests/test_tutor.py`.
 - **Editor launching:** all `$EDITOR` behavior lives in `editor.py` — GUI editors detach via `Popen(start_new_session=True)`, terminal editors go through tmux/osascript, unknown editors block. Don't call subprocess directly from `flow.py`; tests cover the pure classification helpers only, never process spawning.
 - **SQLite:** `db.py` owns schema and connection. Keep `sqlite3.Row` access by name. JSON columns go through `dumps_json`/`loads_json`.

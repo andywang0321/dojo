@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     id                   INTEGER PRIMARY KEY,
     user_id              INTEGER NOT NULL REFERENCES users(id),
     problem_id           INTEGER NOT NULL REFERENCES problems(id),
+    kind                 TEXT NOT NULL DEFAULT 'solve',  -- 'solve' | 'warmup'
     code                 TEXT,
     status               TEXT,   -- unsolved | correct | wrong_answer | error | timed_out
     started_at           TEXT NOT NULL,
@@ -55,6 +56,21 @@ CREATE TABLE IF NOT EXISTS attempts (
     review               TEXT,   -- JSON from the reviewer
     reflection           TEXT
 );
+
+CREATE TABLE IF NOT EXISTS pattern_cards (
+    id              INTEGER PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES users(id),
+    pattern         TEXT NOT NULL,
+    stability       REAL NOT NULL,     -- FSRS-lite stability, days
+    difficulty      REAL NOT NULL,     -- FSRS-lite difficulty, 1..10
+    reps            INTEGER NOT NULL DEFAULT 0,
+    lapses          INTEGER NOT NULL DEFAULT 0,
+    due_at          TEXT NOT NULL,     -- ISO UTC; due for warm-up retrieval
+    last_review_at  TEXT,
+    last_reflection TEXT,
+    created_at      TEXT NOT NULL,
+    UNIQUE (user_id, pattern)
+);
 """
 
 
@@ -63,7 +79,22 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    migrate(conn)
     return conn
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Additive migrations only (AGENTS.md rule 4: user data is real)."""
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'attempts'"
+    ).fetchone():
+        return  # fresh DB; SCHEMA will create everything
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(attempts)")}
+    if "kind" not in cols:
+        conn.execute(
+            "ALTER TABLE attempts ADD COLUMN kind TEXT NOT NULL DEFAULT 'solve'"
+        )
+    conn.commit()
 
 
 def init_db(db_path: Path) -> None:
@@ -73,6 +104,17 @@ def init_db(db_path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def get_or_create_user(conn: sqlite3.Connection, name: str) -> int:
+    row = conn.execute("SELECT id FROM users WHERE name = ?", (name,)).fetchone()
+    if row:
+        return row["id"]
+    cur = conn.execute(
+        "INSERT INTO users (name, created_at) VALUES (?, ?)", (name, now())
+    )
+    conn.commit()
+    return cur.lastrowid
 
 
 def now() -> str:

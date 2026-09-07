@@ -21,9 +21,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from dojo import complexity
+from dojo import complexity, scheduler
 from dojo.config import WORKBENCH_DIR
-from dojo.db import dumps_json, loads_json, now
+from dojo.db import dumps_json, get_or_create_user, loads_json, now
 from dojo.editor import launch as launch_editor
 from dojo.judge import JUDGE_CASES, PROFILER_INPUTS, run_cases
 from dojo.profiler import classify, measure
@@ -53,17 +53,6 @@ SIGNATURES = {
     "valid_parentheses": "(s: str) -> bool",
     "two_sum": "(nums: list[int], target: int) -> list[int]",
 }
-
-
-def _get_or_create_user(conn: sqlite3.Connection, name: str) -> int:
-    row = conn.execute("SELECT id FROM users WHERE name = ?", (name,)).fetchone()
-    if row:
-        return row["id"]
-    cur = conn.execute(
-        "INSERT INTO users (name, created_at) VALUES (?, ?)", (name, now())
-    )
-    conn.commit()
-    return cur.lastrowid
 
 
 def _get_problem(conn: sqlite3.Connection, slug: str) -> sqlite3.Row | None:
@@ -148,10 +137,10 @@ def _show_complexity_table(
         )
 
 
-def _write_template(problem: sqlite3.Row) -> None:
+def _write_template(problem: sqlite3.Row, force: bool = False) -> None:
     WORKBENCH_DIR.mkdir(parents=True, exist_ok=True)
     path = WORKBENCH_DIR / f"{problem['slug']}.py"
-    if path.exists():
+    if path.exists() and not force:
         return
     path.write_text(
         TEMPLATE_HEADER.format(
@@ -181,7 +170,11 @@ def _submit(
     backend,
     problem: sqlite3.Row,
     state: WorkbenchState,
-) -> str:
+    warmup: bool = False,
+) -> tuple[str, str | None]:
+    """Run the full pipeline on the current code. Returns
+    ("keep_going", None) on failed cases, ("solved", reflection) on success.
+    Warm-ups skip the reflection prompt — the recall grade replaces it."""
     code_path = state.code_path
     rng = random.Random(f"dojo-{problem['slug']}")
     cases = _build_cases(problem, rng)
@@ -193,7 +186,7 @@ def _submit(
             + (f" — status: {report.status}" if report.status != "wrong_answer" else "")
         )
         _show_case_failures(console, report)
-        return "keep_going"
+        return "keep_going", None
 
     console.print(f"[green]✓ All {report.total} cases passed[/green]")
 
@@ -250,9 +243,11 @@ def _submit(
     else:
         _show_review(console, review_json)
 
-    reflection = console.input(
-        "Reflection — what was the key insight, and when would you reach for this again? "
-    )
+    reflection = None
+    if not warmup:
+        reflection = console.input(
+            "Reflection — what was the key insight, and when would you reach for this again? "
+        )
 
     conn.execute(
         """
@@ -293,7 +288,7 @@ def _submit(
             title="Session complete",
         )
     )
-    return "solved"
+    return "solved", reflection
 
 
 def _show_review(console: Console, review_json: dict) -> None:
@@ -324,6 +319,43 @@ def _show_review(console: Console, review_json: dict) -> None:
         console.print(f"[italic]{de_markdown(str(review_json['overall_comment']))}[/italic]")
 
 
+def _ask_grade(console: Console, hints: int) -> int:
+    suggested = 4 if hints == 0 else 3 if hints == 1 else 2
+    raw = console.input(
+        f"Recall grade [4=easy 3=good 2=hard 1=forgot] (suggested {suggested}): "
+    ).strip()
+    try:
+        grade = int(raw)
+        if grade not in (1, 2, 3, 4):
+            raise ValueError
+    except ValueError:
+        grade = suggested
+    return grade
+
+
+def _show_card_update(
+    console: Console, card: sqlite3.Row, summary: dict, lapse: bool
+) -> None:
+    console.print(
+        Panel(
+            f"pattern: [bold]{card['pattern']}[/bold]\n"
+            f"stability: {card['stability']:.2f} → {summary['stability']:.2f} days\n"
+            f"difficulty: {card['difficulty']:.1f} → {summary['difficulty']:.1f}\n"
+            f"next warm-up: [bold]{scheduler.humanize_due(summary['due_at'])}[/bold]",
+            title="Card updated — lapse" if lapse else "Card updated",
+            border_style="red" if lapse else "green",
+        )
+    )
+    if not lapse and card["last_reflection"]:
+        console.print(
+            Panel(
+                card["last_reflection"],
+                title="Your last reflection on this pattern",
+                border_style="blue",
+            )
+        )
+
+
 def run_day(
     conn: sqlite3.Connection,
     console: Console,
@@ -331,6 +363,8 @@ def run_day(
     slug: str,
     user_name: str,
     open_editor: bool = False,
+    warmup: bool = False,
+    card: sqlite3.Row | None = None,
 ) -> str:
     problem = _get_problem(conn, slug)
     if problem is None:
@@ -343,12 +377,14 @@ def run_day(
         )
         return "error"
 
-    user_id = _get_or_create_user(conn, user_name)
+    user_id = get_or_create_user(conn, user_name)
+    kind = "warmup" if warmup else "solve"
     state = load_state(slug)
-    if state is None or state.user_id != user_id:
+    if state is None or state.user_id != user_id or state.kind != kind:
         cur = conn.execute(
-            "INSERT INTO attempts (user_id, problem_id, status, started_at) VALUES (?, ?, 'unsolved', ?)",
-            (user_id, problem["id"], now()),
+            "INSERT INTO attempts (user_id, problem_id, kind, status, started_at) "
+            "VALUES (?, ?, ?, 'unsolved', ?)",
+            (user_id, problem["id"], kind, now()),
         )
         conn.commit()
         state = WorkbenchState(
@@ -356,18 +392,30 @@ def run_day(
             attempt_id=cur.lastrowid,
             user_id=user_id,
             started_epoch=time.time(),
+            kind=kind,
         )
         save_state(state)
 
     _write_template(problem)
-    console.print(
-        Panel(
-            f"[bold]{problem['title']}[/bold] [{problem['difficulty']}] — {problem['pattern']}\n\n"
-            f"{problem['statement']}\n\n"
-            f"Workbench: {state.code_path}",
-            title="dojo",
+    if warmup:
+        console.print(
+            Panel(
+                f"[bold]Warm-up[/bold] — re-solve [bold]{problem['title']}[/bold] "
+                f"from scratch ([bold]{problem['pattern']}[/bold] pattern)\n\n"
+                f"{problem['statement']}\n\n"
+                f"Workbench: {state.code_path}",
+                title="dojo",
+            )
         )
-    )
+    else:
+        console.print(
+            Panel(
+                f"[bold]{problem['title']}[/bold] [{problem['difficulty']}] — {problem['pattern']}\n\n"
+                f"{problem['statement']}\n\n"
+                f"Workbench: {state.code_path}",
+                title="dojo",
+            )
+        )
 
     if open_editor:
         console.print(launch_editor(state.code_path))
@@ -385,6 +433,9 @@ def run_day(
             )
             conn.commit()
             console.print("[dim]Progress saved; attempt stays 'unsolved'.[/dim]")
+            if warmup and card is not None:
+                summary = scheduler.record_grade(conn, card, 1)
+                _show_card_update(console, card, summary, lapse=True)
             return "quit"
         if cmd in ("c", "check"):
             _check(console, problem, state.code_path)
@@ -415,11 +466,57 @@ def run_day(
             )
             console.print(f"[dim]Next hint will be tier {state.tier} ({TIER_NAMES[state.tier]}).[/dim]")
         elif cmd in ("s", "submit"):
-            outcome = _submit(conn, console, backend, problem, state)
+            outcome, reflection = _submit(
+                conn, console, backend, problem, state, warmup=warmup
+            )
             if outcome == "solved":
+                if warmup and card is not None:
+                    grade = _ask_grade(console, len(state.hints))
+                    summary = scheduler.record_grade(conn, card, grade)
+                    _show_card_update(console, card, summary, lapse=(grade == 1))
+                    return "warmup_done"
+                scheduler.ensure_card(
+                    conn, user_id, problem["pattern"], reflection=reflection
+                )
                 return "solved"
         else:
             console.print("[dim]Unknown command.[/dim]")
+
+
+def run_warmups(
+    conn: sqlite3.Connection,
+    console: Console,
+    backend,
+    user_name: str,
+    limit: int = 2,
+) -> list[str]:
+    """Run due warm-up retrievals (re-solve solved problems from scratch),
+    most overdue first. Stops early if the student quits a warm-up."""
+    user_id = get_or_create_user(conn, user_name)
+    cards = scheduler.due_cards(conn, user_id, limit=limit)
+    if not cards:
+        console.print("[green]No warm-ups due — the scheduler says you're fresh.[/green]")
+        return []
+    console.print(f"[bold]Warm-up: {len(cards)} pattern card(s) due.[/bold]")
+    outcomes = []
+    for card in cards:
+        problem = scheduler.warmup_problem(conn, user_id, card["pattern"])
+        if problem is None:
+            console.print(
+                f"[yellow]Card '{card['pattern']}' has no solved problem to "
+                "re-solve; deferring it a day.[/yellow]"
+            )
+            scheduler.defer(conn, card, days=1.0)
+            continue
+        _write_template(problem, force=True)
+        outcome = run_day(
+            conn, console, backend, problem["slug"], user_name,
+            open_editor=False, warmup=True, card=card,
+        )
+        outcomes.append(outcome)
+        if outcome == "quit":
+            break
+    return outcomes
 
 
 def run_check(conn: sqlite3.Connection, console: Console, slug: str) -> str:

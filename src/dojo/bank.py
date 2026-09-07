@@ -127,10 +127,19 @@ def seed_problems(conn: sqlite3.Connection, root: Path = DSA_DIR) -> int:
         ov = overrides.get(problem.slug)
         conn.execute(
             """
-            INSERT OR REPLACE INTO problems
+            INSERT INTO problems
                 (slug, title, difficulty, pattern, statement, function_name,
                  expected_time, expected_space, visible_tests, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (slug) DO UPDATE SET
+                title = excluded.title,
+                difficulty = excluded.difficulty,
+                pattern = excluded.pattern,
+                statement = excluded.statement,
+                function_name = excluded.function_name,
+                expected_time = excluded.expected_time,
+                expected_space = excluded.expected_space,
+                visible_tests = excluded.visible_tests
             """,
             (
                 problem.slug,

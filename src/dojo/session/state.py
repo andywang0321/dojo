@@ -22,6 +22,7 @@ class WorkbenchState:
     tier: int = 0
     hints: list[dict] = field(default_factory=list)
     started_epoch: float = 0.0
+    kind: str = "solve"  # 'solve' | 'warmup' — a session state belongs to one kind
 
     @property
     def code_path(self) -> Path:

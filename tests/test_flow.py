@@ -159,3 +159,111 @@ def test_open_command_and_commands_hint(db, fake_console, monkeypatch, tmp_path)
     # The command list appears after output, before each prompt.
     assert "Commands:" in console.text
     assert console.text.count("Commands:") >= 1
+
+
+def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
+    """A new solve creates the pattern's card (first review due tomorrow)."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    (workbench / "valid_parentheses.py").write_text(SOLUTION)
+
+    console = fake_console(
+        [
+            "submit",
+            "O(n) because one pass over the string",
+            "O(n) for the stack",
+            "The key insight: the stack mirrors the opening order.",
+        ]
+    )
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+    assert outcome == "solved"
+
+    attempt = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert attempt["kind"] == "solve"
+    card = db.execute(
+        "SELECT * FROM pattern_cards WHERE pattern = 'stack'"
+    ).fetchone()
+    assert card is not None
+    assert "stack" in card["last_reflection"]
+    assert card["due_at"] > card["created_at"]  # first review scheduled in the future
+
+
+def _fast_measure(code_path, function_name, input_generator, **kwargs):
+    from dojo.profiler import measure as real_measure
+
+    return real_measure(
+        code_path, function_name, input_generator, sizes=[100, 200, 400, 800], repeats=2
+    )
+
+
+def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path):
+    from dojo import scheduler
+    from dojo.db import get_or_create_user
+
+    _seed_problem(db)
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+    # Age the card a day so the review has a real R < 1 and stability moves.
+    db.execute(
+        "UPDATE pattern_cards SET stability = 1.0, last_review_at = datetime('now', '-1 day') WHERE id = ?",
+        (card["id"],),
+    )
+    db.commit()
+    card = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    (workbench / "valid_parentheses.py").write_text(SOLUTION)
+
+    console = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "3"]
+    )
+    outcome = run_day(
+        db, console, MockBackend(), "valid_parentheses", "andy",
+        open_editor=False, warmup=True, card=card,
+    )
+    assert outcome == "warmup_done"
+
+    attempt = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert attempt["kind"] == "warmup"
+    assert attempt["reflection"] is None  # the recall grade replaces reflection
+
+    updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    assert updated["reps"] == 1
+    assert updated["stability"] > 1.0
+    assert updated["due_at"] > card["due_at"]
+    assert "recall" in console.text.lower() or "Recall grade" in console.text
+
+
+def test_warmup_quit_records_lapse(db, fake_console, monkeypatch, tmp_path):
+    from dojo import scheduler
+    from dojo.db import get_or_create_user
+
+    _seed_problem(db)
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+    db.execute("UPDATE pattern_cards SET stability = 1.0 WHERE id = ?", (card["id"],))
+    db.commit()
+
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    console = fake_console(["quit"])
+    outcome = run_day(
+        db, console, MockBackend(), "valid_parentheses", "andy",
+        open_editor=False, warmup=True, card=card,
+    )
+    assert outcome == "quit"
+
+    updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    assert updated["lapses"] == 1
+    assert updated["stability"] < 1.0

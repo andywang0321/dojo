@@ -34,6 +34,7 @@ class FakeConsole:
         self.out.append(" ".join(str(a) for a in args))
 
     def input(self, prompt: str = "") -> str:
+        self.out.append(str(prompt))
         return self.answers.pop(0) if self.answers else "quit"
 
     @property

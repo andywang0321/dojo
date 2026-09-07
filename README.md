@@ -6,7 +6,7 @@ Three components:
 
 1. **A never-solve tutor** (DeepSeek) — a gated hint ladder that unblocks thinking without leaking solutions, with a second model call auditing every hint for spoilers.
 2. **A grading engine** — quantitative: an isolated judge (visible, generated, and oracle-checked tests) plus an empirical profiler that *measures* time/space growth; qualitative: a rubric-based AI review of approach, style, and edge-case habits.
-3. **A problem bank + learner model** — problems are a catalog; the asset is your attempt history: hints consumed, claimed vs. measured vs. expected complexity, reviews, and reflections.
+3. **A retention engine** — FSRS-lite spaced repetition over pattern cards: `dojo day` starts with warm-up retrievals (re-solving past problems from scratch), grades your recall, and schedules the next review. A problem bank + learner model underpin all three: problems are a catalog; the asset is your attempt history and card schedule.
 
 ## Design principles
 
@@ -20,10 +20,11 @@ Three components:
 ## The daily loop
 
 ```
-dojo day valid_parentheses
+dojo day
 ```
 
-1. **Read** the problem (printed in the terminal). Nothing opens automatically.
+0. **Warm-up** (if any cards are due) — the scheduler re-opens a previously solved problem in the due pattern, *from scratch*: fresh template, same full pipeline. After submitting you grade your own recall (4 = easy, 3 = good, 2 = hard, 1 = forgot) and the card's next review is scheduled.
+1. **Read** the problem (printed in the terminal). Nothing opens automatically; `dojo day` picks for you — weakest pattern first, then lowest difficulty.
 2. **Open** — `open` launches `$EDITOR` without blocking the prompt: GUI editors (zed, code, …) get a detached process; terminal editors (nvim, vim, …) get a new tmux window inside tmux, or a new Terminal/iTerm window on macOS. Use `dojo day --open` to auto-open on launch.
 3. **Check** — run visible tests as often as you like (`check`). The editor stays open; the prompt stays live.
 4. **Hint** — when stuck, `hint <what you're stuck on>`. Hints are metered and logged.
@@ -34,7 +35,13 @@ dojo day valid_parentheses
 9. **Review** — the AI reviewer scores a rubric (correctness, approach, idiom, naming, edge cases, complexity claim) and writes a "broader picture" note connecting the problem to its pattern family and your ML background.
 10. **Reflect** — one prompt feeds the pattern card: what was the key insight, and when would you reach for this again?
 
-Everything lands on an `attempts` row in SQLite. The command list (`check · hint <text> · open · submit · quit`) is reprinted after every output, so it's always at the bottom of your screen.
+Everything lands on an `attempts` row in SQLite (kind = `solve` or `warmup`); new solves create/refresh the pattern's card. The command list (`check · hint <text> · open · submit · quit`) is reprinted after every output, so it's always at the bottom of your screen. `dojo warmup` runs due retrievals on their own; `dojo progress` shows per-pattern proficiency and the card schedule.
+
+## The retention engine (v0.2)
+
+FSRS-lite: each (user, pattern) card carries two numbers — **stability S** (memory strength, days) and **difficulty D** (1–10) — plus a due date. Recall probability follows the FSRS forgetting curve `R(t) = (1 + 19/81 · t/S)^(−0.5)`, so `R ≈ 0.90` at `t = S`; the next review is scheduled when retrievability decays to 0.9 (which, with these constants, is simply `interval = S`). Successful recalls grow stability (more for easy, less for hard cards, damped as S grows) and ease difficulty; lapses roughly halve stability and raise difficulty. Grading follows Anki's convention (1–4), and the suggested grade is derived from hints used: 0 hints → 4, 1 → 3, 2+ → 2. Quitting a warm-up records a lapse. Reviewed-too-early (R ≈ 1) deliberately yields no growth — that's the model, not a bug.
+
+The scheduler also decides **what to solve next**: curated problems you haven't solved, ordered by weakest pattern (lowest average card stability; untouched patterns count as 0) then difficulty. And warm-ups re-solve the *least recently solved* problem in the pattern — oldest memory, most worth retrieving. Cards from v0.1 history are backfilled by `dojo init` (due immediately).
 
 ## The hint ladder
 
@@ -70,19 +77,20 @@ Two build-time lessons are baked into the tests: CPython 3.12+ resizes unshared 
 
 ```
 src/dojo/
-  cli.py            # init / list / day / check / profile
+  cli.py            # init / list / day / warmup / check / profile / progress
   config.py         # paths, env, backend selection (DEEPSEEK_API_KEY, DOJO_AI_BACKEND)
   editor.py         # $EDITOR launching: detached GUI, tmux/macOS windows for terminal editors
-  db.py             # SQLite schema (users, problems, attempts)
+  db.py             # SQLite schema (users, problems, attempts, pattern_cards) + migrations
   bank.py           # seed importer: dsa/**/*.py docstrings -> problems
   complexity.py     # O(...) normalization + mismatch logic
+  scheduler.py      # FSRS-lite cards, due reviews, warm-up + new-problem picks
   judge/            # registry (oracles, generators) + subprocess runner
   profiler/         # fit (curve fitting) + measure (doubling sizes, tracemalloc)
   tutor/            # backend (mock | deepseek), prompts, hint ladder, reviewer
-  session/          # workbench state + the day flow
+  session/          # workbench state + the day flow (solve & warmup modes)
 data/problem_overrides.json   # curated function names + visible tests
 dsa/                          # your existing prompts: the seed corpus
-tests/                        # 33 tests, no network, mock backend
+tests/                        # 45 tests, no network, mock backend
 workbench/                    # scratch space (gitignored); attempt code lives in the DB
 Makefile                      # sandbox-friendly entry points (workspace-local uv cache)
 ```
@@ -105,7 +113,8 @@ No API key? `DOJO_AI_BACKEND=mock` runs the whole pipeline with canned responses
 
 - `users(name)` — one row per person; all data is per-user from day one.
 - `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests)` — the catalog. `function_name` + `visible_tests` = "curated", i.e. ready for `dojo day`.
-- `attempts(user, problem, code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, timings)` — the learner model.
+- `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, timings)` — the learner model.
+- `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern).
 
 `data/dojo.db` and `workbench/` are gitignored: they're personal state, not source.
 
@@ -115,11 +124,10 @@ No API key? `DOJO_AI_BACKEND=mock` runs the whole pipeline with canned responses
 uv run pytest
 ```
 
-33 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import, judge correctness/crash/timeout, hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, and a full mocked day flow. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
+45 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import, judge correctness/crash/timeout, hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), and full mocked day flows. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
 
 ## Roadmap
 
-- **v0.2 — retention:** spaced repetition (FSRS-style scheduling over pattern cards) + warm-up retrievals in `dojo day`; per-pattern proficiency from attempt history.
 - **v0.3 — the updating bank:** LeetCode GraphQL fetcher with a private, gitignored local cache. Copyright stance: LeetCode problem text and test data are proprietary — fetch on demand for personal use, never commit a scraped corpus to the repo. Curate more problems (signatures move into `problem_overrides.json`).
 - **v0.4 — deeper grading:** static analysis (radon cyclomatic complexity, ruff), the hinted-solution penalty, review score trends per pattern.
 - **Later:** TUI polish (Textual), two-machine sync, warm-up problem variants. A web UI only if the CLI loop proves insufficient — never first.
@@ -127,6 +135,8 @@ uv run pytest
 ## Known limitations (v0)
 
 - One fully curated solve path (`valid_parentheses`); `two_sum` is seeded as a fixture. Every other problem waits for curation (function name + visible tests).
+- A warm-up card needs at least one *solved* problem in its pattern to re-solve; cards without one are deferred a day.
+- Same-day reviews yield no stability growth (R ≈ 1 at t ≈ 0) — schedule your warm-ups a day or more after solving, which is exactly what the due dates do.
 - Terminal editors detach only inside tmux or on macOS (Terminal/iTerm via osascript); elsewhere `open` falls back to blocking with a warning. Unrecognized editors are treated as blocking — add them to `GUI_EDITORS` in `src/dojo/editor.py` if they can detach.
 - The profiler models polynomial-ish growth only; exponential/constant-factor pathologies show as low-R² reports.
 - The judge compares by strict JSON equality (float `1.0` vs `1` mismatch); oracle-generated cases exist only where a brute-force reference is registered.
