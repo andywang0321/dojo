@@ -1,9 +1,9 @@
 """Problem bank: seed importer + fixture overrides.
 
-The seed importer turns the existing ``dsa/**/*.py`` files (prompt in the
-module docstring, pattern = parent directory) into ``problems`` rows. The
-canonical LeetCode fetcher is a v1 feature; for now the bank is what's on
-disk plus ``data/problem_overrides.json`` for curated metadata (function
+The seed importer turns the existing ``problems/**/*.py`` files (prompt in
+the module docstring, pattern = parent directory) into ``problems`` rows.
+The canonical LeetCode fetcher is a v1 feature; for now the bank is what's
+on disk plus ``data/problem_overrides.json`` for curated metadata (function
 names, visible tests) that prompts don't carry.
 """
 
@@ -15,7 +15,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dojo.config import DSA_DIR, PROBLEM_OVERRIDES
+from dojo.config import PROBLEMS_DIR, PROBLEM_OVERRIDES
 from dojo.db import dumps_json, now
 
 _HEADER_RE = re.compile(r"^(.*?)\s*[\[\(]\s*(Easy|Medium|Hard)\s*[\]\)]")
@@ -61,7 +61,7 @@ def _normalize_complexity(raw: str) -> str:
 
 
 def parse_problem_file(path: Path) -> ParsedProblem | None:
-    """Parse a ``dsa/**/*.py`` file into a ParsedProblem, or None if it
+    """Parse a ``problems/**/*.py`` file into a ParsedProblem, or None if it
     doesn't match the expected shape (no docstring / no [Difficulty])."""
     text = path.read_text()
     if not text.lstrip().startswith(('"""', "'''")):
@@ -93,7 +93,7 @@ def parse_problem_file(path: Path) -> ParsedProblem | None:
     )
 
 
-def discover_problems(root: Path = DSA_DIR) -> list[ParsedProblem]:
+def discover_problems(root: Path = PROBLEMS_DIR) -> list[ParsedProblem]:
     problems, skipped = [], []
     for path in sorted(root.rglob("*.py")):
         parsed = parse_problem_file(path)
@@ -120,7 +120,7 @@ def load_overrides(path: Path = PROBLEM_OVERRIDES) -> dict[str, ProblemOverride]
     }
 
 
-def seed_problems(conn: sqlite3.Connection, root: Path = DSA_DIR) -> int:
+def seed_problems(conn: sqlite3.Connection, root: Path = PROBLEMS_DIR) -> int:
     overrides = load_overrides()
     inserted = 0
     for problem in discover_problems(root):

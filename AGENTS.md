@@ -16,7 +16,7 @@ src/dojo/
                     # tmux new-window / macOS osascript; unknown -> blocking
   db.py             # schema (users, problems, attempts, pattern_cards) +
                     # migrate(); MIGRATIONS MUST BE ADDITIVE
-  bank.py           # dsa/**/*.py docstring -> problems importer (upsert on slug)
+  bank.py           # problems/**/*.py docstring -> problems importer (upsert on slug)
   complexity.py     # O(...) canonicalization; only KNOWN_CLASSES participate in mismatch()
   scheduler.py      # FSRS-lite (stability/difficulty/forgetting curve), due cards,
                     # record_grade, warmup + new-problem picks, backfill
@@ -35,7 +35,7 @@ src/dojo/
     state.py        # workbench/<slug>.state.json (tier, hints, attempt id, kind)
     flow.py         # run_day (solve & warmup modes) + run_warmups
 data/problem_overrides.json   # curated metadata: function_name + visible tests
-dsa/                # seed corpus: one problem per file, prompt in module docstring
+problems/           # seed corpus: one problem per file, prompt in module docstring
 tests/              # 45 tests; offline; mock backend
 workbench/          # gitignored scratch; attempt code persists in the DB, not here
 Makefile            # sync/test/demo targets with a workspace-local UV_CACHE_DIR
@@ -57,7 +57,7 @@ Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by ha
 ## Hard rules
 
 1. **Never-solve is an architectural property, not a prompt detail.** Reference implementations (oracles in `judge/registry.py`) must never enter tutor context. The tutor prompt (`tutor/prompts.py`) receives only: statement, student code, tier, hint history. If a change adds a new file with solution code, keep it outside anything the tutor imports or reads.
-2. **Copyright.** Never commit scraped LeetCode problem statements, editorials, or test data. Fetched content (the v0.3 fetcher) lives in a gitignored local cache only. The seed corpus in `dsa/` is the users' own writing.
+2. **Copyright.** Never commit scraped LeetCode problem statements, editorials, or test data. Fetched content (the v0.3 fetcher) lives in a gitignored local cache only. The seed corpus in `problems/` is the users' own writing.
 3. **Secrets.** `DEEPSEEK_API_KEY` lives in the environment or a gitignored `.env`. Never log it, never put it in prompts, tests, or fixtures.
 4. **User data is real.** `data/dojo.db` and `workbench/` are personal state. Don't delete or reset them as a side effect; DB migrations are additive only (`ALTER TABLE ... ADD COLUMN` or new tables).
 5. **Tests are offline and deterministic.** No network calls in tests; always use `MockBackend`. Measurement tests target coarse outcomes (class, slope range), not exact timings.

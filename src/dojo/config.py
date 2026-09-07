@@ -15,7 +15,9 @@ SRC_ROOT = REPO_ROOT / "src"
 DATA_DIR = REPO_ROOT / "data"
 WORKBENCH_DIR = REPO_ROOT / "workbench"
 PROBLEM_OVERRIDES = REPO_ROOT / "data" / "problem_overrides.json"
-DSA_DIR = REPO_ROOT / "dsa"
+#: The seed corpus: one problem per file, prompt in the module docstring,
+#: organized by pattern directory (imported by dojo.bank).
+PROBLEMS_DIR = REPO_ROOT / "problems"
 DB_PATH = DATA_DIR / "dojo.db"
 
 

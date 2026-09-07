@@ -60,6 +60,20 @@ Full discussions and reference solutions unlock only after submission — and v0
 
 Tutor output is terminal-safe: the prompts instruct plain text (no Markdown), and `de_markdown` strips any asterisks, backticks, headers, and bullets that slip through before display.
 
+## The problem bank and curation
+
+Every problem has a **slug** (a stable machine identifier: the filename stem, e.g. `valid_parentheses`), a **title** (the human-readable name, e.g. "Valid Parentheses"), and a statement. The CLI shows them merged as `Title (slug)` — the slug is what you type, the title is what you read.
+
+Seeding is automatic: `dojo init` imports every `problems/**/*.py` file whose module docstring starts with `Title [Difficulty]` (pattern = parent directory, expected complexity parsed from the "You should aim for..." line).
+
+**Curated** is a stricter bar, and it is a manual, deliberate step — the ✓ column in `dojo list`. A problem is curated when it has everything `dojo day` needs:
+
+1. `function_name` + `visible_tests` in `data/problem_overrides.json` (the interface contract: how the judge calls your code, and the examples you can check against);
+2. a signature in `SIGNATURES` (`session/flow.py`) so the workbench template writes the right stub;
+3. ideally: a `@judge_case` generator + `@oracle` in `judge/registry.py` (randomized + oracle-checked cases) and a `@profiler_input` (worst-case-shaped inputs for measurement) — without these, submission still works on visible tests only, and the profiler is skipped.
+
+There is no `dojo curate` command: curation can't be automated honestly, because the function signature, test cases, and brute-force oracle are problem-specific knowledge that only a human (or a future LeetCode fetcher for the statement part) can provide. The recipe above is the whole process — pick a slug, write the four entries, re-run `dojo init`, and the ✓ appears. (`two_sum` is a minimal working example: it has 1 and 2, and intentionally no generator/oracle — which is why solving it skips the profiler.)
+
 ## The grading engine
 
 **Judge.** Student code runs in an isolated subprocess with a JSON protocol: import the workbench file, call the problem's function, compare results by JSON equality, kill on timeout. Cases come from three layers: visible examples (curated in `data/problem_overrides.json`), randomized generated cases, and oracle-checked cases where a brute-force reference exists (`dojo/judge/registry.py`). Oracle code is correctness infrastructure only — never tutor context.
@@ -81,15 +95,17 @@ src/dojo/
   config.py         # paths, env, backend selection (DEEPSEEK_API_KEY, DOJO_AI_BACKEND)
   editor.py         # $EDITOR launching: detached GUI, tmux/macOS windows for terminal editors
   db.py             # SQLite schema (users, problems, attempts, pattern_cards) + migrations
-  bank.py           # seed importer: dsa/**/*.py docstrings -> problems
+  bank.py           # seed importer: problems/**/*.py docstrings -> problems
   complexity.py     # O(...) normalization + mismatch logic
   scheduler.py      # FSRS-lite cards, due reviews, warm-up + new-problem picks
   judge/            # registry (oracles, generators) + subprocess runner
   profiler/         # fit (curve fitting) + measure (doubling sizes, tracemalloc)
   tutor/            # backend (mock | deepseek), prompts, hint ladder, reviewer
   session/          # workbench state + the day flow (solve & warmup modes)
-data/problem_overrides.json   # curated function names + visible tests
-dsa/                          # your existing prompts: the seed corpus
+problems/           # the seed corpus: one problem per file, prompt in the module
+                    # docstring, organized by pattern (arrays_and_hashing, stack,
+                    # two_pointers, interview/...) — your original solving files
+data/problem_overrides.json   # curated metadata: function names + visible tests
 tests/                        # 45 tests, no network, mock backend
 workbench/                    # scratch space (gitignored); attempt code lives in the DB
 Makefile                      # sandbox-friendly entry points (workspace-local uv cache)
@@ -100,9 +116,9 @@ Makefile                      # sandbox-friendly entry points (workspace-local u
 ```bash
 make sync                        # or: uv sync  (see the uv-cache note below)
 export DEEPSEEK_API_KEY=...      # or put it in a gitignored .env
-uv run dojo init --user andy     # create DB, seed the bank from dsa/
+uv run dojo init --user andy     # create DB, seed the bank from problems/
 uv run dojo list --user andy     # catalog with solved status
-uv run dojo day valid_parentheses --user andy
+uv run dojo day --user andy      # warm-ups (if due) + scheduler-picked problem
 ```
 
 **The uv cache note.** uv writes its package cache to `~/.cache/uv` by default, which is outside this repo. If you run inside a sandbox (CI, an agent harness, a container), use `make sync` / `make test` — the Makefile sets `UV_CACHE_DIR=.uv-cache`, keeping everything inside the workspace so no permission escalation is ever needed.

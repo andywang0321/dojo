@@ -19,13 +19,13 @@ from rich.table import Table
 
 from dojo import scheduler
 from dojo.bank import seed_problems
-from dojo.config import DB_PATH, DSA_DIR
+from dojo.config import DB_PATH, PROBLEMS_DIR
 from dojo.db import connect, get_or_create_user, init_db, now
 
 
 def _cmd_init(args) -> int:
     init_db(DB_PATH)
-    n = seed_problems(connect(DB_PATH), DSA_DIR)
+    n = seed_problems(connect(DB_PATH), PROBLEMS_DIR)
     console = Console()
     console.print(f"[green]Seeded {n} problems into {DB_PATH}[/green]")
     with connect(DB_PATH) as conn:
@@ -64,24 +64,23 @@ def _cmd_list(args) -> int:
             ):
                 solved[r["problem_id"]] = r["status"]
     table = Table(title="Problem bank")
-    table.add_column("slug")
-    table.add_column("title")
-    table.add_column("difficulty")
-    table.add_column("pattern")
-    table.add_column("curated")
-    table.add_column("status" if args.user else "solved")
+    table.add_column("Problem")
+    table.add_column("Difficulty")
+    table.add_column("Pattern")
+    table.add_column("Curated")
+    table.add_column("Status" if args.user else "Solved")
     for r in rows:
         table.add_row(
-            r["slug"],
-            r["title"],
+            f"{r['title']} [dim]({r['slug']})[/dim]",
             r["difficulty"],
             r["pattern"],
-            "✓" if r["function_name"] and r["visible_tests"] else "",
+            "✓" if r["function_name"] and r["visible_tests"] else "—",
             solved.get(r["id"], "—"),
         )
     console.print(table)
     console.print(
-        f"{len(rows)} problems. Curated = has function name + visible tests, ready for `dojo day`."
+        f"{len(rows)} problems. Curated = has function name + visible tests "
+        "(see data/problem_overrides.json), ready for `dojo day`."
     )
     return 0
 
@@ -169,13 +168,13 @@ def _cmd_profile(args) -> int:
         ).fetchall()
     table = Table(title=f"Attempts — {args.user or 'default'}")
     for col in (
-        "problem", "difficulty", "status", "hints", "claimed time", "measured time",
-        "r²", "claimed space", "measured space", "submitted",
+        "Problem", "Difficulty", "Status", "Hints", "Claimed time", "Measured time",
+        "r²", "Claimed space", "Measured space", "Submitted",
     ):
         table.add_column(col)
     for r in rows:
         table.add_row(
-            f"{r['title']} ({r['slug']})",
+            f"{r['title']} [dim]({r['slug']})[/dim]",
             r["difficulty"],
             r["status"],
             str(r["hint_count"]),
