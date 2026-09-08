@@ -10,7 +10,7 @@ Example 2:
 Input: n = 3
 Output: ["((()))","(()())","(())()","()(())","()()()"]
 
-You may return the answer in any order.
+Return the strings in lexicographic order.
 
 Constraints:
 1 <= n <= 7

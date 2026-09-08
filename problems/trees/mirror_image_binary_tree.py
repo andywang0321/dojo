@@ -14,6 +14,9 @@ and whose right child 4 has children 1 and 1, is not symmetric -> false.
 
 You should aim for a solution with O(n) time and O(n) space, where n is the
 number of nodes.
+
+Input format: the tree is passed as a nested list [value, left, right], where
+left and right are either None or nested lists. An empty tree is None.
 """
 
 class BTNode:

@@ -70,9 +70,13 @@ Seeding is automatic: `dojo init` imports every `problems/**/*.py` file whose mo
 
 1. `function_name` + `visible_tests` in `data/problem_overrides.json` (the interface contract: how the judge calls your code, and the examples you can check against);
 2. a signature in `SIGNATURES` (`session/flow.py`) so the workbench template writes the right stub;
-3. ideally: a `@judge_case` generator + `@oracle` in `judge/registry.py` (randomized + oracle-checked cases) and a `@profiler_input` (worst-case-shaped inputs for measurement) — without these, submission still works on visible tests only, and the profiler is skipped.
+3. a `@judge_case` generator + `@oracle` in `judge/registry.py` (randomized + oracle-checked cases) and, wherever measurement is meaningful, a `@profiler_input` (worst-case-shaped inputs).
 
-There is no `dojo curate` command: curation can't be automated honestly, because the function signature, test cases, and brute-force oracle are problem-specific knowledge that only a human (or a future LeetCode fetcher for the statement part) can provide. The recipe above is the whole process — pick a slug, write the four entries, re-run `dojo init`, and the ✓ appears. (`two_sum` is a minimal working example: it has 1 and 2, and intentionally no generator/oracle — which is why solving it skips the profiler.)
+28 of 31 problems are curated this way. The judge's strict JSON equality means output contracts are pinned explicitly where prompts traditionally say "any order": group_anagrams, top_k_frequent, three_sum, generate_parentheses, array_intersection and k_closest_points return canonical sorted order; peak_elements returns the *leftmost* peak; correlation returns the coefficient *rounded to 4 decimals*; trees are passed as nested lists `[value, left, right]` (`None` for a missing child or an empty tree). `tests/test_registry.py` enforces the whole contract — every visible test and generated case must agree with its oracle, and representative oracles must survive the real judge subprocess.
+
+Three problems are deliberately **not** curated, because they don't fit the single-function, strict-equality protocol: `min_stack` (a class API), `encode_and_decode_strings` (two functions that must round-trip), and `generate_sample_to_target_sum` (any valid sample is correct — a predicate, not an equality). They'll need judge-protocol extensions (ops-list class mode, per-case function dispatch, predicate checkers) before they can be curated.
+
+There is no `dojo curate` command: curation can't be automated honestly, because the function signature, test cases, and brute-force oracle are problem-specific knowledge that only a human can supply (a future LeetCode fetcher can cover the statement part). The recipe above is the whole process — pick a slug, write the entries, re-run `dojo init`, and the ✓ appears.
 
 ## The grading engine
 
@@ -147,7 +151,7 @@ Commands that need a user resolve `--user` against the DB's single existing user
 uv run pytest
 ```
 
-58 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout, hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
+63 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout, the curation contract (overrides ↔ signatures ↔ oracles ↔ generated cases, plus oracle wrappers through the real judge), hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
 
 ## Roadmap
 
@@ -157,7 +161,8 @@ uv run pytest
 
 ## Known limitations (v0)
 
-- One fully curated solve path (`valid_parentheses`); `two_sum` is seeded as a fixture. Every other problem (31 seeded across 9 patterns) waits for curation (function name + visible tests).
+- 28 of 31 problems are curated; `min_stack`, `encode_and_decode_strings`, and `generate_sample_to_target_sum` are skipped until the judge protocol grows (see "The problem bank and curation").
+- `generate_parentheses` has no profiler input (its output is exponential, so polynomial fitting would misreport the algorithm); `peak_elements` and `valid_sudoku` have none either (O(log n) is flat at probe sizes, and a sudoku board is fixed 9×9) — solving them skips the measurement step.
 - A warm-up card needs at least one *solved* problem in its pattern to re-solve; cards without one are deferred a day.
 - Same-day reviews yield no stability growth (R ≈ 1 at t ≈ 0) — schedule your warm-ups a day or more after solving, which is exactly what the due dates do.
 - Terminal editors detach only inside tmux or on macOS (Terminal/iTerm via osascript); elsewhere `open` falls back to blocking with a warning. Unrecognized editors are treated as blocking — add them to `GUI_EDITORS` in `src/dojo/editor.py` if they can detach.

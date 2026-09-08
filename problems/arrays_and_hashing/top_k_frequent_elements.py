@@ -3,7 +3,7 @@ Top K Frequent Elements [Medium]
 
 Given an integer array nums and an integer k, return the k most frequent elements within the array.
 The test cases are generated such that the answer is always unique.
-You may return the output in any order.
+Return the k elements sorted by decreasing frequency; if two elements tie on frequency, the smaller value comes first.
 
 Example 1:
 Input: nums = [1, 2, 2, 3, 3, 3], k = 2

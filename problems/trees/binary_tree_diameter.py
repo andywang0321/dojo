@@ -23,6 +23,9 @@ Output: 2
 
 You should aim for a solution with O(n) time and O(n) space, where n is the
 number of nodes.
+
+Input format: the tree is passed as a nested list [value, left, right], where
+left and right are either None or nested lists. The tree is never empty.
 """
 
 

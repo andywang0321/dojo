@@ -2,8 +2,9 @@
 K Closest Points to Origin [Easy]
 
 Given a list of points on the 2D plane and an integer k, return the k points
-closest to the origin (0, 0), measured by Euclidean distance. Ties may be
-broken in any order.
+closest to the origin (0, 0), measured by Euclidean distance. Return them
+sorted by increasing distance; ties are broken by smaller x first, then
+smaller y.
 
 Example 1:
 Input: k = 3, points = [[2, -1], [3, 2], [4, 1], [-1, -1], [-2, 2]]

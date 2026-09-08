@@ -1,7 +1,7 @@
 """
 Group Anagrams [Medium]
 
-Given an array of strings strs, group all anagrams together into sublists. You may return the output in any order.
+Given an array of strings strs, group all anagrams together into sublists. Return each group's strings in lexicographic order, and the groups themselves in lexicographic order of their first string.
 An anagram is a string that contains the exact same characters as another string, but the order of the characters can be different.
 
 Example 1:

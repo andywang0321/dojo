@@ -1,4 +1,229 @@
 {
+  "array_intersection": {
+    "function_name": "intersection",
+    "visible_tests": [
+      {"args": [[1, 2, 3, 4, 5], [0, 1, 3, 7]], "expected": [1, 3]},
+      {"args": [[1, 2, 3, 4, 5], [6, 7]], "expected": []},
+      {"args": [[], [1]], "expected": []},
+      {"args": [[1, 1, 2], [1, 1, 3]], "expected": [1]}
+    ]
+  },
+  "binary_tree_diameter": {
+    "function_name": "diameter",
+    "visible_tests": [
+      {"args": [[1, null, null]], "expected": 0},
+      {"args": [[0, [1, null, [2, null, null]], null]], "expected": 2},
+      {"args": [[0, [1, [2, null, [3, null, null]], [2, null, null]], [1, null, [2, [3, null, null], null]]]], "expected": 6},
+      {"args": [[1, [2, [4, null, null], null], [3, null, null]]], "expected": 3}
+    ]
+  },
+  "car_fleet": {
+    "function_name": "car_fleet",
+    "visible_tests": [
+      {"args": [10, [1, 4], [3, 2]], "expected": 1},
+      {"args": [10, [4, 1, 0, 7], [2, 2, 1, 1]], "expected": 3},
+      {"args": [12, [10, 8, 0, 5, 3], [2, 4, 1, 1, 3]], "expected": 3}
+    ]
+  },
+  "container_with_most_water": {
+    "function_name": "max_area",
+    "visible_tests": [
+      {"args": [[1, 7, 2, 5, 4, 7, 3, 6]], "expected": 36},
+      {"args": [[2, 2, 2]], "expected": 4},
+      {"args": [[1, 1]], "expected": 1}
+    ]
+  },
+  "contains_duplicate": {
+    "function_name": "contains_duplicate",
+    "visible_tests": [
+      {"args": [[1, 2, 3, 3]], "expected": true},
+      {"args": [[1, 2, 3, 4]], "expected": false},
+      {"args": [[]], "expected": false},
+      {"args": [[-1, 2, -1]], "expected": true}
+    ]
+  },
+  "correlation": {
+    "function_name": "correlation",
+    "visible_tests": [
+      {"args": [[1, 2, 3, 4, 5], [3, 2, 5, 9, 6]], "expected": 0.7506},
+      {"args": [[1, 2, 3], [1, 2, 3]], "expected": 1.0},
+      {"args": [[1, 2, 3], [3, 2, 1]], "expected": -1.0}
+    ]
+  },
+  "daily_temperatures": {
+    "function_name": "daily_temperatures",
+    "visible_tests": [
+      {"args": [[30, 38, 30, 36, 35, 40, 28]], "expected": [1, 4, 1, 2, 1, 0, 0]},
+      {"args": [[22, 21, 20]], "expected": [0, 0, 0]},
+      {"args": [[40, 30, 20, 35]], "expected": [0, 2, 1, 0]}
+    ]
+  },
+  "evaluate_reverse_polish_notation": {
+    "function_name": "eval_rpn",
+    "visible_tests": [
+      {"args": [["1", "2", "+", "3", "*", "4", "-"]], "expected": 5},
+      {"args": [["2", "1", "+", "3", "*"]], "expected": 9},
+      {"args": [["4", "13", "5", "/", "+"]], "expected": 6},
+      {"args": [["10", "6", "9", "3", "+", "-11", "*", "/", "*", "17", "+", "5", "+"]], "expected": 22},
+      {"args": [["18"]], "expected": 18}
+    ]
+  },
+  "generate_parentheses": {
+    "function_name": "generate_parentheses",
+    "visible_tests": [
+      {"args": [1], "expected": ["()"]},
+      {"args": [2], "expected": ["(())", "()()"]},
+      {"args": [3], "expected": ["((()))", "(()())", "(())()", "()(())", "()()()"]}
+    ]
+  },
+  "group_anagrams": {
+    "function_name": "group_anagrams",
+    "visible_tests": [
+      {"args": [["act", "pots", "tops", "cat", "stop", "hat"]], "expected": [["act", "cat"], ["hat"], ["pots", "stop", "tops"]]},
+      {"args": [["x"]], "expected": [["x"]]},
+      {"args": [[""]], "expected": [[""]]}
+    ]
+  },
+  "k_closest_points": {
+    "function_name": "k_closest",
+    "visible_tests": [
+      {"args": [3, [[2, -1], [3, 2], [4, 1], [-1, -1], [-2, 2]]], "expected": [[-1, -1], [2, -1], [-2, 2]]},
+      {"args": [1, [[1, 1], [0, 0]]], "expected": [[0, 0]]},
+      {"args": [2, [[3, 3], [5, -1], [-2, 4]]], "expected": [[3, 3], [-2, 4]]}
+    ]
+  },
+  "k_smallest_elem_matrix": {
+    "function_name": "k_smallest",
+    "visible_tests": [
+      {"args": [4, [[1, 4, 7], [3, 5, 9], [6, 8, 11]]], "expected": 5},
+      {"args": [8, [[1, 4, 7], [3, 5, 9], [6, 8, 11]]], "expected": 9},
+      {"args": [1, [[1]]], "expected": 1}
+    ]
+  },
+  "largest_rectangle_in_histogram": {
+    "function_name": "largest_rectangle",
+    "visible_tests": [
+      {"args": [[7, 1, 7, 2, 2, 4]], "expected": 8},
+      {"args": [[1, 3, 7]], "expected": 7},
+      {"args": [[2, 1, 5, 6, 2, 3]], "expected": 10},
+      {"args": [[2, 4]], "expected": 4}
+    ]
+  },
+  "longest_consecutive_sequence": {
+    "function_name": "longest_seqlen",
+    "visible_tests": [
+      {"args": [[2, 20, 4, 10, 3, 4, 5]], "expected": 4},
+      {"args": [[0, 3, 2, 5, 4, 6, 1, 1]], "expected": 7},
+      {"args": [[]], "expected": 0},
+      {"args": [[100, 4, 200, 1, 3, 2]], "expected": 4}
+    ]
+  },
+  "max_prod_3_nums": {
+    "function_name": "max_tri_prod",
+    "visible_tests": [
+      {"args": [[1, 3, 4, 5]], "expected": 60},
+      {"args": [[-2, -4, 5, 3]], "expected": 40},
+      {"args": [[-3, -2, -1]], "expected": -6},
+      {"args": [[0, 0, 0]], "expected": 0}
+    ]
+  },
+  "mirror_image_binary_tree": {
+    "function_name": "is_mirror",
+    "visible_tests": [
+      {"args": [null], "expected": true},
+      {"args": [[1, null, null]], "expected": true},
+      {"args": [[3, [2, [1, null, null], [2, null, null]], [2, [2, null, null], [1, null, null]]]], "expected": true},
+      {"args": [[3, [2, [1, null, null], [2, null, null]], [4, [1, null, null], [1, null, null]]]], "expected": false},
+      {"args": [[1, [2, null, null], null]], "expected": false}
+    ]
+  },
+  "peak_elements": {
+    "function_name": "find_a_peak",
+    "visible_tests": [
+      {"args": [[3, 5, 2, 4, 1]], "expected": 1},
+      {"args": [[4, 3, 2, 1]], "expected": 0},
+      {"args": [[1, 2, 3, 4]], "expected": 3},
+      {"args": [[1]], "expected": 0}
+    ]
+  },
+  "products_of_array_except_self": {
+    "function_name": "prod_except_self",
+    "visible_tests": [
+      {"args": [[1, 2, 4, 6]], "expected": [48, 24, 12, 8]},
+      {"args": [[-1, 0, 1, 2, 3]], "expected": [0, -6, 0, 0, 0]},
+      {"args": [[2, 3]], "expected": [3, 2]}
+    ]
+  },
+  "sum_largest_contiguous_subarray": {
+    "function_name": "sum_largest_subarray",
+    "visible_tests": [
+      {"args": [[-1, -3, 5, -4, 3, -6, 9, 2]], "expected": 11},
+      {"args": [[-1, -5, -3, -7]], "expected": 0},
+      {"args": [[-2, 1, -3, 4, -1, 2, 1, -5, 4]], "expected": 6},
+      {"args": [[5]], "expected": 5}
+    ]
+  },
+  "three_sum": {
+    "function_name": "three_sum",
+    "visible_tests": [
+      {"args": [[-1, 0, 1, 2, -1, -4]], "expected": [[-1, -1, 2], [-1, 0, 1]]},
+      {"args": [[0, 1, 1]], "expected": []},
+      {"args": [[0, 0, 0]], "expected": [[0, 0, 0]]}
+    ]
+  },
+  "top_k_frequent_elements": {
+    "function_name": "top_k_freq",
+    "visible_tests": [
+      {"args": [[1, 2, 2, 3, 3, 3], 2], "expected": [3, 2]},
+      {"args": [[7, 7], 1], "expected": [7]},
+      {"args": [[8], 1], "expected": [8]},
+      {"args": [[1, 1, 1, 2, 2, 3], 2], "expected": [1, 2]}
+    ]
+  },
+  "trapping_rain_water": {
+    "function_name": "trap",
+    "visible_tests": [
+      {"args": [[0, 2, 0, 3, 1, 0, 1, 3, 2, 1]], "expected": 9},
+      {"args": [[4, 2, 0, 3, 2, 5]], "expected": 9},
+      {"args": [[0, 1, 0, 2, 1, 0, 1, 3, 2, 1, 2, 1]], "expected": 6}
+    ]
+  },
+  "two_sum": {
+    "function_name": "twosum",
+    "visible_tests": [
+      {"args": [[3, 4, 5, 6], 7], "expected": [0, 1]},
+      {"args": [[4, 5, 6], 10], "expected": [0, 2]},
+      {"args": [[5, 5], 10], "expected": [0, 1]},
+      {"args": [[1, 2, 5, 5], 10], "expected": [2, 3]}
+    ]
+  },
+  "two_sum_2": {
+    "function_name": "two_sum_2",
+    "visible_tests": [
+      {"args": [[1, 2, 3, 4], 3], "expected": [1, 2]},
+      {"args": [[2, 7, 11, 15], 9], "expected": [1, 2]},
+      {"args": [[2, 3, 4], 6], "expected": [1, 3]}
+    ]
+  },
+  "valid_anagram": {
+    "function_name": "valid_anagram",
+    "visible_tests": [
+      {"args": ["racecar", "carrace"], "expected": true},
+      {"args": ["jar", "jam"], "expected": false},
+      {"args": ["jarr", "jar"], "expected": false},
+      {"args": ["anagram", "nagaram"], "expected": true}
+    ]
+  },
+  "valid_palindrome": {
+    "function_name": "is_palindrome",
+    "visible_tests": [
+      {"args": ["Was it a car or a cat I saw?"], "expected": true},
+      {"args": ["tab a cat"], "expected": false},
+      {"args": ["A man, a plan, a canal: Panama"], "expected": true},
+      {"args": ["race a car"], "expected": false},
+      {"args": [" "], "expected": true}
+    ]
+  },
   "valid_parentheses": {
     "function_name": "is_valid",
     "visible_tests": [
@@ -14,13 +239,37 @@
       {"args": ["([)]"], "expected": false}
     ]
   },
-  "two_sum": {
-    "function_name": "twosum",
+  "valid_sudoku": {
+    "function_name": "valid_sudoku",
     "visible_tests": [
-      {"args": [[3, 4, 5, 6], 7], "expected": [0, 1]},
-      {"args": [[4, 5, 6], 10], "expected": [0, 2]},
-      {"args": [[5, 5], 10], "expected": [0, 1]},
-      {"args": [[1, 2, 5, 5], 10], "expected": [2, 3]}
+      {
+        "args": [[
+          ["1", "2", ".", ".", "3", ".", ".", ".", "."],
+          ["4", ".", ".", "5", ".", ".", ".", ".", "."],
+          [".", "9", "8", ".", ".", ".", ".", ".", "3"],
+          ["5", ".", ".", ".", "6", ".", ".", ".", "4"],
+          [".", ".", ".", "8", ".", "3", ".", ".", "5"],
+          ["7", ".", ".", ".", "2", ".", ".", ".", "6"],
+          [".", ".", ".", ".", ".", ".", "2", ".", "."],
+          [".", ".", ".", "4", "1", "9", ".", ".", "8"],
+          [".", ".", ".", ".", "8", ".", ".", "7", "9"]
+        ]],
+        "expected": true
+      },
+      {
+        "args": [[
+          ["1", "2", ".", ".", "3", ".", ".", ".", "."],
+          ["4", ".", ".", "5", ".", ".", ".", ".", "."],
+          [".", "9", "1", ".", ".", ".", ".", ".", "3"],
+          ["5", ".", ".", ".", "6", ".", ".", ".", "4"],
+          [".", ".", ".", "8", ".", "3", ".", ".", "5"],
+          ["7", ".", ".", ".", "2", ".", ".", ".", "6"],
+          [".", ".", ".", ".", ".", ".", "2", ".", "."],
+          [".", ".", ".", "4", "1", "9", ".", ".", "8"],
+          [".", ".", ".", ".", "8", ".", ".", "7", "9"]
+        ]],
+        "expected": false
+      }
     ]
   }
 }
