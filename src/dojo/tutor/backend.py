@@ -66,7 +66,8 @@ class DeepSeekBackend:
 class MockBackend:
     """Deterministic canned backend. ``chat`` reads ``TIER=<n>`` from the
     user prompt and returns the canned response for that tier; ``chat_json``
-    serves a leak-check rating queue and a fixed review dict."""
+    serves a leak-check rating queue, a fixed review dict, and a canned
+    curator proposal."""
 
     TIER_RESPONSES = {
         0: "Before I nudge you: can you say, in one sentence, where exactly "
@@ -85,9 +86,15 @@ class MockBackend:
         "recent opener; (4) at the end, check nothing is left open.",
     }
 
-    def __init__(self, leak_ratings: list[int] | None = None, review: dict | None = None):
+    def __init__(
+        self,
+        leak_ratings: list[int] | None = None,
+        review: dict | None = None,
+        curator: dict | None = None,
+    ):
         self._leak_ratings = leak_ratings if leak_ratings is not None else [1]
         self._rating_idx = 0
+        self._curator = curator or {}
         self._review = review or {
             "correctness": {"score": 4, "comment": "The reasoning holds; check the empty-input case."},
             "approach_quality": {"score": 4, "comment": "Natural choice for this problem class."},
@@ -114,6 +121,8 @@ class MockBackend:
             return {"rating": rating, "rewritten": "" if rating < 3 else "SOFTENED"}
         if "rubric" in system.lower() or "review" in system.lower():
             return self._review
+        if "curator" in system.lower():
+            return self._curator
         return {}
 
 

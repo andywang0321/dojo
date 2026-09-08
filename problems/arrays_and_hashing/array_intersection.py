@@ -2,7 +2,7 @@
 Array Intersection [Easy]
 
 Given two arrays of integers, return their intersection: the values that
-appear in both arrays, without duplicates, sorted in ascending order.
+appear in both arrays, without duplicates, in any order.
 
 Example 1:
 Input: A = [1, 2, 3, 4, 5], B = [0, 1, 3, 7]

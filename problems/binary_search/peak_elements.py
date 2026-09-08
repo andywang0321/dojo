@@ -3,12 +3,11 @@ Find a Peak Element [Medium]
 
 Given an array of positive integers, a peak element is one that is greater
 than both of its neighbors (an endpoint only needs to beat its single
-neighbor). Return the index of the leftmost peak element in the array.
+neighbor). Return the index of any peak element in the array.
 
 Example 1:
 Input: [3, 5, 2, 4, 1]
-Output: 1
-Explanation: 1 (value 5) and 3 (value 4) are both peaks; 1 is the leftmost.
+Output: 1 (value 5) or 3 (value 4) — either peak is correct.
 
 Example 2:
 Input: [4, 3, 2, 1]

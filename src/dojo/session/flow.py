@@ -42,48 +42,45 @@ COMMANDS_HINT = (
     "[b]open[/b] · [b]submit[/b] · [b]quit[/b][/dim]"
 )
 
-TEMPLATE_HEADER = '''"""
-{statement}
-"""
+TEMPLATE_STUB_COMMENT = (
+    "# Solve it. Use `dojo check` / `dojo hint` from a second terminal."
+)
 
 
-def {function_name}{signature}:
-    # Solve it. Use `dojo check` / `dojo hint` from a second terminal.
-    raise NotImplementedError
-'''
-
-# v0: signatures for curated problems live here; move into
-# data/problem_overrides.json when the bank grows.
-SIGNATURES = {
-    "array_intersection": "(A: list[int], B: list[int]) -> list[int]",
-    "binary_tree_diameter": "(root: list | None) -> int",
-    "car_fleet": "(target: int, position: list[int], speed: list[int]) -> int",
-    "container_with_most_water": "(height: list[int]) -> int",
-    "contains_duplicate": "(nums: list[int]) -> bool",
-    "correlation": "(X: list, Y: list) -> float",
-    "daily_temperatures": "(temperatures: list[int]) -> list[int]",
-    "evaluate_reverse_polish_notation": "(tokens: list[str]) -> int",
-    "generate_parentheses": "(n: int) -> list[str]",
-    "group_anagrams": "(strs: list[str]) -> list[list[str]]",
-    "k_closest_points": "(k: int, points: list[list[int]]) -> list[list[int]]",
-    "k_smallest_elem_matrix": "(k: int, matrix: list[list[int]]) -> int",
-    "largest_rectangle_in_histogram": "(heights: list[int]) -> int",
-    "longest_consecutive_sequence": "(nums: list[int]) -> int",
-    "max_prod_3_nums": "(A: list[int]) -> int",
-    "mirror_image_binary_tree": "(root: list | None) -> bool",
-    "peak_elements": "(nums: list[int]) -> int",
-    "products_of_array_except_self": "(nums: list[int]) -> list[int]",
-    "sum_largest_contiguous_subarray": "(A: list[int]) -> int",
-    "three_sum": "(nums: list[int]) -> list[list[int]]",
-    "top_k_frequent_elements": "(nums: list[int], k: int) -> list[int]",
-    "trapping_rain_water": "(height: list[int]) -> int",
-    "two_sum": "(nums: list[int], target: int) -> list[int]",
-    "two_sum_2": "(numbers: list[int], target: int) -> list[int]",
-    "valid_anagram": "(s: str, t: str) -> bool",
-    "valid_palindrome": "(s: str) -> bool",
-    "valid_parentheses": "(s: str) -> bool",
-    "valid_sudoku": "(board: list[list[str]]) -> bool",
-}
+def _render_template(problem: sqlite3.Row) -> str:
+    """The blank-template stub for a problem, per its stored signature JSON:
+    a plain string renders one function; {"functions": {...}} renders several;
+    {"methods": {...}} renders a class."""
+    signature = loads_json(problem["signature"], None)
+    header = f'"""{problem["statement"]}"""\n\n\n'
+    if isinstance(signature, dict) and "methods" in signature:
+        lines = [
+            f"class {problem['function_name']}:",
+            "    def __init__(self):",
+            f"        {TEMPLATE_STUB_COMMENT}",
+            "        raise NotImplementedError",
+        ]
+        for name, sig in signature["methods"].items():
+            lines += [
+                "",
+                f"    def {name}{sig}:",
+                f"        {TEMPLATE_STUB_COMMENT}",
+                "        raise NotImplementedError",
+            ]
+        return header + "\n".join(lines) + "\n"
+    if isinstance(signature, dict) and "functions" in signature:
+        parts = []
+        for name, sig in signature["functions"].items():
+            parts.append(
+                f"def {name}{sig}:\n    {TEMPLATE_STUB_COMMENT}\n"
+                "    raise NotImplementedError"
+            )
+        return header + "\n\n".join(parts) + "\n"
+    return (
+        header
+        + f"def {problem['function_name']}{signature or ''}:\n"
+        f"    {TEMPLATE_STUB_COMMENT}\n    raise NotImplementedError\n"
+    )
 
 
 def _get_problem(conn: sqlite3.Connection, slug: str) -> sqlite3.Row | None:
@@ -99,8 +96,17 @@ def _build_cases(problem: sqlite3.Row, rng: random.Random) -> list[dict]:
     if generator:
         for i in range(GENERATED_CASES):
             n = rng.randint(0, 12)
-            args, expected = generator(n, rng)
-            cases.append({"args": args, "expected": expected, "label": f"generated {i + 1}"})
+            generated = generator(n, rng)
+            args, expected = generated[:2]
+            extras = generated[2] if len(generated) > 2 else {}
+            cases.append(
+                {
+                    "args": args,
+                    "expected": expected,
+                    "label": f"generated {i + 1}",
+                    **extras,
+                }
+            )
     return cases
 
 
@@ -173,13 +179,7 @@ def _write_template(problem: sqlite3.Row, force: bool = False) -> None:
     path = WORKBENCH_DIR / f"{problem['slug']}.py"
     if path.exists() and not force:
         return
-    path.write_text(
-        TEMPLATE_HEADER.format(
-            statement=problem["statement"],
-            function_name=problem["function_name"],
-            signature=SIGNATURES.get(problem["slug"], ""),
-        )
-    )
+    path.write_text(_render_template(problem))
 
 
 def _check(console: Console, problem: sqlite3.Row, code_path: Path) -> bool:

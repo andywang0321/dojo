@@ -66,21 +66,18 @@ Every problem has a **slug** (a stable machine identifier: the filename stem, e.
 
 Seeding is automatic: `dojo init` imports every `problems/**/*.py` file whose module docstring starts with `Title [Difficulty]` (pattern = parent directory, expected complexity parsed from the "You should aim for..." line).
 
-**Curated** is a stricter bar, and it is a manual, deliberate step — the ✓ column in `dojo list`. A problem is curated when it has everything `dojo day` needs:
+**Curated** is a stricter bar — the ✓ column in `dojo list`. A problem is curated when it has everything `dojo day` needs, all in `data/problem_overrides.json` + `judge/registry.py`:
 
-1. `function_name` + `visible_tests` in `data/problem_overrides.json` (the interface contract: how the judge calls your code, and the examples you can check against);
-2. a signature in `SIGNATURES` (`session/flow.py`) so the workbench template writes the right stub;
-3. a `@judge_case` generator + `@oracle` in `judge/registry.py` (randomized + oracle-checked cases) and, wherever measurement is meaningful, a `@profiler_input` (worst-case-shaped inputs).
+1. `function_name` + `visible_tests` + a template `signature` (the interface contract: how the judge calls your code, the examples you can check against, and the stub the workbench template writes — a string for one function, `{"functions": {...}}` for multi-function problems, `{"methods": {...}}` for class problems);
+2. a `@judge_case` generator + `@oracle` in `judge/registry.py` (randomized + oracle-checked cases; predicate-checked problems register a `@checker` instead) and, wherever measurement is meaningful, a `@profiler_input` (worst-case-shaped inputs).
 
-28 of 31 problems are curated this way. The judge's strict JSON equality means output contracts are pinned explicitly where prompts traditionally say "any order": group_anagrams, top_k_frequent, three_sum, generate_parentheses, array_intersection and k_closest_points return canonical sorted order; peak_elements returns the *leftmost* peak; correlation returns the coefficient *rounded to 4 decimals*; trees are passed as nested lists `[value, left, right]` (`None` for a missing child or an empty tree). `tests/test_registry.py` enforces the whole contract — every visible test and generated case must agree with its oracle, and representative oracles must survive the real judge subprocess.
+All 31 problems are curated. The judge's verdict is per-case, not global: strict JSON equality by default, plus `"compare": "sorted"` for any-order outputs (group_anagrams, three_sum, generate_parentheses, top_k_frequent, array_intersection, k_closest_points), `"compare": "approx:1e-4"` for correlation, `"predicate"` checkers for property-verified answers (encode/decode round-trip, any-valid-sample, any-peak), and `"ops"` sequences for class problems (min_stack). So prompts can honestly say "any order" — the machine tolerates it. Trees are passed as nested lists `[value, left, right]` (`None` for a missing child or an empty tree). `tests/test_registry.py` enforces the whole contract: every visible test and generated case must agree with its reference behavior, and representative references must survive the real judge subprocess; `tests/test_never_solve.py` pins the boundary that tutor code can never see judge or curator code.
 
-Three problems are deliberately **not** curated, because they don't fit the single-function, strict-equality protocol: `min_stack` (a class API), `encode_and_decode_strings` (two functions that must round-trip), and `generate_sample_to_target_sum` (any valid sample is correct — a predicate, not an equality). They'll need judge-protocol extensions (ops-list class mode, per-case function dispatch, predicate checkers) before they can be curated.
-
-There is no `dojo curate` command: curation can't be automated honestly, because the function signature, test cases, and brute-force oracle are problem-specific knowledge that only a human can supply (a future LeetCode fetcher can cover the statement part). The recipe above is the whole process — pick a slug, write the entries, re-run `dojo init`, and the ✓ appears.
+**`dojo curate`** automates the recipe: paste a problem statement (`dojo curate`, or `--text` / `--file`), and a curator agent — a separate agent from the tutor, structurally isolated so reference solutions never approach tutor context — generates the full artifact set, writes the seed file, registry entries, and overrides entry, and applies them **only if the verification gate (`tests/test_registry.py`) passes**; otherwise it rolls everything back. The proposal is kept in gitignored `data/curation/` for provenance. Human curation still works: the recipe is the same, the gate is the same.
 
 ## The grading engine
 
-**Judge.** Student code runs in an isolated subprocess with a JSON protocol: import the workbench file, call the problem's function, compare results by JSON equality, kill on timeout. Cases come from three layers: visible examples (curated in `data/problem_overrides.json`), randomized generated cases, and oracle-checked cases where a brute-force reference exists (`dojo/judge/registry.py`). Oracle code is correctness infrastructure only — never tutor context.
+**Judge.** Student code runs in an isolated subprocess with a JSON protocol: import the workbench file, call the problem's function, compare results with the case's verdict mode, kill on timeout. Verdicts: strict JSON equality (default), deep-sorted equality (`"compare": "sorted"`), float tolerance (`"approx"` / `"rounded"`), predicate checkers (round-trips, any-valid-sample, any-peak), and ops sequences for class problems. Cases come from three layers: visible examples (curated in `data/problem_overrides.json`), randomized generated cases, and oracle-checked cases where a brute-force reference exists (`dojo/judge/registry.py`). Oracle code is correctness infrastructure only — never tutor context.
 
 **Profiler.** For each of `[100, 200, 400, 800, 1600, 3200, 6400]`, your function runs on worst-case-shaped inputs (never inputs that let it early-exit — a random bracket string fails at the first unmatched closer and would make an O(n) solution *measure* as O(1)), 3 repeats per size, median per size, GC disabled around the timed call, `tracemalloc` for peak space. A least-squares fit over candidates {O(1), O(n), O(n log n), O(n²), O(n³)} picks the best R², with two safeguards:
 
@@ -96,7 +93,7 @@ Two build-time lessons are baked into the tests: CPython 3.12+ resizes unshared 
 ```
 src/dojo/
   cli.py            # init / list / day / warmup / check / profile /
-                    # history / show / progress
+                    # history / show / progress / curate
   config.py         # paths, env, backend selection (DEEPSEEK_API_KEY, DOJO_AI_BACKEND)
   editor.py         # $EDITOR launching: detached GUI, tmux/macOS windows for terminal editors
   db.py             # SQLite schema (users, problems, attempts, pattern_cards) +
@@ -104,15 +101,16 @@ src/dojo/
   bank.py           # seed importer: problems/**/*.py docstrings -> problems
   complexity.py     # O(...) normalization + mismatch logic
   scheduler.py      # FSRS-lite cards, due reviews, warm-up + new-problem picks
-  judge/            # registry (oracles, generators) + subprocess runner
+  judge/            # registry (oracles, generators, checkers) + subprocess runner
   profiler/         # fit (curve fitting) + measure (doubling sizes, tracemalloc)
   tutor/            # backend (mock | deepseek), prompts, hint ladder, reviewer
+  curator/          # AI curation pipeline (propose, validate, apply-with-rollback)
   session/          # workbench state + the day flow (solve & warmup modes)
 problems/           # the seed corpus: one problem per file, prompt in the module
                     # docstring, organized by pattern (arrays_and_hashing, stack,
                     # two_pointers, trees, heap, binary_search, greedy,
                     # dynamic_programming, math) — your original solving files
-data/problem_overrides.json   # curated metadata: function names + visible tests
+data/problem_overrides.json   # curated metadata: function names + visible tests + signatures
 tests/                        # offline; mock backend
 workbench/                    # scratch space (gitignored); attempt code lives in the DB
 Makefile                      # sandbox-friendly entry points (workspace-local uv cache)
@@ -128,6 +126,7 @@ uv run dojo list --user andy     # catalog with solved status
 uv run dojo day --user andy      # warm-ups (if due) + scheduler-picked problem
 uv run dojo history              # your attempts, newest first
 uv run dojo show 12              # full detail of attempt 12 (--code for just the code)
+uv run dojo curate --text "..."  # AI-curate a new problem from a statement
 ```
 
 **The uv cache note.** uv writes its package cache to `~/.cache/uv` by default, which is outside this repo. If you run inside a sandbox (CI, an agent harness, a container), use `make sync` / `make test` — the Makefile sets `UV_CACHE_DIR=.uv-cache`, keeping everything inside the workspace so no permission escalation is ever needed.
@@ -139,11 +138,13 @@ Commands that need a user resolve `--user` against the DB's single existing user
 ## Data model
 
 - `users(name)` — one row per person; all data is per-user from day one.
-- `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests)` — the catalog. `function_name` + `visible_tests` = "curated", i.e. ready for `dojo day`.
+- `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests, signature)` — the catalog. `function_name` + `visible_tests` + `signature` = "curated", i.e. ready for `dojo day`. `signature` is a def string, `{"functions": {...}}` for multi-function problems, or `{"methods": {...}}` for class problems.
 - `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, timings)` — the learner model.
 - `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern).
 
 `data/dojo.db` and `workbench/` are gitignored: they're personal state, not source.
+
+**A note on copyright.** dojo is a private study tool for two people. Problem statements and test data in the bank draw on public sources (LeetCode, *Ace the Data Science Interview*, the users' own notes) and stay in this private repository — don't publish the bank or its data.
 
 ## Testing
 
@@ -151,21 +152,20 @@ Commands that need a user resolve `--user` against the DB's single existing user
 uv run pytest
 ```
 
-63 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout, the curation contract (overrides ↔ signatures ↔ oracles ↔ generated cases, plus oracle wrappers through the real judge), hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
+70 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout and every verdict mode, the curation contract (overrides ↔ signatures ↔ oracles ↔ checkers ↔ generated cases, plus references through the real judge), the never-solve boundary (tutor never sees judge or curator code), the curator pipeline (validation and apply-with-rollback), hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
 
 ## Roadmap
 
-- **v0.3 — the updating bank:** LeetCode GraphQL fetcher with a private, gitignored local cache. Copyright stance: LeetCode problem text and test data are proprietary — fetch on demand for personal use, never commit a scraped corpus to the repo. Curate more problems (signatures move into `problem_overrides.json`).
+- **v0.3 — the updating bank:** LeetCode GraphQL fetcher feeding fresh statements into `dojo curate` (or a human). Personal, private use: fetched statements and test data live in the bank as normal — see the copyright note.
 - **v0.4 — deeper grading:** static analysis (radon cyclomatic complexity, ruff), the hinted-solution penalty, review score trends per pattern.
 - **Later:** TUI polish (Textual), two-machine sync, warm-up problem variants. A web UI only if the CLI loop proves insufficient — never first.
 
 ## Known limitations (v0)
 
-- 28 of 31 problems are curated; `min_stack`, `encode_and_decode_strings`, and `generate_sample_to_target_sum` are skipped until the judge protocol grows (see "The problem bank and curation").
-- `generate_parentheses` has no profiler input (its output is exponential, so polynomial fitting would misreport the algorithm); `peak_elements` and `valid_sudoku` have none either (O(log n) is flat at probe sizes, and a sudoku board is fixed 9×9) — solving them skips the measurement step.
+- `generate_parentheses` has no profiler input (its output is exponential, so polynomial fitting would misreport the algorithm); `peak_elements`, `min_stack` and `valid_sudoku` have none either (O(log n) is flat at probe sizes, O(1) per op is flat, and a sudoku board is fixed 9×9) — solving them skips the measurement step.
 - A warm-up card needs at least one *solved* problem in its pattern to re-solve; cards without one are deferred a day.
 - Same-day reviews yield no stability growth (R ≈ 1 at t ≈ 0) — schedule your warm-ups a day or more after solving, which is exactly what the due dates do.
 - Terminal editors detach only inside tmux or on macOS (Terminal/iTerm via osascript); elsewhere `open` falls back to blocking with a warning. Unrecognized editors are treated as blocking — add them to `GUI_EDITORS` in `src/dojo/editor.py` if they can detach.
 - The profiler models polynomial-ish growth only; exponential/constant-factor pathologies show as low-R² reports.
-- The judge compares by strict JSON equality (float `1.0` vs `1` mismatch); oracle-generated cases exist only where a brute-force reference is registered.
+- The judge compares by strict JSON equality by default (float `1.0` vs `1` mismatch); per-case comparators (`sorted` / `approx` / `rounded` / `predicate` / `ops`) handle any-order outputs, floats, property checks, and class APIs.
 - Session duration is measured from session start, not across editor time.

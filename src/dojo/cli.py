@@ -9,12 +9,14 @@
   dojo history [--user NAME]    attempts, newest first (see `show <id>`)
   dojo show ATTEMPT_ID          full detail of one attempt (hints, code, review)
   dojo progress [--user NAME]   per-pattern proficiency + card schedule
+  dojo curate [--text S|--file] AI-curate a new problem from a statement
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
@@ -358,6 +360,54 @@ def _cmd_show(args) -> int:
     return 0
 
 
+def _cmd_curate(args) -> int:
+    import json
+
+    from dojo.config import REPO_ROOT
+    from dojo.curator import CuratorError, apply, propose
+    from dojo.tutor import get_backend
+
+    console = Console()
+    if args.file:
+        statement = Path(args.file).read_text()
+    elif args.text:
+        statement = args.text
+    else:
+        console.print("[dim]Paste the problem statement, then Ctrl-D:[/dim]")
+        statement = sys.stdin.read()
+    if not statement.strip():
+        console.print("[red]No statement provided.[/red]")
+        return 1
+    try:
+        backend = get_backend()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 1
+    try:
+        proposal = propose(backend, statement)
+    except CuratorError as exc:
+        console.print(f"[red]Curation proposal rejected: {exc}[/red]")
+        return 1
+    # Provenance record (gitignored scratch).
+    proposal_dir = REPO_ROOT / "data" / "curation"
+    proposal_dir.mkdir(parents=True, exist_ok=True)
+    (proposal_dir / f"{proposal['slug']}.proposal.json").write_text(
+        json.dumps(proposal, indent=2)
+    )
+    try:
+        summary = apply(proposal)
+    except CuratorError as exc:
+        console.print(f"[red]Curation failed and was rolled back: {exc}[/red]")
+        return 1
+    console.print(
+        f"[green]Curated {summary['slug']} "
+        f"({summary['pattern']}, {summary['difficulty']}).[/green]\n"
+        f"Wrote {summary['problem_file']}, registry entries, and the overrides "
+        f"entry; verification gate passed.\n[dim]{summary['verification']}[/dim]"
+    )
+    return 0
+
+
 def _cmd_progress(args) -> int:
     console = Console()
     with connect(DB_PATH) as conn:
@@ -466,8 +516,15 @@ def main(argv: list[str] | None = None) -> int:
     p_show.set_defaults(func=_cmd_show)
 
     p_progress = sub.add_parser("progress", help="per-pattern proficiency + card schedule")
-    p_progress.add_argument("--user", help="whose progress (default: 'default')")
+    p_progress.add_argument("--user", help="whose progress (default: the sole DB user)")
     p_progress.set_defaults(func=_cmd_progress)
+
+    p_curate = sub.add_parser("curate", help="AI-curate a new problem from a statement")
+    p_curate.add_argument(
+        "--text", help="the problem statement (alternative: stdin or --file)"
+    )
+    p_curate.add_argument("--file", help="read the statement from a file")
+    p_curate.set_defaults(func=_cmd_curate)
 
     args = parser.parse_args(argv)
     try:

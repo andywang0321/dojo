@@ -1,15 +1,17 @@
 {
   "array_intersection": {
     "function_name": "intersection",
+    "signature": "(A: list[int], B: list[int]) -> list[int]",
     "visible_tests": [
-      {"args": [[1, 2, 3, 4, 5], [0, 1, 3, 7]], "expected": [1, 3]},
-      {"args": [[1, 2, 3, 4, 5], [6, 7]], "expected": []},
-      {"args": [[], [1]], "expected": []},
-      {"args": [[1, 1, 2], [1, 1, 3]], "expected": [1]}
+      {"args": [[1, 2, 3, 4, 5], [0, 1, 3, 7]], "expected": [1, 3], "compare": "sorted"},
+      {"args": [[1, 2, 3, 4, 5], [6, 7]], "expected": [], "compare": "sorted"},
+      {"args": [[], [1]], "expected": [], "compare": "sorted"},
+      {"args": [[1, 1, 2], [1, 1, 3]], "expected": [1], "compare": "sorted"}
     ]
   },
   "binary_tree_diameter": {
     "function_name": "diameter",
+    "signature": "(root: list | None) -> int",
     "visible_tests": [
       {"args": [[1, null, null]], "expected": 0},
       {"args": [[0, [1, null, [2, null, null]], null]], "expected": 2},
@@ -19,6 +21,7 @@
   },
   "car_fleet": {
     "function_name": "car_fleet",
+    "signature": "(target: int, position: list[int], speed: list[int]) -> int",
     "visible_tests": [
       {"args": [10, [1, 4], [3, 2]], "expected": 1},
       {"args": [10, [4, 1, 0, 7], [2, 2, 1, 1]], "expected": 3},
@@ -27,6 +30,7 @@
   },
   "container_with_most_water": {
     "function_name": "max_area",
+    "signature": "(height: list[int]) -> int",
     "visible_tests": [
       {"args": [[1, 7, 2, 5, 4, 7, 3, 6]], "expected": 36},
       {"args": [[2, 2, 2]], "expected": 4},
@@ -35,6 +39,7 @@
   },
   "contains_duplicate": {
     "function_name": "contains_duplicate",
+    "signature": "(nums: list[int]) -> bool",
     "visible_tests": [
       {"args": [[1, 2, 3, 3]], "expected": true},
       {"args": [[1, 2, 3, 4]], "expected": false},
@@ -44,22 +49,41 @@
   },
   "correlation": {
     "function_name": "correlation",
+    "signature": "(X: list, Y: list) -> float",
     "visible_tests": [
-      {"args": [[1, 2, 3, 4, 5], [3, 2, 5, 9, 6]], "expected": 0.7506},
-      {"args": [[1, 2, 3], [1, 2, 3]], "expected": 1.0},
-      {"args": [[1, 2, 3], [3, 2, 1]], "expected": -1.0}
+      {"args": [[1, 2, 3, 4, 5], [3, 2, 5, 9, 6]], "expected": 0.7506, "compare": "approx:0.0001"},
+      {"args": [[1, 2, 3], [1, 2, 3]], "expected": 1.0, "compare": "approx:0.0001"},
+      {"args": [[1, 2, 3], [3, 2, 1]], "expected": -1.0, "compare": "approx:0.0001"}
     ]
   },
   "daily_temperatures": {
     "function_name": "daily_temperatures",
+    "signature": "(temperatures: list[int]) -> list[int]",
     "visible_tests": [
       {"args": [[30, 38, 30, 36, 35, 40, 28]], "expected": [1, 4, 1, 2, 1, 0, 0]},
       {"args": [[22, 21, 20]], "expected": [0, 0, 0]},
       {"args": [[40, 30, 20, 35]], "expected": [0, 2, 1, 0]}
     ]
   },
+  "encode_and_decode_strings": {
+    "function_name": "encode",
+    "signature": {
+      "functions": {
+        "encode": "(strs: list[str]) -> str",
+        "decode": "(s: str) -> list[str]"
+      }
+    },
+    "visible_tests": [
+      {"args": [["neet", "code", "love", "you"]], "predicate": "encode_decode_roundtrip", "expected": true},
+      {"args": [["we", "say", ":", "yes"]], "predicate": "encode_decode_roundtrip", "expected": true},
+      {"args": [[]], "predicate": "encode_decode_roundtrip", "expected": true},
+      {"args": [[""]], "predicate": "encode_decode_roundtrip", "expected": true},
+      {"args": [["", ""]], "predicate": "encode_decode_roundtrip", "expected": true}
+    ]
+  },
   "evaluate_reverse_polish_notation": {
     "function_name": "eval_rpn",
+    "signature": "(tokens: list[str]) -> int",
     "visible_tests": [
       {"args": [["1", "2", "+", "3", "*", "4", "-"]], "expected": 5},
       {"args": [["2", "1", "+", "3", "*"]], "expected": 9},
@@ -70,30 +94,43 @@
   },
   "generate_parentheses": {
     "function_name": "generate_parentheses",
+    "signature": "(n: int) -> list[str]",
     "visible_tests": [
-      {"args": [1], "expected": ["()"]},
-      {"args": [2], "expected": ["(())", "()()"]},
-      {"args": [3], "expected": ["((()))", "(()())", "(())()", "()(())", "()()()"]}
+      {"args": [1], "expected": ["()"], "compare": "sorted"},
+      {"args": [2], "expected": ["(())", "()()"], "compare": "sorted"},
+      {"args": [3], "expected": ["((()))", "(()())", "(())()", "()(())", "()()()"], "compare": "sorted"}
+    ]
+  },
+  "generate_sample_to_target_sum": {
+    "function_name": "generate_sample",
+    "signature": "(n: int, sigma: float, target: int) -> list",
+    "visible_tests": [
+      {"args": [5, 3.6, 6], "predicate": "sample_valid", "expected": true},
+      {"args": [4, 2.0, 10], "predicate": "sample_valid", "expected": true},
+      {"args": [1, 0.5, -7], "predicate": "sample_valid", "expected": true}
     ]
   },
   "group_anagrams": {
     "function_name": "group_anagrams",
+    "signature": "(strs: list[str]) -> list[list[str]]",
     "visible_tests": [
-      {"args": [["act", "pots", "tops", "cat", "stop", "hat"]], "expected": [["act", "cat"], ["hat"], ["pots", "stop", "tops"]]},
-      {"args": [["x"]], "expected": [["x"]]},
-      {"args": [[""]], "expected": [[""]]}
+      {"args": [["act", "pots", "tops", "cat", "stop", "hat"]], "expected": [["act", "cat"], ["hat"], ["pots", "stop", "tops"]], "compare": "sorted"},
+      {"args": [["x"]], "expected": [["x"]], "compare": "sorted"},
+      {"args": [[""]], "expected": [[""]], "compare": "sorted"}
     ]
   },
   "k_closest_points": {
     "function_name": "k_closest",
+    "signature": "(k: int, points: list[list[int]]) -> list[list[int]]",
     "visible_tests": [
-      {"args": [3, [[2, -1], [3, 2], [4, 1], [-1, -1], [-2, 2]]], "expected": [[-1, -1], [2, -1], [-2, 2]]},
-      {"args": [1, [[1, 1], [0, 0]]], "expected": [[0, 0]]},
-      {"args": [2, [[3, 3], [5, -1], [-2, 4]]], "expected": [[3, 3], [-2, 4]]}
+      {"args": [3, [[2, -1], [3, 2], [4, 1], [-1, -1], [-2, 2]]], "expected": [[-1, -1], [2, -1], [-2, 2]], "compare": "sorted"},
+      {"args": [1, [[1, 1], [0, 0]]], "expected": [[0, 0]], "compare": "sorted"},
+      {"args": [2, [[3, 3], [5, -1], [-2, 4]]], "expected": [[3, 3], [-2, 4]], "compare": "sorted"}
     ]
   },
   "k_smallest_elem_matrix": {
     "function_name": "k_smallest",
+    "signature": "(k: int, matrix: list[list[int]]) -> int",
     "visible_tests": [
       {"args": [4, [[1, 4, 7], [3, 5, 9], [6, 8, 11]]], "expected": 5},
       {"args": [8, [[1, 4, 7], [3, 5, 9], [6, 8, 11]]], "expected": 9},
@@ -102,6 +139,7 @@
   },
   "largest_rectangle_in_histogram": {
     "function_name": "largest_rectangle",
+    "signature": "(heights: list[int]) -> int",
     "visible_tests": [
       {"args": [[7, 1, 7, 2, 2, 4]], "expected": 8},
       {"args": [[1, 3, 7]], "expected": 7},
@@ -111,6 +149,7 @@
   },
   "longest_consecutive_sequence": {
     "function_name": "longest_seqlen",
+    "signature": "(nums: list[int]) -> int",
     "visible_tests": [
       {"args": [[2, 20, 4, 10, 3, 4, 5]], "expected": 4},
       {"args": [[0, 3, 2, 5, 4, 6, 1, 1]], "expected": 7},
@@ -120,6 +159,7 @@
   },
   "max_prod_3_nums": {
     "function_name": "max_tri_prod",
+    "signature": "(A: list[int]) -> int",
     "visible_tests": [
       {"args": [[1, 3, 4, 5]], "expected": 60},
       {"args": [[-2, -4, 5, 3]], "expected": 40},
@@ -127,8 +167,34 @@
       {"args": [[0, 0, 0]], "expected": 0}
     ]
   },
+  "min_stack": {
+    "function_name": "MinStack",
+    "signature": {
+      "methods": {
+        "push": "(self, val: int) -> None",
+        "pop": "(self) -> None",
+        "top": "(self) -> int",
+        "getMin": "(self) -> int"
+      }
+    },
+    "visible_tests": [
+      {
+        "ops": [["push", 1], ["push", 2], ["push", 0], ["getMin"], ["pop"], ["top"], ["getMin"]],
+        "expected": [null, null, null, 0, null, 2, 1]
+      },
+      {
+        "ops": [["push", -2], ["push", 0], ["push", -3], ["getMin"], ["pop"], ["top"], ["getMin"]],
+        "expected": [null, null, null, -3, null, 0, -2]
+      },
+      {
+        "ops": [["push", 5], ["top"], ["getMin"], ["pop"]],
+        "expected": [null, 5, 5, null]
+      }
+    ]
+  },
   "mirror_image_binary_tree": {
     "function_name": "is_mirror",
+    "signature": "(root: list | None) -> bool",
     "visible_tests": [
       {"args": [null], "expected": true},
       {"args": [[1, null, null]], "expected": true},
@@ -139,8 +205,9 @@
   },
   "peak_elements": {
     "function_name": "find_a_peak",
+    "signature": "(nums: list[int]) -> int",
     "visible_tests": [
-      {"args": [[3, 5, 2, 4, 1]], "expected": 1},
+      {"args": [[3, 5, 2, 4, 1]], "predicate": "is_peak", "expected": true},
       {"args": [[4, 3, 2, 1]], "expected": 0},
       {"args": [[1, 2, 3, 4]], "expected": 3},
       {"args": [[1]], "expected": 0}
@@ -148,6 +215,7 @@
   },
   "products_of_array_except_self": {
     "function_name": "prod_except_self",
+    "signature": "(nums: list[int]) -> list[int]",
     "visible_tests": [
       {"args": [[1, 2, 4, 6]], "expected": [48, 24, 12, 8]},
       {"args": [[-1, 0, 1, 2, 3]], "expected": [0, -6, 0, 0, 0]},
@@ -156,6 +224,7 @@
   },
   "sum_largest_contiguous_subarray": {
     "function_name": "sum_largest_subarray",
+    "signature": "(A: list[int]) -> int",
     "visible_tests": [
       {"args": [[-1, -3, 5, -4, 3, -6, 9, 2]], "expected": 11},
       {"args": [[-1, -5, -3, -7]], "expected": 0},
@@ -165,23 +234,26 @@
   },
   "three_sum": {
     "function_name": "three_sum",
+    "signature": "(nums: list[int]) -> list[list[int]]",
     "visible_tests": [
-      {"args": [[-1, 0, 1, 2, -1, -4]], "expected": [[-1, -1, 2], [-1, 0, 1]]},
-      {"args": [[0, 1, 1]], "expected": []},
-      {"args": [[0, 0, 0]], "expected": [[0, 0, 0]]}
+      {"args": [[-1, 0, 1, 2, -1, -4]], "expected": [[-1, -1, 2], [-1, 0, 1]], "compare": "sorted"},
+      {"args": [[0, 1, 1]], "expected": [], "compare": "sorted"},
+      {"args": [[0, 0, 0]], "expected": [[0, 0, 0]], "compare": "sorted"}
     ]
   },
   "top_k_frequent_elements": {
     "function_name": "top_k_freq",
+    "signature": "(nums: list[int], k: int) -> list[int]",
     "visible_tests": [
-      {"args": [[1, 2, 2, 3, 3, 3], 2], "expected": [3, 2]},
-      {"args": [[7, 7], 1], "expected": [7]},
-      {"args": [[8], 1], "expected": [8]},
-      {"args": [[1, 1, 1, 2, 2, 3], 2], "expected": [1, 2]}
+      {"args": [[1, 2, 2, 3, 3, 3], 2], "expected": [3, 2], "compare": "sorted"},
+      {"args": [[7, 7], 1], "expected": [7], "compare": "sorted"},
+      {"args": [[8], 1], "expected": [8], "compare": "sorted"},
+      {"args": [[1, 1, 1, 2, 2, 3], 2], "expected": [1, 2], "compare": "sorted"}
     ]
   },
   "trapping_rain_water": {
     "function_name": "trap",
+    "signature": "(height: list[int]) -> int",
     "visible_tests": [
       {"args": [[0, 2, 0, 3, 1, 0, 1, 3, 2, 1]], "expected": 9},
       {"args": [[4, 2, 0, 3, 2, 5]], "expected": 9},
@@ -190,6 +262,7 @@
   },
   "two_sum": {
     "function_name": "twosum",
+    "signature": "(nums: list[int], target: int) -> list[int]",
     "visible_tests": [
       {"args": [[3, 4, 5, 6], 7], "expected": [0, 1]},
       {"args": [[4, 5, 6], 10], "expected": [0, 2]},
@@ -199,6 +272,7 @@
   },
   "two_sum_2": {
     "function_name": "two_sum_2",
+    "signature": "(numbers: list[int], target: int) -> list[int]",
     "visible_tests": [
       {"args": [[1, 2, 3, 4], 3], "expected": [1, 2]},
       {"args": [[2, 7, 11, 15], 9], "expected": [1, 2]},
@@ -207,6 +281,7 @@
   },
   "valid_anagram": {
     "function_name": "valid_anagram",
+    "signature": "(s: str, t: str) -> bool",
     "visible_tests": [
       {"args": ["racecar", "carrace"], "expected": true},
       {"args": ["jar", "jam"], "expected": false},
@@ -216,6 +291,7 @@
   },
   "valid_palindrome": {
     "function_name": "is_palindrome",
+    "signature": "(s: str) -> bool",
     "visible_tests": [
       {"args": ["Was it a car or a cat I saw?"], "expected": true},
       {"args": ["tab a cat"], "expected": false},
@@ -226,6 +302,7 @@
   },
   "valid_parentheses": {
     "function_name": "is_valid",
+    "signature": "(s: str) -> bool",
     "visible_tests": [
       {"args": ["[]"], "expected": true},
       {"args": ["([{}])"], "expected": true},
@@ -241,6 +318,7 @@
   },
   "valid_sudoku": {
     "function_name": "valid_sudoku",
+    "signature": "(board: list[list[str]]) -> bool",
     "visible_tests": [
       {
         "args": [[

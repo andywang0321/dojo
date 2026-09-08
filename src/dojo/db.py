@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS problems (
     expected_space  TEXT,
     source          TEXT DEFAULT 'seed',
     visible_tests   TEXT,  -- JSON: [{"args": [...], "expected": ...}]
+    signature       TEXT,  -- JSON: "def-sig" | {"functions": {...}} | {"methods": {...}}
     created_at      TEXT NOT NULL
 );
 
@@ -89,11 +90,14 @@ def migrate(conn: sqlite3.Connection) -> None:
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'attempts'"
     ).fetchone():
         return  # fresh DB; SCHEMA will create everything
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(attempts)")}
-    if "kind" not in cols:
+    attempts_cols = {r["name"] for r in conn.execute("PRAGMA table_info(attempts)")}
+    if "kind" not in attempts_cols:
         conn.execute(
             "ALTER TABLE attempts ADD COLUMN kind TEXT NOT NULL DEFAULT 'solve'"
         )
+    problems_cols = {r["name"] for r in conn.execute("PRAGMA table_info(problems)")}
+    if "signature" not in problems_cols:
+        conn.execute("ALTER TABLE problems ADD COLUMN signature TEXT")
     conn.commit()
 
 

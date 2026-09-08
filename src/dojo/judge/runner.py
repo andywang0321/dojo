@@ -1,4 +1,19 @@
-"""Subprocess-isolated execution of student code against test cases."""
+"""Subprocess-isolated execution of student code against test cases.
+
+Verdict model: case dicts carry an optional ``compare`` mode; the default is
+strict JSON equality (no leniency — a non-serializable return fails the
+case). Extra modes, per case:
+
+- ``"sorted"``    — deep-sort both sides before JSON equality (any order).
+- ``"rounded:n"`` — round floats to n decimals before equality.
+- ``"approx:t"``  — recursive absolute tolerance t for floats.
+- ``"predicate"`` — case key names a checker in ``judge/registry.CHECKERS``
+  that receives (module, got, args) and returns a boolean (round-trip
+  tests, property checks like "any valid sample").
+- ``"ops"``       — class problems: case has ``ops`` (a list of
+  [method, *args]) and ``expected`` (per-op outputs); the harness
+  instantiates ``function_name`` and replays the sequence.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +31,54 @@ import json
 import sys
 import time
 
+try:
+    from dojo.judge.registry import CHECKERS
+except ImportError:  # pragma: no cover - dojo is always importable here
+    CHECKERS = {}
+
+
+def canonical(value):
+    """Deep-sort lists (and dicts by key) for order-insensitive compare."""
+    if isinstance(value, list):
+        key = lambda v: json.dumps(v, sort_keys=True, default=str)
+        return sorted((canonical(v) for v in value), key=key)
+    if isinstance(value, dict):
+        key = lambda kv: json.dumps(kv[0], sort_keys=True, default=str)
+        return [(k, canonical(v)) for k, v in sorted(value.items(), key=key)]
+    return value
+
+
+def rounded(value, ndigits):
+    if isinstance(value, float):
+        return round(value, ndigits)
+    if isinstance(value, list):
+        return [rounded(v, ndigits) for v in value]
+    if isinstance(value, dict):
+        return {k: rounded(v, ndigits) for k, v in value.items()}
+    return value
+
+
+def approx_equal(a, b, tol):
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(a - b) <= tol if isinstance(a, float) or isinstance(b, float) else a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(approx_equal(x, y, tol) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(approx_equal(a[k], b[k], tol) for k in a)
+    return a == b
+
+
+def check_equal(got, expected, mode):
+    if mode.startswith("approx"):
+        tol = float(mode.split(":", 1)[1]) if ":" in mode else 1e-9
+        return approx_equal(got, expected, tol)
+    if mode.startswith("rounded"):
+        ndigits = int(mode.split(":", 1)[1]) if ":" in mode else 4
+        got, expected = rounded(got, ndigits), rounded(expected, ndigits)
+    elif mode == "sorted":
+        got, expected = canonical(got), canonical(expected)
+    return json.dumps(got, sort_keys=True) == json.dumps(expected, sort_keys=True)
+
 
 def main():
     function_name = sys.argv[1]
@@ -24,21 +87,25 @@ def main():
     spec = importlib.util.spec_from_file_location("solution", "solution.py")
     solution = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(solution)
-    fn = getattr(solution, function_name)
     results = []
     for i, case in enumerate(cases):
         label = case.get("label", f"case {i}")
+        mode = case.get("compare", "strict")
         expected = case["expected"]
         t0 = time.perf_counter()
         try:
-            got = fn(*case["args"])
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            # Strict JSON equality, as documented: no default=str leniency.
-            # A non-JSON-serializable return value fails this case (the
-            # TypeError lands in the except branch below as the case error).
-            passed = json.dumps(got, sort_keys=True) == json.dumps(
-                expected, sort_keys=True
-            )
+            if "ops" in case:
+                obj = getattr(solution, function_name)(*case.get("ctor_args", []))
+                got = [getattr(obj, method)(*args) for method, *args in case["ops"]]
+            else:
+                fn = getattr(solution, function_name)
+                got = fn(*case["args"])
+            if case.get("predicate"):
+                passed = CHECKERS[case["predicate"]](solution, got, case["args"])
+            elif "ops" in case:
+                passed = check_equal(got, expected, mode)
+            else:
+                passed = check_equal(got, expected, mode)
             results.append(
                 {
                     "label": label,
@@ -46,7 +113,7 @@ def main():
                     "expected": expected,
                     "got": got,
                     "error": None,
-                    "elapsed_ms": elapsed_ms,
+                    "elapsed_ms": (time.perf_counter() - t0) * 1000,
                 }
             )
         except Exception as exc:  # noqa: BLE001 - the harness must survive anything

@@ -19,3 +19,6 @@ workbench/
 
 # Sandbox-local uv cache (see Makefile)
 .uv-cache/
+
+# Curator provenance (scratch proposals)
+data/curation/

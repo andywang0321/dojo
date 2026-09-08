@@ -41,6 +41,7 @@ class ProblemOverride:
     slug: str
     function_name: str
     visible_tests: list[dict] = field(default_factory=list)
+    signature: str | dict | None = None
 
 
 def _normalize_complexity(raw: str) -> str:
@@ -116,6 +117,7 @@ def load_overrides(path: Path = PROBLEM_OVERRIDES) -> dict[str, ProblemOverride]
             slug=slug,
             function_name=entry["function_name"],
             visible_tests=entry.get("visible_tests", []),
+            signature=entry.get("signature"),
         )
         for slug, entry in raw.items()
     }
@@ -130,8 +132,8 @@ def seed_problems(conn: sqlite3.Connection, root: Path = PROBLEMS_DIR) -> int:
             """
             INSERT INTO problems
                 (slug, title, difficulty, pattern, statement, function_name,
-                 expected_time, expected_space, visible_tests, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 expected_time, expected_space, visible_tests, signature, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (slug) DO UPDATE SET
                 title = excluded.title,
                 difficulty = excluded.difficulty,
@@ -140,7 +142,8 @@ def seed_problems(conn: sqlite3.Connection, root: Path = PROBLEMS_DIR) -> int:
                 function_name = excluded.function_name,
                 expected_time = excluded.expected_time,
                 expected_space = excluded.expected_space,
-                visible_tests = excluded.visible_tests
+                visible_tests = excluded.visible_tests,
+                signature = excluded.signature
             """,
             (
                 problem.slug,
@@ -152,6 +155,7 @@ def seed_problems(conn: sqlite3.Connection, root: Path = PROBLEMS_DIR) -> int:
                 problem.expected_time,
                 problem.expected_space,
                 dumps_json(ov.visible_tests) if ov else None,
+                dumps_json(ov.signature) if ov and ov.signature else None,
                 now(),
             ),
         )

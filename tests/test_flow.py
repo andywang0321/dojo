@@ -34,8 +34,8 @@ def _seed_problem(conn):
         """
         INSERT INTO problems
             (slug, title, difficulty, pattern, statement, function_name,
-             expected_time, expected_space, visible_tests, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             expected_time, expected_space, visible_tests, signature, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "valid_parentheses",
@@ -52,6 +52,7 @@ def _seed_problem(conn):
                     {"args": ["(]"], "expected": False},
                 ]
             ),
+            dumps_json("(s: str) -> bool"),
             now(),
         ),
     )

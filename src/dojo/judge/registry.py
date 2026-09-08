@@ -27,7 +27,15 @@ from typing import Any, Callable
 ORACLES: dict[str, Callable[..., Any]] = {}
 
 #: slug -> (n, rng) -> (args, expected): small random correctness cases.
-JUDGE_CASES: dict[str, Callable[[int, random.Random], tuple[list, Any]]] = {}
+#: Generators may also return a third element, a dict of case extras
+#: ({"compare": ...} / {"predicate": ...} / {"ops": ...}).
+JUDGE_CASES: dict[str, Callable[[int, random.Random], tuple[list, Any, ...]]] = {}
+
+#: name -> (module, got, args) -> bool: predicate checkers for cases tagged
+#: {"predicate": name}. Property-based verdicts the fixed comparators can't
+#: express (round-trips, "any valid sample", "any peak"). Quarantine zone —
+#: never tutor context.
+CHECKERS: dict[str, Callable[..., bool]] = {}
 
 #: slug -> (n, rng) -> args: inputs of size ~n for complexity measurement.
 #: These must exercise worst-case-ish paths, not early exits — a random
@@ -55,6 +63,14 @@ def judge_case(slug: str) -> Callable:
 def profiler_input(slug: str) -> Callable:
     def register(fn) -> Callable:
         PROFILER_INPUTS[slug] = fn
+        return fn
+
+    return register
+
+
+def checker(name: str) -> Callable:
+    def register(fn) -> Callable:
+        CHECKERS[name] = fn
         return fn
 
     return register
@@ -109,11 +125,11 @@ def _intersection_oracle(A: list[int], B: list[int]) -> list[int]:
 
 
 @judge_case("array_intersection")
-def _intersection_case(n: int, rng: random.Random) -> tuple[list, list]:
+def _intersection_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
     n = max(0, min(n, 12))
     A = [rng.randint(-5, 5) for _ in range(rng.randint(0, n))]
     B = [rng.randint(-5, 5) for _ in range(rng.randint(0, n))]
-    return [A, B], _intersection_oracle(A, B)
+    return [A, B], _intersection_oracle(A, B), {"compare": "sorted"}
 
 
 @profiler_input("array_intersection")
@@ -151,10 +167,10 @@ def _group_anagrams_oracle(strs: list[str]) -> list[list[str]]:
 
 
 @judge_case("group_anagrams")
-def _group_anagrams_case(n: int, rng: random.Random) -> tuple[list, list]:
+def _group_anagrams_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
     n = max(0, min(n, 12))
     strs = ["".join(rng.choice("ab") for _ in range(rng.randint(1, 4))) for _ in range(n)]
-    return [strs], _group_anagrams_oracle(strs)
+    return [strs], _group_anagrams_oracle(strs), {"compare": "sorted"}
 
 
 @profiler_input("group_anagrams")
@@ -224,11 +240,11 @@ def _top_k_freq_oracle(nums: list[int], k: int) -> list[int]:
 
 
 @judge_case("top_k_frequent_elements")
-def _top_k_freq_case(n: int, rng: random.Random) -> tuple[list, list]:
+def _top_k_freq_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
     n = max(1, min(n, 12))
     nums = [rng.randint(-5, 5) for _ in range(n)]
     k = rng.randint(1, len(set(nums)))
-    return [nums, k], _top_k_freq_oracle(nums, k)
+    return [nums, k], _top_k_freq_oracle(nums, k), {"compare": "sorted"}
 
 
 @profiler_input("top_k_frequent_elements")
@@ -480,9 +496,9 @@ def _generate_parentheses_oracle(n: int) -> list[str]:
 
 
 @judge_case("generate_parentheses")
-def _generate_parentheses_case(n: int, rng: random.Random) -> tuple[list, list]:
+def _generate_parentheses_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
     n = max(1, min(n, 7))
-    return [n], _generate_parentheses_oracle(n)
+    return [n], _generate_parentheses_oracle(n), {"compare": "sorted"}
 # No profiler input: the output itself is exponential, so polynomial growth
 # fitting would misreport the algorithm.
 
@@ -590,7 +606,7 @@ def _three_sum_oracle(nums: list[int]) -> list[list[int]]:
 
 
 @judge_case("three_sum")
-def _three_sum_case(n: int, rng: random.Random) -> tuple[list, list]:
+def _three_sum_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
     n = max(3, min(n, 12))
     nums = [rng.randint(-8, 8) for _ in range(n)]
     if rng.random() < 0.6:
@@ -598,7 +614,7 @@ def _three_sum_case(n: int, rng: random.Random) -> tuple[list, list]:
         b = rng.randint(-6, 6)
         nums.extend([a, b, -(a + b)])  # embed a guaranteed zero-sum triple
         rng.shuffle(nums)
-    return [nums], _three_sum_oracle(nums)
+    return [nums], _three_sum_oracle(nums), {"compare": "sorted"}
 
 
 @profiler_input("three_sum")
@@ -694,11 +710,11 @@ def _k_closest_oracle(k: int, points: list[list[int]]) -> list[list[int]]:
 
 
 @judge_case("k_closest_points")
-def _k_closest_case(n: int, rng: random.Random) -> tuple[list, list]:
+def _k_closest_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
     n = max(1, min(n, 12))
     points = [[rng.randint(-10, 10), rng.randint(-10, 10)] for _ in range(n)]
     k = rng.randint(1, n)
-    return [k, points], _k_closest_oracle(k, points)
+    return [k, points], _k_closest_oracle(k, points), {"compare": "sorted"}
 
 
 @profiler_input("k_closest_points")
@@ -744,7 +760,7 @@ def _correlation_oracle(X: list, Y: list) -> float:
 
 
 @judge_case("correlation")
-def _correlation_case(n: int, rng: random.Random) -> tuple[list, float]:
+def _correlation_case(n: int, rng: random.Random) -> tuple[list, float, dict]:
     n = max(2, min(n, 12))
     X = [rng.randint(1, 20) for _ in range(n)]
     slope = rng.randint(-5, 5)
@@ -754,7 +770,7 @@ def _correlation_case(n: int, rng: random.Random) -> tuple[list, float]:
         X[0] += 1  # zero variance makes correlation undefined
     if len(set(Y)) == 1:
         Y[0] += 1
-    return [X, Y], _correlation_oracle(X, Y)
+    return [X, Y], _correlation_oracle(X, Y), {"compare": "approx:0.0001"}
 
 
 @profiler_input("correlation")
@@ -905,3 +921,115 @@ def _max_tri_prod_case(n: int, rng: random.Random) -> tuple[list, int]:
 @profiler_input("max_prod_3_nums")
 def _max_tri_prod_profiler(n: int, rng: random.Random) -> list:
     return [[rng.randint(-100, 100) for _ in range(n)]]
+
+
+# ------------------------------------------------- multi-function / predicate
+# Problems whose correctness is a property, not an equality: the judge runs
+# the function, then a CHECKER validates the result (with the module in hand,
+# so round-trips can call both functions).
+
+
+@checker("encode_decode_roundtrip")
+def _encode_decode_roundtrip(module, got, args) -> bool:
+    """decode(encode(strs)) == strs — the contract for encode_and_decode_strings."""
+    return module.decode(got) == args[0]
+
+
+@judge_case("encode_and_decode_strings")
+def _encode_decode_case(n: int, rng: random.Random) -> tuple[list, bool, dict]:
+    n = max(0, min(n, 12))
+    strs = [
+        "".join(rng.choice("ab:, !?") for _ in range(rng.randint(0, 6)))
+        for _ in range(rng.randint(0, n))
+    ]
+    return [strs], True, {"predicate": "encode_decode_roundtrip"}
+
+
+@checker("sample_valid")
+def _sample_valid(module, got, args) -> bool:
+    """Exactly n integers, summing to target, standard deviation <= sigma."""
+    n, sigma, target = args
+    if not isinstance(got, list) or len(got) != n or any(not isinstance(x, int) for x in got):
+        return False
+    if sum(got) != target:
+        return False
+    mu = target / n
+    variance = sum((x - mu) ** 2 for x in got) / n
+    return variance**0.5 <= sigma + 1e-9
+
+
+def _reference_sample(n: int, sigma: float, target: int) -> list:
+    """A trivially valid sample (values differ by at most 1, so sd <= 0.5).
+    Used by tests to validate the checker; not part of the judge itself."""
+    base, rem = divmod(target, n)
+    return [base + 1] * rem + [base] * (n - rem)
+
+
+@judge_case("generate_sample_to_target_sum")
+def _generate_sample_case(n: int, rng: random.Random) -> tuple[list, bool, dict]:
+    n = max(1, min(n, 12))
+    sigma = round(rng.uniform(1.0, 4.0), 1)  # >= 1: the even split is always feasible
+    target = rng.randint(-20, 20)
+    return [n, sigma, target], True, {"predicate": "sample_valid"}
+
+
+@checker("is_peak")
+def _is_peak(module, got, args) -> bool:
+    """got is the index of any peak in args[0] (strictly greater than its
+    existing neighbors; endpoints beat their single neighbor)."""
+    nums = args[0]
+    if not isinstance(got, int) or not 0 <= got < len(nums):
+        return False
+    left = nums[got - 1] if got > 0 else float("-inf")
+    right = nums[got + 1] if got < len(nums) - 1 else float("-inf")
+    return nums[got] > left and nums[got] > right
+
+
+# ----------------------------------------------------------------- class mode
+# min_stack: an "ops" problem — the case replays a method sequence on a fresh
+# instance and compares the per-op outputs. The replay oracle below is a
+# reference implementation (quarantine zone, never tutor context).
+
+
+@oracle("min_stack")
+def _min_stack_oracle(ops: list[list]) -> list:
+    stack: list[int] = []
+    mins: list[int] = []
+    out: list = []
+    for op in ops:
+        method, *args = op
+        if method == "push":
+            stack.append(args[0])
+            mins.append(args[0] if not mins else min(args[0], mins[-1]))
+            out.append(None)
+        elif method == "pop":
+            stack.pop()
+            mins.pop()
+            out.append(None)
+        elif method == "top":
+            out.append(stack[-1])
+        elif method == "getMin":
+            out.append(mins[-1])
+        else:  # pragma: no cover - generators only emit the four methods
+            raise ValueError(f"unknown op {method}")
+    return out
+
+
+@judge_case("min_stack")
+def _min_stack_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
+    n = max(1, min(n, 12))
+    ops: list[list] = []
+    size = 0
+    for _ in range(n * 2 + 1):
+        choices = ["push"]
+        if size > 0:
+            choices += ["pop", "top", "getMin"]
+        method = rng.choice(choices)
+        if method == "push":
+            ops.append(["push", rng.randint(-20, 20)])
+            size += 1
+        else:
+            ops.append([method])
+            if method == "pop":
+                size -= 1
+    return [], _min_stack_oracle(ops), {"ops": ops}
