@@ -1,13 +1,13 @@
-"""The tutor: gated hint ladder + leak audit.
+"""The tutor: AI-classified ladder vs discussion, leak-audited.
 
-Ladder policy (v0):
-- tier 0 "articulate the blockage" — triggered when the student's message is
-  too vague to be actionable; forcing metacognition before a hint.
-- otherwise respond at the current tier and advance one tier for next time
-  (capped at 5). The student can't get a deeper hint without trying in
-  between — each `dojo hint` call is one rung.
-- every response passes a leak audit (a second model call); anything rated
-  >= 3 is regenerated, up to 2 retries.
+One command, two modes the model picks (v0.6):
+- "ladder": the student is stuck — respond at the current tier and advance
+  (capped at 5); a vague message forces tier 0 (metacognition first).
+- "discussion": the student is exploring, not blocked — answer directly, no
+  tier, no forced progression. The never-solve boundary holds in both modes.
+
+Every response passes the leak audit; a response that still scores >= 3
+after retries is discarded and never shown.
 """
 
 from __future__ import annotations
@@ -40,8 +40,10 @@ TIER_NAMES = {
 @dataclass
 class HintResult:
     text: str
-    tier: int
+    tier: int | None
     leak_rating: int
+    kind: str  # "ladder" | "discussion"
+    delivered: bool = True
 
 
 def _vague(message: str) -> bool:
@@ -70,6 +72,31 @@ def de_markdown(text: str) -> str:
     return "\n".join(lines).replace("*", "")
 
 
+def _tutor_call(backend: AIBackend, prompt: str, default_tier: int) -> tuple[str, int | None, str]:
+    raw = backend.chat_json(TUTOR_SYSTEM, prompt)
+    if not isinstance(raw, dict):
+        return "ladder", default_tier, str(raw)
+    kind = raw.get("kind")
+    kind = kind if kind in ("ladder", "discussion") else "ladder"
+    tier = raw.get("tier")
+    if kind == "ladder":
+        tier = int(tier) if isinstance(tier, int) and 0 <= tier <= MAX_TIER else default_tier
+    else:
+        tier = None
+    text = str(raw.get("text", "") or "")
+    if not text:  # the model ignored the schema — fall back to the raw payload
+        text = str(raw)
+    return kind, tier, text
+
+
+def _audit(backend: AIBackend, text: str) -> int:
+    leak = backend.chat_json(LEAK_CHECK_SYSTEM, build_leak_prompt(text, 0))
+    try:
+        return int(leak.get("rating", 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def ask_tutor(
     backend: AIBackend,
     statement: str,
@@ -78,28 +105,39 @@ def ask_tutor(
     user_message: str,
     history: list[dict],
 ) -> HintResult:
-    if _vague(user_message):
+    """Classify and answer, then leak-audit. A response still rated >= 3
+    after retries is discarded — never shown to the student."""
+    vague = _vague(user_message)
+    if vague:
         tier = 0
     prompt = build_tutor_prompt(statement, code, tier, user_message, history)
-    response = backend.chat(TUTOR_SYSTEM, prompt)
+    kind, response_tier, text = _tutor_call(backend, prompt, default_tier=tier)
+    if vague:
+        kind = "ladder"  # "stuck" with no words is always the metacognition path
 
-    leak = backend.chat_json(LEAK_CHECK_SYSTEM, build_leak_prompt(response, tier))
-    rating = int(leak.get("rating", 1))
+    rating = _audit(backend, text)
     retries = 0
     while rating >= LEAK_THRESHOLD and retries < LEAK_RETRIES:
-        rewritten = leak.get("rewritten") or ""
-        response = (
-            rewritten
-            if rewritten and rewritten != "SOFTENED"
-            else backend.chat(
-                TUTOR_SYSTEM,
-                prompt
-                + "\n\nYour previous response was flagged as leaking too much "
-                "of the solution. Answer again at the same tier, more guardedly.",
-            )
+        flagged = (
+            prompt
+            + f"\n\nYour previous response was flagged as leaking too much of "
+            f"the solution. Answer again more guardedly, keeping kind={kind}."
         )
-        leak = backend.chat_json(LEAK_CHECK_SYSTEM, build_leak_prompt(response, tier))
-        rating = int(leak.get("rating", 1))
+        _, _, text = _tutor_call(backend, flagged, default_tier=tier)
+        rating = _audit(backend, text)
         retries += 1
 
-    return HintResult(text=response, tier=tier, leak_rating=rating)
+    if rating >= LEAK_THRESHOLD:
+        return HintResult(
+            text="",
+            tier=response_tier if kind == "ladder" else None,
+            leak_rating=rating,
+            kind=kind,
+            delivered=False,
+        )
+    return HintResult(
+        text=text,
+        tier=response_tier if kind == "ladder" else None,
+        leak_rating=rating,
+        kind=kind,
+    )

@@ -56,7 +56,9 @@ CREATE TABLE IF NOT EXISTS attempts (
     measured_space_r2    REAL,
     review               TEXT,   -- JSON from the reviewer
     reflection           TEXT,
-    static_analysis      TEXT    -- JSON: radon complexity + ruff findings
+    static_analysis      TEXT,   -- JSON: radon complexity + ruff findings
+    polished             INTEGER NOT NULL DEFAULT 0,  -- post-solve re-submissions
+    discussion           TEXT    -- JSON: post-solve chat transcript
 );
 
 CREATE TABLE IF NOT EXISTS pattern_cards (
@@ -102,6 +104,12 @@ def migrate(conn: sqlite3.Connection) -> None:
         )
     if "static_analysis" not in attempts_cols:
         conn.execute("ALTER TABLE attempts ADD COLUMN static_analysis TEXT")
+    if "polished" not in attempts_cols:
+        conn.execute(
+            "ALTER TABLE attempts ADD COLUMN polished INTEGER NOT NULL DEFAULT 0"
+        )
+    if "discussion" not in attempts_cols:
+        conn.execute("ALTER TABLE attempts ADD COLUMN discussion TEXT")
     problems_cols = {r["name"] for r in conn.execute("PRAGMA table_info(problems)")}
     if "signature" not in problems_cols:
         conn.execute("ALTER TABLE problems ADD COLUMN signature TEXT")
@@ -190,6 +198,7 @@ REVIEW_DIMS = (
     "naming",
     "edge_cases",
     "complexity_claim_check",
+    "complexity_reasoning",
 )
 
 

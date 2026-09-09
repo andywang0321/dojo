@@ -23,16 +23,38 @@ words only — still no code.
 pushes the student forward.
 - Use analogies to their ML/engineering background when natural (graphs in \
 neural architectures, DP vs. value iteration, amortized costs of hashing, etc.).
-- Match the ladder tier you are told. Do not jump ahead of it.
 - If the student asks for the solution directly, decline kindly and offer the \
 next-tier hint instead.
 - Output PLAIN TEXT ONLY — never Markdown: no asterisks for emphasis, no \
 backticks, no '#' headers, no list markup. The student reads your answer in a \
 terminal, where Markdown renders as noise.
 
+Classify the student's query:
+- kind "ladder": they are stuck or blocked, asking to be unblocked or for the \
+next step. Match the ladder tier you are told; do not jump ahead of it.
+- kind "discussion": they are exploring concepts, trade-offs, or verifying \
+their understanding without being blocked. Answer the question directly — \
+still obeying the hard rules above (no complete solution, no code) — and do \
+not label or advance any tier.
+
+Respond with JSON only: {"kind": "ladder"|"discussion", "tier": <int or null>, \
+"text": <your plain-text answer>}. For kind "ladder", tier is the tier you \
+answered at; for kind "discussion", tier must be null.
+
 You are given: the problem statement, the student's current code, the hint \
 ladder tier (0-5), and the hint history. You have no access to any reference \
 solution; do not pretend to be checking one.
+"""
+
+DISCUSSION_SYSTEM = """\
+You are the dojo post-solve tutor. The student has just solved the problem and \
+received a rubric review. Now the training wheels are off: you may discuss \
+freely — alternative approaches and their trade-offs, deeper pattern \
+connections, how the problem relates to their ML/engineering background, and \
+follow-up problems that extend the same ideas.
+
+Keep responses under 10 sentences, plain text only (no Markdown — the student \
+reads a terminal), and end with a question when there is a natural one.
 """
 
 LEAK_CHECK_SYSTEM = """\
@@ -59,7 +81,12 @@ Hard rules:
 - NEVER include a better or alternative solution in the review — no code, no \
 algorithm sketches. Critique what exists.
 - Be specific: reference line-level habits in the submitted code.
-- Match the rubric dimensions and score each 1-5 with a one-sentence comment.
+- Score the student's complexity REASONING, not just the claim: \
+"complexity_reasoning" judges whether their "why" (and their reflection, when \
+given) is sound, and the comment should point out what they missed or \
+misunderstood.
+- "reflection_feedback" is a short prose comment on the student's reflection: \
+what it captured well, what it missed. It is feedback, not a score.
 - The STATIC ANALYSIS block, when present, is evidence from radon/ruff about \
 the submitted code (cyclomatic complexity, lint findings). Reference it where \
 relevant — never invent findings that are not there.
@@ -74,6 +101,8 @@ Respond with JSON only, using exactly these keys:
  "naming": {"score": int, "comment": str},
  "edge_cases": {"score": int, "comment": str},
  "complexity_claim_check": {"score": int, "comment": str},
+ "complexity_reasoning": {"score": int, "comment": str},
+ "reflection_feedback": str,
  "broader_picture": str,
  "overall_comment": str}
 
@@ -99,7 +128,9 @@ def build_tutor_prompt(
         f"STUDENT'S CURRENT CODE:\n{code[-4000:] or '(no code yet)'}\n\n"
         f"HINT HISTORY:\n{history_block}\n\n"
         f"STUDENT SAYS: {user_message}\n\n"
-        f"Respond at tier {tier}. No code. One question to end with."
+        "Classify the query and respond per the system prompt "
+        f"(kind 'ladder': answer at tier {tier}; kind 'discussion': answer "
+        "directly, tier null). No code."
     )
 
 
@@ -117,6 +148,7 @@ def build_review_prompt(
     expected_time: str | None,
     expected_space: str | None,
     static_analysis=None,
+    reflection: str | None = None,
 ) -> str:
     static_block = ""
     if static_analysis is not None:
@@ -131,12 +163,15 @@ def build_review_prompt(
         static_block = (
             f"\n\nSTATIC ANALYSIS:\ncyclomatic complexity: {cc}\nruff: {ruff}"
         )
+    reflection_block = (
+        f"\n\nSTUDENT REFLECTION:\n{reflection}" if reflection else ""
+    )
     return (
         f"PROBLEM STATEMENT:\n{statement}\n\n"
         f"SUBMITTED CODE:\n{code[-6000:]}\n\n"
         f"Student's self-reported complexity: time={claimed_time}, space={claimed_space}\n"
         f"Empirically measured complexity: time={measured_time}, space={measured_space}\n"
         f"Problem's expected complexity: time={expected_time}, space={expected_space}"
-        f"{static_block}\n\n"
+        f"{static_block}{reflection_block}\n\n"
         "Review as JSON per the rubric."
     )

@@ -15,6 +15,7 @@ DIMS = (
     "naming",
     "edge_cases",
     "complexity_claim_check",
+    "complexity_reasoning",
 )
 
 
@@ -39,8 +40,8 @@ def test_weighted_average_favors_recent_attempts():
     assert entry["solves"] == 2
     # weights 1 (old) and 2 (new): (2*1 + 5*2) / 3
     assert entry["dims"]["correctness"] == pytest.approx(round(12 / 3, 2))
-    # other dims are 5s; overall = round((4 + 5*5) / 6, 2)
-    assert entry["overall"] == pytest.approx(round(29 / 6, 2))
+    # other six dims are 5s; overall = round((4 + 6*5) / 7, 2)
+    assert entry["overall"] == pytest.approx(round(34 / 7, 2))
 
 
 def test_groups_by_pattern_and_excludes_missing_reviews():

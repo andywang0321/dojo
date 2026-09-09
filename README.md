@@ -6,7 +6,7 @@ Every day, `dojo day` runs the whole loop:
 
 - **Warm up** — the scheduler re-opens a previously solved problem, from scratch, to keep the pattern alive (spaced repetition).
 - **Solve** — a fresh problem picked for you (weakest pattern first), in your own editor.
-- **Grade** — an isolated judge runs visible + generated + oracle-checked tests; an empirical profiler *measures* your time/space growth; an AI reviewer scores a rubric; static analysis (cyclomatic complexity + lint) rides along.
+- **Grade** — an isolated judge runs visible + generated + oracle-checked tests; an empirical profiler *measures* your time/space growth; an AI reviewer scores a rubric — including whether your complexity *reasoning* was sound, with feedback on your reflection; static analysis (cyclomatic complexity + lint) rides along as advisory findings.
 - **Retain** — you state your complexity before the machine measures it, reflect, and everything lands in your attempt history — the durable asset.
 
 Three pillars: a **never-solve tutor** (gated hint ladder, leak-audited), a **grading engine** (judge + profiler + reviewer + static analysis), and a **retention engine** (FSRS-lite spaced repetition over pattern cards).
@@ -33,9 +33,11 @@ dojo <slug>                 # the same, on a specific problem
 dojo warmup                 # due retrievals only
 ```
 
-Inside a session the prompt always lists the commands: `check` (run the visible tests), `hint <what you're stuck on>` (one rung up the ladder), `open` (re-open your editor), `submit` (judge → self-report → measure → review → reflect), `quit` (saves your progress; the next session starts fresh from a blank template). Every session becomes one attempt row in your history.
+Inside a session the prompt always lists the commands: `open` (re-open your editor), `check` (run the visible tests + advisory lint/complexity findings), `hint <what you're stuck on>` (one rung up the ladder), `submit` (judge → self-report → measure → reflect → review), `quit` (saves your progress; the next session starts fresh from a blank template). Every session becomes one attempt row in your history.
 
-**The hint ladder** — each `hint` advances one rung; a vague "stuck" forces rung 0 (articulating the blockage is metacognition):
+After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), **`discuss <question>`** opens a post-solve conversation (solutions allowed now), **`done`** closes the session.
+
+**The hint ladder** — each `hint` advances one rung; a vague "stuck" forces rung 0 (articulating the blockage is metacognition). The tutor classifies your query: if you're *exploring* rather than blocked — asking conceptual questions, trade-offs, "is this interview-appropriate?" — it answers directly without advancing tiers, and the panel is simply titled "tutor":
 
 | Tier | Name | What it may do |
 |------|------|----------------|

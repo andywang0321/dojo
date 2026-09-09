@@ -34,12 +34,18 @@ from dojo.session.state import (
     save_state,
 )
 from dojo.tutor import TIER_NAMES, ask_tutor, de_markdown, review
+from dojo.tutor.prompts import DISCUSSION_SYSTEM
 
 GENERATED_CASES = 30
 
 COMMANDS_HINT = (
-    "[dim]Commands: [b]check[/b] · [b]hint <text>[/b] · "
-    "[b]open[/b] · [b]submit[/b] · [b]quit[/b][/dim]"
+    "[dim]Commands: [b]open[/b] · [b]check[/b] · [b]hint <text>[/b] · "
+    "[b]submit[/b] · [b]quit[/b][/dim]"
+)
+
+POST_COMMANDS_HINT = (
+    "[dim]Post-solve: [b]polish[/b] (re-grade edits) · "
+    "[b]discuss <question>[/b] · [b]done[/b][/dim]"
 )
 
 TEMPLATE_STUB_COMMENT = (
@@ -190,9 +196,40 @@ def _check(console: Console, problem: sqlite3.Row, code_path: Path) -> bool:
     report = run_cases(code_path, problem["function_name"], cases)
     if report.all_passed:
         console.print(f"[green]✓ {report.passed}/{report.total} visible cases passed[/green]")
-        return True
-    _show_case_failures(console, report)
-    return False
+    else:
+        _show_case_failures(console, report)
+    # Advisory static analysis: findings here are live coaching, so the
+    # student can fix them before the reviewer grades the final code.
+    analysis = static.analyze(code_path)
+    if analysis.flags or analysis.notes:
+        _show_static(console, analysis)
+    return report.all_passed
+
+
+def _measure_complexity(
+    console: Console, problem: sqlite3.Row, code_path: Path
+) -> tuple[str | None, float | None, str | None, float | None]:
+    """Empirical measurement + the three-way table (shared by submit and
+    polish). Returns (measured_time, time_r2, measured_space, space_r2)."""
+    measured_time = measured_space = time_r2 = space_r2 = None
+    if problem["slug"] in PROFILER_INPUTS:
+        console.print("[bold]Measuring empirical complexity[/bold] (doubling input sizes, median of repeats)...")
+        m = measure(
+            code_path,
+            problem["function_name"],
+            PROFILER_INPUTS[problem["slug"]],
+        )
+        if m.time_points:
+            fit = classify([n for n, _ in m.time_points], [t for _, t in m.time_points])
+            measured_time, time_r2 = fit.best_class, round(fit.r2, 3)
+        if m.space_points:
+            sfit = classify([n for n, _ in m.space_points], [s for _, s in m.space_points])
+            measured_space, space_r2 = sfit.best_class, round(sfit.r2, 3)
+        if m.dropped:
+            console.print(f"[dim](dropped sizes: {', '.join(m.dropped)})[/dim]")
+    else:
+        console.print("[dim]No profiler input generator registered for this problem — skipping measurement.[/dim]")
+    return measured_time, time_r2, measured_space, space_r2
 
 
 def _submit(
@@ -225,29 +262,14 @@ def _submit(
     if analysis.flags or analysis.notes:
         _show_static(console, analysis)
 
-    claimed_time_raw = console.input("State your time complexity and why (e.g. 'O(n) because one pass'): ")
+    claimed_time_raw = console.input("State your time complexity and why: ")
     claimed_space_raw = console.input("State your space complexity and why: ")
     claimed_time = complexity.parse(claimed_time_raw)
     claimed_space = complexity.parse(claimed_space_raw)
 
-    measured_time = measured_space = time_r2 = space_r2 = None
-    if problem["slug"] in PROFILER_INPUTS:
-        console.print("[bold]Measuring empirical complexity[/bold] (doubling input sizes, median of repeats)...")
-        m = measure(
-            code_path,
-            problem["function_name"],
-            PROFILER_INPUTS[problem["slug"]],
-        )
-        if m.time_points:
-            fit = classify([n for n, _ in m.time_points], [t for _, t in m.time_points])
-            measured_time, time_r2 = fit.best_class, round(fit.r2, 3)
-        if m.space_points:
-            sfit = classify([n for n, _ in m.space_points], [s for _, s in m.space_points])
-            measured_space, space_r2 = sfit.best_class, round(sfit.r2, 3)
-        if m.dropped:
-            console.print(f"[dim](dropped sizes: {', '.join(m.dropped)})[/dim]")
-    else:
-        console.print("[dim]No profiler input generator registered for this problem — skipping measurement.[/dim]")
+    measured_time, time_r2, measured_space, space_r2 = _measure_complexity(
+        console, problem, code_path
+    )
 
     _show_complexity_table(
         console,
@@ -258,6 +280,13 @@ def _submit(
         measured_time,
         measured_space,
     )
+
+    # Reflect first, so the reviewer can comment on the reflection.
+    reflection = None
+    if not warmup:
+        reflection = console.input(
+            "Reflection — what was the key insight, and when would you reach for this again? "
+        )
 
     console.print("[bold]AI review[/bold] (post-submission; the reviewer critiques, it never repairs)...")
     code = code_path.read_text()
@@ -272,18 +301,13 @@ def _submit(
         problem["expected_time"],
         problem["expected_space"],
         static_analysis=analysis,
+        reflection=reflection,
     )
     if "error" in review_json:
         console.print("[yellow]Reviewer unavailable (non-JSON response) — review skipped.[/yellow]")
         review_json = {}
     else:
         _show_review(console, review_json)
-
-    reflection = None
-    if not warmup:
-        reflection = console.input(
-            "Reflection — what was the key insight, and when would you reach for this again? "
-        )
 
     conn.execute(
         """
@@ -329,13 +353,11 @@ def _submit(
 
 
 def _show_static(console: Console, analysis) -> None:
-    table = Table(title="Static analysis (radon + ruff)")
-    table.add_column("Finding")
+    console.print("[bold]Static analysis[/bold] (radon + ruff)...")
     for flag in analysis.flags:
-        table.add_row(flag)
+        console.print(f"[yellow]• {flag}[/yellow]")
     for note in analysis.notes:
-        table.add_row(f"[dim]{note}[/dim]")
-    console.print(table)
+        console.print(f"[dim]• {note}[/dim]")
 
 
 def _show_review(console: Console, review_json: dict) -> None:
@@ -350,6 +372,7 @@ def _show_review(console: Console, review_json: dict) -> None:
         "naming",
         "edge_cases",
         "complexity_claim_check",
+        "complexity_reasoning",
     ]
     for dim in dims:
         entry = review_json.get(dim, {})
@@ -360,10 +383,139 @@ def _show_review(console: Console, review_json: dict) -> None:
                 de_markdown(str(entry.get("comment", ""))),
             )
     console.print(table)
+    if review_json.get("reflection_feedback"):
+        console.print(
+            Panel(
+                de_markdown(str(review_json["reflection_feedback"])),
+                title="On your reflection",
+                border_style="cyan",
+            )
+        )
     if review_json.get("broader_picture"):
         console.print(Panel(de_markdown(str(review_json["broader_picture"])), title="Broader picture"))
     if review_json.get("overall_comment"):
         console.print(f"[italic]{de_markdown(str(review_json['overall_comment']))}[/italic]")
+
+
+def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
+    """Post-solve re-grade: re-judge, re-measure, re-analyze the edited code
+    and update the same attempt row (polished counter bumps)."""
+    code_path = state.code_path
+    rng = random.Random(f"dojo-{problem['slug']}")
+    cases = _build_cases(problem, rng)
+    report = run_cases(code_path, problem["function_name"], cases)
+    if not report.all_passed:
+        console.print(f"[red]✗ {report.passed}/{report.total} passed[/red]")
+        _show_case_failures(console, report)
+        return
+    console.print(f"[green]✓ All {report.total} cases passed[/green]")
+
+    row = conn.execute(
+        "SELECT self_reported_time, self_reported_space, review FROM attempts WHERE id = ?",
+        (state.attempt_id,),
+    ).fetchone()
+    analysis = static.analyze(code_path)
+    if analysis.flags or analysis.notes:
+        _show_static(console, analysis)
+    measured_time, time_r2, measured_space, space_r2 = _measure_complexity(
+        console, problem, code_path
+    )
+    _show_complexity_table(
+        console,
+        problem["expected_time"],
+        problem["expected_space"],
+        row["self_reported_time"],
+        row["self_reported_space"],
+        measured_time,
+        measured_space,
+    )
+
+    review_json = loads_json(row["review"], {})
+    if console.input("Review again? [y/N]: ").strip().lower() in ("y", "yes"):
+        review_json = review(
+            backend,
+            problem["statement"],
+            code_path.read_text(),
+            row["self_reported_time"],
+            row["self_reported_space"],
+            measured_time,
+            measured_space,
+            problem["expected_time"],
+            problem["expected_space"],
+            static_analysis=analysis,
+        )
+        if "error" in review_json:
+            console.print("[yellow]Reviewer unavailable (non-JSON response) — review kept as-is.[/yellow]")
+            review_json = {}
+        else:
+            _show_review(console, review_json)
+
+    conn.execute(
+        """
+        UPDATE attempts SET
+            code = ?, submitted_at = ?,
+            measured_time_class = ?, measured_time_r2 = ?,
+            measured_space_class = ?, measured_space_r2 = ?,
+            static_analysis = ?, review = ?, polished = polished + 1
+        WHERE id = ?
+        """,
+        (
+            code_path.read_text(),
+            now(),
+            measured_time,
+            time_r2,
+            measured_space,
+            space_r2,
+            dumps_json(analysis.to_dict()),
+            dumps_json(review_json) if review_json else None,
+            state.attempt_id,
+        ),
+    )
+    conn.commit()
+    console.print("[green]Polished — attempt updated.[/green]")
+
+
+def _discuss(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState, question: str) -> None:
+    """Post-solve chat: the never-solve boundary lifts, the transcript
+    persists on the attempt row."""
+    history = loads_json(
+        conn.execute(
+            "SELECT discussion FROM attempts WHERE id = ?", (state.attempt_id,)
+        ).fetchone()["discussion"],
+        [],
+    )
+    prompt = (
+        f"PROBLEM: {problem['statement']}\n\n"
+        "The student solved this and was graded. Discussion so far:\n"
+        + "\n".join(
+            f"- student: {entry['user']}\n  tutor: {entry['tutor'][:200]}"
+            for entry in history[-4:]
+        )
+        + f"\n\nSTUDENT: {question}"
+    )
+    answer = de_markdown(backend.chat(DISCUSSION_SYSTEM, prompt))
+    console.print(Panel(answer, title="tutor — post-solve discussion", border_style="green"))
+    conn.execute(
+        "UPDATE attempts SET discussion = ? WHERE id = ?",
+        (dumps_json(history + [{"user": question, "tutor": answer}]), state.attempt_id),
+    )
+    conn.commit()
+
+
+def _post_solve_loop(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
+    """After review + reflection: polish (re-grade edits), discuss (free
+    post-solve chat), done (retire)."""
+    while True:
+        console.print(POST_COMMANDS_HINT)
+        raw = console.input("[bold cyan]dojo ›[/bold cyan] ").strip()
+        if raw in ("done", "quit", "q"):
+            return
+        if raw in ("polish", "p"):
+            _polish(conn, console, backend, problem, state)
+        elif raw.startswith("discuss "):
+            _discuss(conn, console, backend, problem, state, raw[len("discuss ") :].strip())
+        else:
+            console.print("[dim]Unknown command.[/dim]")
 
 
 def _ask_grade(console: Console, hints: int) -> int:
@@ -515,21 +667,37 @@ def run_day(
                 rest or "I'm stuck",
                 state.hints,
             )
+            if not result.delivered:
+                console.print(
+                    "[yellow]Tutor couldn't answer without leaking the solution "
+                    "— try rephrasing.[/yellow]"
+                )
+                continue
             cleaned = de_markdown(result.text)
             state.hints.append(
-                {"tier": result.tier, "user": rest or "I'm stuck", "hint": cleaned}
+                {
+                    "kind": result.kind,
+                    "tier": result.tier,
+                    "user": rest or "I'm stuck",
+                    "hint": cleaned,
+                }
             )
-            state.tier = min(result.tier + 1, 5)
+            if result.kind == "ladder":
+                state.tier = min(result.tier + 1, 5)
             save_state(state)
-            console.print(
-                Panel(
-                    cleaned,
-                    title=f"hint · tier {result.tier} ({TIER_NAMES[result.tier]})"
-                    + (f" · leak rating {result.leak_rating}" if result.leak_rating >= 3 else ""),
-                    border_style="blue",
+            if result.kind == "ladder":
+                console.print(
+                    Panel(
+                        cleaned,
+                        title=f"hint · tier {result.tier} ({TIER_NAMES[result.tier]})",
+                        border_style="blue",
+                    )
                 )
-            )
-            console.print(f"[dim]Next hint will be tier {state.tier} ({TIER_NAMES[state.tier]}).[/dim]")
+                console.print(
+                    f"[dim]Next hint will be tier {state.tier} ({TIER_NAMES[state.tier]}).[/dim]"
+                )
+            else:
+                console.print(Panel(cleaned, title="tutor", border_style="blue"))
         elif cmd in ("s", "submit"):
             outcome, reflection = _submit(
                 conn, console, backend, problem, state, warmup=warmup
@@ -544,6 +712,8 @@ def run_day(
                 scheduler.ensure_card(
                     conn, user_id, problem["pattern"], reflection=reflection
                 )
+                if not warmup:
+                    _post_solve_loop(conn, console, backend, problem, state)
                 retire_state(state.slug)
                 return "solved"
         else:

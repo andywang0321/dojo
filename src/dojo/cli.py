@@ -422,6 +422,7 @@ def _format_review(review: dict) -> str:
         "naming",
         "edge_cases",
         "complexity_claim_check",
+        "complexity_reasoning",
     ):
         entry = review.get(dim, {})
         if isinstance(entry, dict):
@@ -429,6 +430,11 @@ def _format_review(review: dict) -> str:
                 f"{dim.replace('_', ' ')}: {entry.get('score', '?')}/5 — "
                 f"{de_markdown(str(entry.get('comment', '')))}"
             )
+    if review.get("reflection_feedback"):
+        lines.append("")
+        lines.append(
+            f"On your reflection: {de_markdown(str(review['reflection_feedback']))}"
+        )
     if review.get("broader_picture"):
         lines.append("")
         lines.append(f"Broader picture: {de_markdown(str(review['broader_picture']))}")
@@ -464,7 +470,7 @@ def _cmd_show(args) -> int:
         f"[dim]status: {row['status']} · started: {row['started_at']} · "
         f"submitted: {row['submitted_at'] or '—'} · "
         f"duration: {row['duration_seconds'] or '—'}s · "
-        f"hints: {row['hint_count']}[/dim]"
+        f"hints: {row['hint_count']} · polished: {row['polished'] or 0}x[/dim]"
     )
     table = Table(title="Complexity: claimed vs. measured")
     table.add_column("")
@@ -510,6 +516,15 @@ def _cmd_show(args) -> int:
         console.print(Panel(_format_review(review), title="AI review", border_style="green"))
     if row["reflection"]:
         console.print(Panel(row["reflection"], title="Reflection", border_style="cyan"))
+    discussion = loads_json(row["discussion"], [])
+    if discussion:
+        lines = []
+        for entry in discussion:
+            lines.append(f"[bold]you:[/bold] {entry.get('user', '')}")
+            lines.append(f"[bold]tutor:[/bold] {entry.get('tutor', '')}")
+        console.print(
+            Panel("\n\n".join(lines), title="Post-solve discussion", border_style="green")
+        )
     return 0
 
 

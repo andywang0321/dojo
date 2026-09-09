@@ -1,52 +1,134 @@
-"""Tutor hint ladder: tier gating, vagueness metacognition, leak re-audit,
+"""Tutor: AI-classified ladder vs discussion, leak re-audit + discard,
 and Markdown stripping for terminal display."""
 
 from dojo.tutor.backend import MockBackend
+from dojo.tutor.prompts import build_tutor_prompt
 from dojo.tutor.tutor import ask_tutor, de_markdown
 
 STATEMENT = "Return true if the bracket string is valid."
 CODE = "def is_valid(s: str) -> bool:\n    pass\n"
 
+CANNED_LADDER = {
+    "kind": "ladder",
+    "tier": 2,
+    "text": "Pattern hint: a data structure remembers the most recent opener.",
+}
+CANNED_DISCUSSION = {
+    "kind": "discussion",
+    "tier": None,
+    "text": "Good question: sets give O(1) membership via hashing.",
+}
+
+
+class RecordingBackend:
+    """Captures prompts; serves canned tutor JSON and audit ratings. Without
+    a canned tutor, it synthesizes a ladder response echoing the requested
+    tier (so tier-forcing is observable)."""
+
+    def __init__(self, tutor=None, leak_ratings=None):
+        self._tutor = tutor
+        self._leak = leak_ratings if leak_ratings is not None else [1]
+        self._rating_idx = 0
+        self.prompts = []
+
+    def chat(self, system, user):
+        return ""
+
+    def chat_json(self, system, user):
+        self.prompts.append(user)
+        if "auditor" in system.lower():
+            rating = self._leak[min(self._rating_idx, len(self._leak) - 1)]
+            self._rating_idx += 1
+            return {"rating": rating, "rewritten": "" if rating < 3 else "SOFTENED"}
+        if isinstance(self._tutor, list) and self._tutor:
+            return self._tutor.pop(0)
+        if self._tutor is not None:
+            return self._tutor
+        import re
+
+        match = re.search(r"answer at tier (\d+)", user)
+        tier = int(match.group(1)) if match else 1
+        return {"kind": "ladder", "tier": tier, "text": f"Canned ladder answer at tier {tier}."}
+
+    def tutor_prompts(self):
+        return [p for p in self.prompts if "Audit it as JSON" not in p]
+
 
 def test_vague_message_forces_tier_zero():
-    result = ask_tutor(MockBackend(), STATEMENT, CODE, tier=4, user_message="help", history=[])
+    backend = RecordingBackend()
+    result = ask_tutor(backend, STATEMENT, CODE, tier=4, user_message="help", history=[])
+    assert result.kind == "ladder"
     assert result.tier == 0
-    assert "where exactly you're stuck" in result.text
+    assert any("tier 0" in p.lower() for p in backend.tutor_prompts())
 
 
-def test_specific_message_answers_at_current_tier():
+def test_ladder_kind_reports_tier_and_delivers():
+    backend = RecordingBackend(tutor=[dict(CANNED_LADDER)])
     result = ask_tutor(
-        MockBackend(),
+        backend,
         STATEMENT,
         CODE,
         tier=2,
         user_message="I tried counting brackets but it fails on '[(])' — what am I missing?",
         history=[],
     )
+    assert result.kind == "ladder"
     assert result.tier == 2
-    assert "data structure" in result.text  # canned tier-2 response
+    assert result.delivered
     assert result.leak_rating == 1
 
 
-def test_leak_regenerates_until_clean():
-    backend = MockBackend(leak_ratings=[5, 1])
+def test_discussion_kind_has_no_tier():
+    backend = RecordingBackend(tutor=[dict(CANNED_DISCUSSION)])
     result = ask_tutor(
         backend,
         STATEMENT,
         CODE,
-        tier=1,
+        tier=2,
+        user_message="What are the permitted operations on a set?",
+        history=[],
+    )
+    assert result.kind == "discussion"
+    assert result.tier is None
+    assert "sets give O(1)" in result.text
+
+
+def test_leak_regenerates_until_clean_and_keeps_kind():
+    backend = RecordingBackend(
+        tutor=[dict(CANNED_LADDER), dict(CANNED_DISCUSSION)], leak_ratings=[5, 1]
+    )
+    result = ask_tutor(
+        backend,
+        STATEMENT,
+        CODE,
+        tier=2,
         user_message="Can you just give me the answer?",
         history=[],
     )
     assert result.leak_rating == 1
+    assert result.kind == "ladder"  # the regeneration must not flip the mode
+    assert result.delivered
 
 
-def test_hint_history_is_passed_along():
-    history = [{"tier": 1, "user": "stuck", "hint": "think about LIFO"}]
+def test_leak_discards_after_retries():
+    backend = RecordingBackend(leak_ratings=[5, 5, 5])
     result = ask_tutor(
-        MockBackend(), STATEMENT, CODE, tier=2, user_message="still stuck on the closer case", history=history
+        backend,
+        STATEMENT,
+        CODE,
+        tier=2,
+        user_message="What is the full algorithm?",
+        history=[],
     )
-    assert result.tier == 2
+    assert result.delivered is False
+    assert result.text == ""
+
+
+def test_prompt_asks_for_classification():
+    prompt = build_tutor_prompt(STATEMENT, CODE, 2, "question", [])
+    assert "kind" in prompt
+    assert "ladder" in prompt
+    assert "discussion" in prompt
 
 
 def test_de_markdown_strips_artifacts():

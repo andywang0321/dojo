@@ -54,7 +54,11 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 
 ## The daily flow, mechanically
 
-`solve in $EDITOR → check (visible tests) → hint ladder → submit → judge (visible + generated + oracle) → self-report complexity → empirical profiler → three-way complexity table → static analysis → AI review → reflection → persist attempt`.
+`solve in $EDITOR → check (visible tests + advisory static analysis) → hint ladder → submit → judge (visible + generated + oracle) → self-report complexity → empirical profiler → three-way complexity table → reflection → AI review → post-solve loop (polish / discuss / done) → persist attempt`.
+
+### Tutor modes (v0.6)
+
+One `hint` command, two modes the model classifies: **ladder** (the student is stuck — respond at the current tier and advance, vague messages force tier 0) and **discussion** (the student is exploring — answer directly, no tier, no progression). The never-solve boundary holds in both; every response passes the leak audit, and a response still rated ≥ 3 after retries is discarded, never shown. History entries record the mode.
 
 Session semantics:
 

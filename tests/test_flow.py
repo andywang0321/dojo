@@ -84,6 +84,7 @@ def test_full_day_flow(db, fake_console, monkeypatch, tmp_path):
             "O(n) because one pass over the string",
             "O(n) for the stack",
             "The key insight: the stack mirrors the opening order.",
+            "done",
         ],
         actions={
             # Sessions start blank now; "editing" happens during the session.
@@ -352,6 +353,7 @@ def test_quit_persists_hints_and_retires_state(db, fake_console, monkeypatch, tm
     assert row["status"] == "unsolved"
     assert row["hint_count"] == 1
     assert json.loads(row["hints"])[0]["tier"] == 0
+    assert json.loads(row["hints"])[0]["kind"] == "ladder"
     assert not (workbench / "valid_parentheses.state.json").exists()
 
     # Next session is a fresh attempt, not a resume.
@@ -381,3 +383,60 @@ def test_new_session_starts_from_blank_template(db, fake_console, monkeypatch, t
     assert "pairs = {" not in content  # the old solution is gone
     row = db.execute("SELECT code FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert "raise NotImplementedError" in row["code"]  # blank start is recorded
+
+
+def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_path):
+    """After the review: `polish` re-grades and updates the same attempt row,
+    `discuss` persists a post-solve conversation, `done` retires the state."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        [
+            "submit",
+            "O(n) one pass",
+            "O(n) stack",
+            "The key insight: the stack.",
+            "polish",
+            "n",  # no second review
+            "discuss how else could I solve this?",
+            "done",
+        ],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+    assert outcome == "solved"
+
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["polished"] == 1
+    discussion = json.loads(row["discussion"])
+    assert len(discussion) == 1
+    assert discussion[0]["user"] == "how else could I solve this?"
+    assert "you could" in discussion[0]["tutor"].lower() or len(discussion[0]["tutor"]) > 0
+    assert not (workbench / "valid_parentheses.state.json").exists()
+    assert "Post-solve" in console.text
+
+
+def test_check_shows_static_findings(db, fake_console, monkeypatch, tmp_path):
+    """Static analysis is advisory at check time: lint findings appear with
+    the visible-test run, so the student can fix them before submitting."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    linty = "import sys\n\n" + SOLUTION
+
+    console = fake_console(
+        ["check", "quit"],
+        actions={"check": lambda: (workbench / "valid_parentheses.py").write_text(linty)},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    assert "Static analysis" in console.text
+    assert "F401" in console.text

@@ -91,10 +91,16 @@ class MockBackend:
         leak_ratings: list[int] | None = None,
         review: dict | None = None,
         curator: dict | None = None,
+        tutor: dict | list | None = None,
+        discussion: str = "Post-solve discussion: you could also sort both arrays and walk two pointers.",
     ):
         self._leak_ratings = leak_ratings if leak_ratings is not None else [1]
         self._rating_idx = 0
         self._curator = curator or {}
+        self._tutor = tutor if tutor is not None else [
+            {"kind": "ladder", "tier": 0, "text": self.TIER_RESPONSES[0]}
+        ]
+        self._discussion = discussion
         self._review = review or {
             "correctness": {"score": 4, "comment": "The reasoning holds; check the empty-input case."},
             "approach_quality": {"score": 4, "comment": "Natural choice for this problem class."},
@@ -102,12 +108,16 @@ class MockBackend:
             "naming": {"score": 4, "comment": "Clear names."},
             "edge_cases": {"score": 3, "comment": "Empty input and unbalanced closers deserve explicit tests."},
             "complexity_claim_check": {"score": 4, "comment": "Claim matches the code and measurement."},
+            "complexity_reasoning": {"score": 4, "comment": "The why is sound."},
+            "reflection_feedback": "You captured the core insight; naming the pattern family would help recall.",
             "broader_picture": "This is the canonical 'stack as LIFO memory' pattern; the same invariant "
             "powers DFS, expression evaluation, and undo stacks in editors.",
             "overall_comment": "Solid. One habit to build: state your loop invariant out loud.",
         }
 
     def chat(self, system: str, user: str) -> str:
+        if "discussion" in system.lower():
+            return self._discussion
         for line in user.splitlines():
             if line.startswith("TIER="):
                 tier = int(line.split("=")[1])
@@ -125,6 +135,10 @@ class MockBackend:
             if isinstance(self._curator, list):
                 return self._curator.pop(0) if self._curator else {}
             return self._curator
+        if "tutor" in system.lower():
+            if isinstance(self._tutor, list):
+                return self._tutor.pop(0) if self._tutor else {}
+            return self._tutor
         return {}
 
 

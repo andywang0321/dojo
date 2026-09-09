@@ -32,11 +32,17 @@ Two build-time lessons are baked into the tests: CPython 3.12+ resizes unshared 
 
 ## The reviewer
 
-Post-submission, rubric-scored JSON: correctness, approach quality, style/idiom, naming, edge cases, complexity-claim check, broader picture, overall comment. Inputs: statement, submitted code, self-reported complexity, measured complexity, expected complexity, and the static-analysis block. Hard rules: it critiques, never repairs — no alternative solutions, no code. Terminal-safe: plain text only, `de_markdown` applied at display time (underscores are never stripped — they may be identifiers like `two_sum`).
+Post-submission, rubric-scored JSON: correctness, approach quality, style/idiom, naming, edge cases, complexity-claim check, **complexity-reasoning** (is the *why* behind the claim sound?), plus **reflection feedback** (prose on the student's reflection — feedback, not a score), broader picture, overall comment. Inputs: statement, submitted code, self-reported complexity (the raw strings, so the reasoning is visible), measured complexity, expected complexity, the static-analysis block, and the student's reflection — which is why reflection now happens *before* the review. Hard rules: it critiques, never repairs — no alternative solutions, no code. Terminal-safe: plain text only, `de_markdown` applied at display time (underscores are never stripped — they may be identifiers like `two_sum`).
 
-## Static analysis (v0.4)
+Model output is schema-normalized (`reviewer.normalize_review`) before display and storage: rubric dimensions may arrive as `{"score", "comment"}` dicts or as bare numbers, and either shape must render (a real solve once returned bare ints and the chart came out empty).
 
-Every successful submit also runs `static.analyze` (radon cyclomatic complexity per function + ruff): findings display before the review, persist on the attempt row (`static_analysis` JSON), re-display in `dojo show`, and reach the reviewer prompt as evidence ("reference it where relevant — never invent findings"). Complexity above the McCabe convention (10) is a flag, never a failure; tool hiccups degrade into `notes`.
+## Static analysis (v0.4, advisory since v0.6)
+
+Runs at **every `check`** as advisory findings (radon cyclomatic complexity per function + ruff), so the student can fix them before the reviewer ever sees the code — the trainer-not-exam stance: the style score grades the final submitted code, and the live loop itself teaches the habit. Submit still stores the analysis (`static_analysis` JSON) and feeds it to the reviewer as evidence ("reference it where relevant — never invent findings"). Complexity above the McCabe convention (10) is a flag, never a failure; tool hiccups degrade into `notes`.
+
+## The post-solve loop (v0.6)
+
+After review + reflection, the session continues with `polish` (re-judge + re-measure + re-analyze the edited code, updating the same attempt row and bumping its `polished` counter; an optional second review), `discuss <question>` (free post-solve chat — the never-solve boundary lifts after solving; the transcript persists on the attempt row), and `done` (retire the state).
 
 ## Per-pattern score trends (v0.4)
 
