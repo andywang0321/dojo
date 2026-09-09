@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from dojo import complexity, scheduler
+from dojo import complexity, scheduler, static
 from dojo.config import WORKBENCH_DIR
 from dojo.db import dumps_json, get_or_create_user, loads_json, now
 from dojo.editor import launch as launch_editor
@@ -221,6 +221,10 @@ def _submit(
 
     console.print(f"[green]✓ All {report.total} cases passed[/green]")
 
+    analysis = static.analyze(code_path)
+    if analysis.flags or analysis.notes:
+        _show_static(console, analysis)
+
     claimed_time_raw = console.input("State your time complexity and why (e.g. 'O(n) because one pass'): ")
     claimed_space_raw = console.input("State your space complexity and why: ")
     claimed_time = complexity.parse(claimed_time_raw)
@@ -267,6 +271,7 @@ def _submit(
         measured_space,
         problem["expected_time"],
         problem["expected_space"],
+        static_analysis=analysis,
     )
     if "error" in review_json:
         console.print("[yellow]Reviewer unavailable (non-JSON response) — review skipped.[/yellow]")
@@ -289,7 +294,7 @@ def _submit(
             self_reported_time = ?, self_reported_space = ?,
             measured_time_class = ?, measured_time_r2 = ?,
             measured_space_class = ?, measured_space_r2 = ?,
-            review = ?, reflection = ?
+            review = ?, reflection = ?, static_analysis = ?
         WHERE id = ?
         """,
         (
@@ -306,6 +311,7 @@ def _submit(
             space_r2,
             dumps_json(review_json) if review_json else None,
             reflection,
+            dumps_json(analysis.to_dict()),
             state.attempt_id,
         ),
     )
@@ -320,6 +326,16 @@ def _submit(
         )
     )
     return "solved", reflection
+
+
+def _show_static(console: Console, analysis) -> None:
+    table = Table(title="Static analysis (radon + ruff)")
+    table.add_column("Finding")
+    for flag in analysis.flags:
+        table.add_row(flag)
+    for note in analysis.notes:
+        table.add_row(f"[dim]{note}[/dim]")
+    console.print(table)
 
 
 def _show_review(console: Console, review_json: dict) -> None:

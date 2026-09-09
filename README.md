@@ -88,6 +88,8 @@ All 31 problems are curated. The judge's verdict is per-case, not global: strict
 
 Two build-time lessons are baked into the tests: CPython 3.12+ resizes unshared `s[:-1]` strings *in place* (a "quadratic" string rebuild is actually linear), and 4 small sizes with constant overhead can make O(n log n) out-fit O(n) — hence the tiebreak.
 
+**Static analysis (v0.4).** Every successful submit also runs radon (cyclomatic complexity per function) and ruff on the workbench file: findings are shown before the review, stored on the attempt row (`dojo show` re-displays them), and fed to the reviewer as evidence. Complexity above the McCabe convention (10) is flagged as "consider refactoring" — static analysis is evidence, never a verdict; nothing fails a solve.
+
 **Reviewer.** Post-submission, rubric-scored JSON: correctness, approach quality, style/idiom, naming, edge cases, complexity-claim check, broader picture, overall comment. Hard rule: it critiques, never repairs — no alternative solutions in reviews.
 
 ## Layout
@@ -104,6 +106,7 @@ src/dojo/
   complexity.py     # O(...) normalization + mismatch logic
   scheduler.py      # FSRS-lite cards, due reviews, warm-up + new-problem picks
   patterns.py       # the pattern taxonomy + LeetCode tag -> pattern mapping
+  static.py         # radon cyclomatic complexity + ruff at submit
   judge/            # registry (oracles, generators, checkers) + subprocess runner
   profiler/         # fit (curve fitting) + measure (doubling sizes, tracemalloc)
   tutor/            # backend (mock | deepseek), prompts, hint ladder, reviewer
@@ -145,7 +148,7 @@ Commands that need a user resolve `--user` against the DB's single existing user
 
 - `users(name)` — one row per person; all data is per-user from day one.
 - `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests, signature)` — the catalog. `function_name` + `visible_tests` + `signature` = "curated", i.e. ready for `dojo day`. `signature` is a def string, `{"functions": {...}}` for multi-function problems, or `{"methods": {...}}` for class problems.
-- `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, timings)` — the learner model.
+- `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, static_analysis JSON, timings)` — the learner model.
 - `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern).
 
 `data/dojo.db` and `workbench/` are gitignored: they're personal state, not source.
@@ -158,11 +161,11 @@ Commands that need a user resolve `--user` against the DB's single existing user
 uv run pytest
 ```
 
-88 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout and every verdict mode, the curation contract (overrides ↔ signatures ↔ oracles ↔ checkers ↔ generated cases, plus references through the real judge), the never-solve boundary (tutor never sees judge, curator, or fetcher code), the curator pipeline (validation and apply-with-rollback), the fetcher (HTML conversion, snippet parsing, tag mapping, transport errors, landing — all against canned fixtures), hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
+103 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout and every verdict mode, the curation contract (overrides ↔ signatures ↔ oracles ↔ checkers ↔ generated cases, plus references through the real judge), the never-solve boundary (tutor never sees judge, curator, or fetcher code), the curator pipeline (validation, apply-with-rollback, and the dual-oracle differential), the fetcher (HTML conversion, snippet parsing, tag mapping, transport errors, landing — all against canned fixtures), static analysis (radon + ruff, flags, syntax-error survival, reviewer integration), per-pattern score trends (recency weighting, malformed-review tolerance), hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
 
 ## Roadmap
 
-- **v0.4 — deeper grading:** static analysis (radon cyclomatic complexity, ruff), the hinted-solution penalty, review score trends per pattern, the dual-oracle differential check for AI curation.
+- **v0.4 — deeper grading (delivered):** static analysis at submit (radon cyclomatic complexity + ruff, reviewer-informed), per-pattern review-score trends in `dojo progress` (recency-weighted), and the always-on dual-oracle differential check for AI curation (two independent curator runs must agree before a proposal applies). The hinted-solution penalty was deliberately dropped — penalizing hints punishes asking for genuinely enriching help.
 - **Later:** TUI polish (Textual), two-machine sync, warm-up problem variants. A web UI only if the CLI loop proves insufficient — never first.
 
 ## Known limitations (v0)

@@ -13,6 +13,7 @@ curation contract tests (tests/test_registry.py) as the acceptance gate.
 from __future__ import annotations
 
 import json
+import random
 import re
 import subprocess
 import sys
@@ -95,11 +96,124 @@ def propose(backend, statement: str, hints: dict | None = None) -> dict:
     the fetcher — the curator prefers it unless clearly wrong."""
     from dojo.curator.prompts import CURATOR_SYSTEM, build_curator_prompt
 
-    raw = backend.chat_json(CURATOR_SYSTEM, build_curator_prompt(statement, hints))
+    return _propose_with(backend, CURATOR_SYSTEM, build_curator_prompt(statement, hints))
+
+
+def _propose_with(backend, system: str, user: str) -> dict:
+    raw = backend.chat_json(system, user)
     if "error" in raw:
         raise CuratorError(f"curator returned non-JSON: {raw['error']}")
     validate(raw)
     return raw
+
+
+def make_isolated_namespace() -> dict:
+    """A fresh registry namespace for executing curation code away from the
+    live registries (tests and the dual-oracle differential check)."""
+    ns = {
+        "ORACLES": {},
+        "JUDGE_CASES": {},
+        "PROFILER_INPUTS": {},
+        "CHECKERS": {},
+        "random": __import__("random"),
+        "math": __import__("math"),
+    }
+
+    def decorator(store):
+        def make(name):
+            def register(fn):
+                store[name] = fn
+                return fn
+
+            return register
+
+        return make
+
+    ns["oracle"] = decorator(ns["ORACLES"])
+    ns["judge_case"] = decorator(ns["JUDGE_CASES"])
+    ns["profiler_input"] = decorator(ns["PROFILER_INPUTS"])
+    ns["checker"] = decorator(ns["CHECKERS"])
+    return ns
+
+
+def _exec_proposal(proposal: dict, namespace: dict) -> None:
+    for field in ("oracle_code", "judge_case_code", "checker_code", "profiler_code"):
+        source = proposal.get(field)
+        if source:
+            exec(compile(source, f"<dual {field}>", "exec"), namespace)
+
+
+def _strict_equal(a, b) -> bool:
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def differential_check(proposal_a: dict, proposal_b: dict) -> list[str]:
+    """Cross-check two independent curator runs: their oracles must agree on
+    the generated cases. Returns human-readable disagreements (empty = the
+    two oracles agree)."""
+    has_a = bool(proposal_a.get("oracle_code"))
+    has_b = bool(proposal_b.get("oracle_code"))
+    if has_a != has_b:
+        return ["one proposal has an oracle and the other does not"]
+    if not has_a:
+        return []  # predicate-only problems have nothing to cross-check
+
+    ns_a, ns_b = make_isolated_namespace(), make_isolated_namespace()
+    try:
+        _exec_proposal(proposal_a, ns_a)
+        _exec_proposal(proposal_b, ns_b)
+    except Exception as exc:  # noqa: BLE001
+        return [f"a proposal's code failed to execute: {exc}"]
+    slug = proposal_a["slug"]
+    if slug not in ns_a["ORACLES"] or slug not in ns_a["JUDGE_CASES"]:
+        return ["first proposal did not register oracle + generator"]
+    if slug not in ns_b["ORACLES"]:
+        return ["second proposal did not register an oracle"]
+
+    disagreements = []
+    for n in (0, 3, 7, 12):
+        for seed in range(5):
+            rng = random.Random(f"dual-{slug}-{n}-{seed}")
+            generated = ns_a["JUDGE_CASES"][slug](n, rng)
+            args, expected = generated[:2]
+            extras = generated[2] if len(generated) > 2 else {}
+            if extras.get("predicate"):
+                continue  # checkers can't be cross-checked this way
+            call_args = [extras["ops"]] if extras.get("ops") is not None else args
+            got_a = ns_a["ORACLES"][slug](*call_args)
+            got_b = ns_b["ORACLES"][slug](*call_args)
+            if _strict_equal(got_a, expected) and _strict_equal(got_a, got_b):
+                continue
+            disagreements.append(
+                f"n={n} seed={seed}: first={got_a!r} second={got_b!r} "
+                f"expected={expected!r}"
+            )
+            if len(disagreements) >= 5:
+                return disagreements
+    return disagreements
+
+
+def curate_dual(backend, statement: str, hints: dict | None = None) -> dict:
+    """Two independent curator runs; the oracles must agree on the generated
+    cases before either proposal is trusted (the oracle is the trust root)."""
+    from dojo.curator.prompts import CURATOR_SYSTEM, build_curator_prompt
+
+    user = build_curator_prompt(statement, hints)
+    first = _propose_with(backend, CURATOR_SYSTEM, user)
+    second_system = (
+        CURATOR_SYSTEM
+        + "\n\nThis is an independent second pass. Implement the oracle using "
+        "a different construction or algorithm than before; the two oracles "
+        "will be cross-checked against each other."
+    )
+    second = _propose_with(backend, second_system, user)
+    disagreements = differential_check(first, second)
+    if disagreements:
+        raise CuratorError(
+            "dual-oracle differential failed — the two curator runs disagree:\n"
+            + "\n".join(disagreements)
+        )
+    return first
 
 
 def _default_registry_namespace() -> tuple[dict, Path]:

@@ -34,6 +34,7 @@ from dojo.db import (
     list_attempts,
     loads_json,
     now,
+    review_trends,
 )
 
 
@@ -353,6 +354,22 @@ def _cmd_show(args) -> int:
         console.print(hint_table)
     if row["code"]:
         console.print(Panel(row["code"], title="Code", border_style="blue"))
+    analysis = loads_json(row["static_analysis"], {})
+    if analysis:
+        findings = []
+        for entry in analysis.get("complexity", []):
+            findings.append(
+                f"{entry['name']}: complexity {entry['complexity']} "
+                f"(rank {entry.get('rank', '?')})"
+            )
+        for finding in analysis.get("ruff", []):
+            findings.append(
+                f"ruff {finding['code']} line {finding['line']}: {finding['message']}"
+            )
+        if findings:
+            console.print(
+                Panel("\n".join(findings), title="Static analysis", border_style="magenta")
+            )
     review = loads_json(row["review"], {})
     if review:
         console.print(Panel(_format_review(review), title="AI review", border_style="green"))
@@ -365,7 +382,7 @@ def _cmd_curate(args) -> int:
     import json
 
     from dojo.config import REPO_ROOT
-    from dojo.curator import CuratorError, apply, propose
+    from dojo.curator import CuratorError, apply, curate_dual
     from dojo.tutor import get_backend
 
     console = Console()
@@ -385,7 +402,7 @@ def _cmd_curate(args) -> int:
         console.print(f"[red]{exc}[/red]")
         return 1
     try:
-        proposal = propose(backend, statement)
+        proposal = curate_dual(backend, statement)
     except CuratorError as exc:
         console.print(f"[red]Curation proposal rejected: {exc}[/red]")
         return 1
@@ -415,7 +432,7 @@ def _cmd_fetch(args) -> int:
     import json
 
     from dojo.config import REPO_ROOT
-    from dojo.curator import CuratorError, apply, propose
+    from dojo.curator import CuratorError, apply, curate_dual
     from dojo.fetcher import LeetCodeError, fetch_problem, land
     from dojo.tutor import get_backend
 
@@ -448,7 +465,7 @@ def _cmd_fetch(args) -> int:
     if problem.signature:
         hints["signature"] = json.dumps(problem.signature)
     try:
-        proposal = propose(backend, problem.statement, hints)
+        proposal = curate_dual(backend, problem.statement, hints)
     except CuratorError as exc:
         console.print(
             f"[yellow]Statement landed, but the curator proposal was "
@@ -509,6 +526,7 @@ def _cmd_progress(args) -> int:
                 (now(), user_id),
             ).fetchall()
         }
+        trends = review_trends(conn, user_id)
     patterns = sorted({r["pattern"] for r in attempt_rows} | set(card_rows))
     table = Table(title=f"Pattern proficiency — {user}")
     for col in ("pattern", "solved", "attempts", "avg hints", "cards", "due now", "avg stability", "avg difficulty"):
@@ -531,6 +549,30 @@ def _cmd_progress(args) -> int:
         "[dim]Stability = FSRS-lite memory strength in days; the scheduler picks "
         "new problems from the weakest pattern (lowest avg stability).[/dim]"
     )
+    if trends:
+        t = Table(title="Score trends per pattern (review rubric, recency-weighted)")
+        for col in (
+            "pattern", "solves", "corr", "appr", "styl", "name", "edge", "comp", "overall",
+        ):
+            t.add_column(col)
+        for r in trends:
+            d = r["dims"]
+            t.add_row(
+                r["pattern"],
+                str(r["solves"]),
+                str(d["correctness"]),
+                str(d["approach_quality"]),
+                str(d["style_idiom"]),
+                str(d["naming"]),
+                str(d["edge_cases"]),
+                str(d["complexity_claim_check"]),
+                str(r["overall"]),
+            )
+        console.print(t)
+        console.print(
+            "[dim]Scores come from the AI reviewer's rubric; the newest "
+            "attempts weigh most.[/dim]"
+        )
     return 0
 
 

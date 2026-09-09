@@ -122,6 +122,8 @@ class MockBackend:
         if "rubric" in system.lower() or "review" in system.lower():
             return self._review
         if "curator" in system.lower():
+            if isinstance(self._curator, list):
+                return self._curator.pop(0) if self._curator else {}
             return self._curator
         return {}
 

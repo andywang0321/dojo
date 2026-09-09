@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS attempts (
     measured_space_class TEXT,
     measured_space_r2    REAL,
     review               TEXT,   -- JSON from the reviewer
-    reflection           TEXT
+    reflection           TEXT,
+    static_analysis      TEXT    -- JSON: radon complexity + ruff findings
 );
 
 CREATE TABLE IF NOT EXISTS pattern_cards (
@@ -95,6 +96,8 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE attempts ADD COLUMN kind TEXT NOT NULL DEFAULT 'solve'"
         )
+    if "static_analysis" not in attempts_cols:
+        conn.execute("ALTER TABLE attempts ADD COLUMN static_analysis TEXT")
     problems_cols = {r["name"] for r in conn.execute("PRAGMA table_info(problems)")}
     if "signature" not in problems_cols:
         conn.execute("ALTER TABLE problems ADD COLUMN signature TEXT")
@@ -174,3 +177,62 @@ def loads_json(value: str | None, default=None):
     if value is None:
         return default
     return json.loads(value)
+
+
+REVIEW_DIMS = (
+    "correctness",
+    "approach_quality",
+    "style_idiom",
+    "naming",
+    "edge_cases",
+    "complexity_claim_check",
+)
+
+
+def trends_from_rows(rows) -> list[dict]:
+    """(pattern, review) pairs, oldest first → per-pattern recency-weighted
+    score trends. The oldest of n attempts gets weight 1, the newest n, so
+    late improvement counts more than early flailing. Missing or malformed
+    reviews are skipped."""
+    per_pattern: dict[str, list[dict]] = {}
+    for pattern, review in rows:
+        if not isinstance(review, dict):
+            continue
+        if not all(
+            isinstance(review.get(dim), dict)
+            and isinstance(review[dim].get("score"), (int, float))
+            for dim in REVIEW_DIMS
+        ):
+            continue
+        per_pattern.setdefault(pattern, []).append(review)
+
+    trends = []
+    for pattern, reviews in sorted(per_pattern.items()):
+        n = len(reviews)
+        total_weight = sum(range(1, n + 1))
+        dims = {}
+        for dim in REVIEW_DIMS:
+            dims[dim] = round(
+                sum(reviews[i][dim]["score"] * (i + 1) for i in range(n))
+                / total_weight,
+                2,
+            )
+        overall = round(sum(dims.values()) / len(REVIEW_DIMS), 2)
+        trends.append({"pattern": pattern, "solves": n, "dims": dims, "overall": overall})
+    return trends
+
+
+def review_trends(conn: sqlite3.Connection, user_id: int) -> list[dict]:
+    """Per-pattern review-score trends for `dojo progress`."""
+    rows = conn.execute(
+        """
+        SELECT p.pattern AS pattern, a.review AS review
+        FROM attempts a JOIN problems p ON p.id = a.problem_id
+        WHERE a.user_id = ? AND a.status = 'correct' AND a.review IS NOT NULL
+        ORDER BY a.id ASC
+        """,
+        (user_id,),
+    ).fetchall()
+    return trends_from_rows(
+        [(r["pattern"], loads_json(r["review"], None)) for r in rows]
+    )

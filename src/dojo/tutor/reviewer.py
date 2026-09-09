@@ -21,6 +21,7 @@ def review(
     measured_space: str | None,
     expected_time: str | None,
     expected_space: str | None,
+    static_analysis=None,
 ) -> dict:
     prompt = build_review_prompt(
         statement,
@@ -31,5 +32,6 @@ def review(
         measured_space,
         expected_time,
         expected_space,
+        static_analysis=static_analysis,
     )
     return backend.chat_json(REVIEWER_SYSTEM, prompt)

@@ -60,6 +60,9 @@ Hard rules:
 algorithm sketches. Critique what exists.
 - Be specific: reference line-level habits in the submitted code.
 - Match the rubric dimensions and score each 1-5 with a one-sentence comment.
+- The STATIC ANALYSIS block, when present, is evidence from radon/ruff about \
+the submitted code (cyclomatic complexity, lint findings). Reference it where \
+relevant — never invent findings that are not there.
 - "broader_picture" should connect this problem to the wider pattern family \
 and, where natural, to the student's ML background, plus one follow-up idea \
 to try next time they see this pattern.
@@ -113,12 +116,27 @@ def build_review_prompt(
     measured_space: str | None,
     expected_time: str | None,
     expected_space: str | None,
+    static_analysis=None,
 ) -> str:
+    static_block = ""
+    if static_analysis is not None:
+        cc = ", ".join(
+            f"{c['name']} {c['complexity']}({c['rank']})"
+            for c in static_analysis.complexity
+        ) or "none"
+        ruff = "; ".join(
+            f"{f['code']} line {f['line']}: {f['message']}"
+            for f in static_analysis.ruff[:5]
+        ) or "clean"
+        static_block = (
+            f"\n\nSTATIC ANALYSIS:\ncyclomatic complexity: {cc}\nruff: {ruff}"
+        )
     return (
         f"PROBLEM STATEMENT:\n{statement}\n\n"
         f"SUBMITTED CODE:\n{code[-6000:]}\n\n"
         f"Student's self-reported complexity: time={claimed_time}, space={claimed_space}\n"
         f"Empirically measured complexity: time={measured_time}, space={measured_space}\n"
-        f"Problem's expected complexity: time={expected_time}, space={expected_space}\n\n"
+        f"Problem's expected complexity: time={expected_time}, space={expected_space}"
+        f"{static_block}\n\n"
         "Review as JSON per the rubric."
     )

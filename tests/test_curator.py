@@ -228,3 +228,69 @@ def test_apply_rolls_back_when_generated_code_crashes(paths):
 
     assert registry_path.read_text() == registry_text
     assert json.loads(overrides_path.read_text()) == {}
+
+
+# --------------------------------------------------- dual-oracle differential
+
+CANNED_ALT = {
+    **CANNED_PROPOSAL,
+    "oracle_code": (
+        "@oracle('matrix_diagonal_sum')\n"
+        "def _alt_diagonal_oracle(matrix):\n"
+        "    n = len(matrix)\n"
+        "    total = sum(matrix[i][i] for i in range(n))\n"
+        "    total += sum(matrix[i][n - 1 - i] for i in range(n))\n"
+        "    return total - (matrix[n // 2][n // 2] if n % 2 else 0)\n"
+    ),
+}
+
+CANNED_DISAGREE = {
+    **CANNED_PROPOSAL,
+    "oracle_code": (
+        "@oracle('matrix_diagonal_sum')\n"
+        "def _wrong_diagonal_oracle(matrix):\n"
+        "    return 0  # always wrong except for zero matrices\n"
+    ),
+}
+
+CANNED_NO_ORACLE = {
+    **CANNED_PROPOSAL,
+    "oracle_code": "",
+    "visible_tests": [
+        {"args": [[[1]]], "predicate": "sample_valid", "expected": True},
+        {"args": [[[2]]], "predicate": "sample_valid", "expected": True},
+        {"args": [[[3]]], "predicate": "sample_valid", "expected": True},
+    ],
+}
+
+
+def test_dual_oracle_agrees_and_returns_first_proposal():
+    from dojo.curator import curate_dual
+
+    backend = MockBackend(curator=[CANNED_PROPOSAL, CANNED_ALT])
+    proposal = curate_dual(backend, "some statement")
+    assert proposal == CANNED_PROPOSAL
+
+
+def test_dual_oracle_disagrees_and_rejects():
+    from dojo.curator import curate_dual
+
+    backend = MockBackend(curator=[CANNED_PROPOSAL, CANNED_DISAGREE])
+    with pytest.raises(CuratorError, match="differential"):
+        curate_dual(backend, "some statement")
+
+
+def test_dual_oracle_requires_both_sides():
+    from dojo.curator import curate_dual
+
+    backend = MockBackend(curator=[CANNED_PROPOSAL, CANNED_NO_ORACLE])
+    with pytest.raises(CuratorError, match="differential"):
+        curate_dual(backend, "some statement")
+
+
+def test_dual_oracle_skips_predicate_only_pairs():
+    from dojo.curator import curate_dual
+
+    backend = MockBackend(curator=[CANNED_NO_ORACLE, dict(CANNED_NO_ORACLE)])
+    proposal = curate_dual(backend, "some statement")
+    assert proposal["slug"] == "matrix_diagonal_sum"
