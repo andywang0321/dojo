@@ -127,7 +127,18 @@ def test_html_to_text_paragraphs_and_code():
     assert "Input: nums = [2,7,11,15], target = 9" in text
     assert "Output: [0,1]" in text
     assert "Only one valid answer exists." in text
-    assert "O(n2) is fine as a start." in text  # sup tags flattened, no markup
+    assert "O(n^2) is fine as a start." in text  # sup → ^, no markup
+
+
+def test_html_to_text_superscripts_and_bullets():
+    text = HTMLToText().convert(
+        "<ul><li>\t2 &lt;= nums.length &lt;= 10<sup>4</sup></li>"
+        "<li>-10<sup>9</sup> &lt;= nums[i]</li></ul>"
+    )
+    assert "* 2 <= nums.length <= 10^4" in text
+    assert "* -10^9 <= nums[i]" in text
+    assert "\t*" not in text
+    assert "\n\t\n" not in text  # no whitespace-only lines between bullets
 
 
 def test_html_to_text_strips_all_markup():

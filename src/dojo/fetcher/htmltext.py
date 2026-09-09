@@ -35,6 +35,8 @@ class HTMLToText(HTMLParser):
         if tag == "br":
             self._out.append("\n")
             self._in_block = False
+        if tag == "sup":
+            self._out.append("^")  # 10<sup>4</sup> → 10^4, not "104"
 
     def handle_endtag(self, tag: str) -> None:
         if tag in self.END_TAGS:
@@ -43,11 +45,19 @@ class HTMLToText(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if data:
+            if self._out and self._out[-1] == "* ":
+                data = data.lstrip()  # no tab between the bullet and its text
             self._out.append(data)
 
     def convert(self, html: str) -> str:
         self.feed(html)
         text = "".join(self._out)
         text = text.replace("\xa0", " ")  # &nbsp; → normal space
+        for _ in range(8):  # fixpoint: single-pass subs miss re-formed runs
+            cleaned = re.sub(r"\n[ \t]*\n", "\n", text)  # whitespace-only lines
+            cleaned = re.sub(r"\n[ \t]+(\*)", r"\n\1", cleaned)  # indent before bullets
+            if cleaned == text:
+                break
+            text = cleaned
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
