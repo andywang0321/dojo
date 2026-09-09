@@ -4,7 +4,7 @@ Guidance for humans and AI agents working on this repository.
 
 ## What this is
 
-dojo is an AI-guided interview-prep trainer: a CLI (`dojo`) that runs a daily loop of warm-up retrievals → solve → judge → self-report complexity → empirical profiler → AI review → reflection, persisted to SQLite, with FSRS-lite spaced repetition deciding what comes back when. Its defining constraint is the **never-solve rule**: the tutor agent guides, it never solves. Read `README.md` first; everything below assumes it.
+dojo is an AI-guided interview-prep trainer: a CLI (`dojo`) that runs a daily loop of warm-up retrievals → solve → judge → self-report complexity → empirical profiler → AI review → reflection, persisted to SQLite, with FSRS-lite spaced repetition deciding what comes back when. Its defining constraint is the **never-solve rule**: the tutor agent guides, it never solves. Read `README.md` first (the user-facing pitch + guide); design docs live in `docs/`, delivered and planned stages in `roadmap/`, and everything below assumes that split.
 
 ## Layout map
 
@@ -52,6 +52,8 @@ problems/           # seed corpus: one problem per file, prompt in module docstr
 tests/              # offline; mock backend
 workbench/          # gitignored scratch; attempt code persists in the DB, not here
 Makefile            # sync/test/demo targets with a workspace-local UV_CACHE_DIR
+docs/               # technical docs: architecture, grading, retention, curation, development
+roadmap/            # delivered stages (v0.1..v0.4) and next.md (planned)
 ```
 
 ## Setup and commands
@@ -80,7 +82,7 @@ Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by ha
 ## Conventions
 
 - **Judge protocol:** `runner.py` writes `solution.py` + `cases.json` + a harness into a temp dir and executes it with a timeout. Case dicts: `{"args": [...], "expected": any, "label": str}` plus optional verdict tags — `"compare": "sorted"` (deep-sorted equality for any-order outputs), `"compare": "approx:1e-4"` / `"rounded:n"` (float tolerance), `"predicate": name` (a `@checker` in the registry validates `(module, got, args)`), or `{"ops": [...], "expected": [...]}` (class problems: instantiate `function_name`, replay the method sequence). Default is strict JSON equality with `sort_keys` — don't "fix" it to approximate float equality without updating README and tests.
-- **Registries:** per-slug decorators in `judge/registry.py`: `@oracle(slug)` (correctness reference), `@judge_case(slug)` (small random cases with expected values; may return a third extras dict carrying the same verdict tags), `@profiler_input(slug)` (worst-case-shaped inputs of size n — never early-exit inputs; see the random-bracket lesson in README), and `@checker(name)` (predicate verdicts). Generators must clamp n into the problem's constraints (the caller sends 0..12).
+- **Registries:** per-slug decorators in `judge/registry.py`: `@oracle(slug)` (correctness reference), `@judge_case(slug)` (small random cases with expected values; may return a third extras dict carrying the same verdict tags), `@profiler_input(slug)` (worst-case-shaped inputs of size n — never early-exit inputs; see the random-bracket lesson in docs/grading.md), and `@checker(name)` (predicate verdicts). Generators must clamp n into the problem's constraints (the caller sends 0..12).
 - **Measurement protocol:** one timed call per subprocess; GC disabled around the call; tracemalloc started after module import; median across repeats. The subprocess boundary exists to contain hangs — don't replace it with in-process timing.
 - **Curating a new problem:** add `function_name` + `visible_tests` + a `signature` (string for one function, `{"functions": {...}}` for multi-function problems, `{"methods": {...}}` for class problems) to `data/problem_overrides.json`, and a generator/oracle pair in `judge/registry.py` (a `@checker` for predicate problems, a `@profiler_input` unless measurement is meaningless). Then `dojo init` re-seeds (an upsert, so it never deletes rows attempts reference). The judge's verdict modes mean prompts can honestly say "any order": tag those cases `"compare": "sorted"` and emit canonical form from the oracle. Trees are nested lists `[value, left, right]` (`None` = missing child / empty tree). `tests/test_registry.py` pins the contract — update it when the curated set changes. `dojo curate` automates the recipe via the curator agent (a separate agent from the tutor — its oracle output must never enter tutor context; `tests/test_never_solve.py` pins that boundary) and applies only when the verification gate passes, rolling back otherwise.
 - **Static analysis (v0.4):** runs automatically on every successful submit (`static.analyze`): radon cyclomatic complexity per function + ruff findings, stored on the attempt row (`static_analysis` JSON) and fed to the reviewer prompt as evidence. Complexity > 10 (McCabe convention) is a flag, never a failure; tool hiccups degrade into `notes`. Add new deps with `uv add` — never hand-edit the lockfile.
@@ -96,4 +98,4 @@ Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by ha
 
 - `uv run pytest` passes; new behavior has tests.
 - The never-solve boundary is unchanged or deliberately narrowed with rationale in the PR description.
-- README updated when user-visible behavior changes (commands, ladder policy, grading semantics, limitations).
+- User-visible changes update `README.md` (guide) and the matching `docs/` file (technical); new stage work lands in `roadmap/`.
