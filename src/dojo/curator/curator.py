@@ -22,20 +22,10 @@ from typing import Any, Callable
 from dojo import bank
 from dojo.config import DB_PATH, PROBLEMS_DIR, PROBLEM_OVERRIDES, REPO_ROOT
 from dojo.db import connect
+from dojo.patterns import PATTERNS
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 DIFFICULTIES = ("Easy", "Medium", "Hard")
-PATTERNS = (
-    "arrays_and_hashing",
-    "stack",
-    "two_pointers",
-    "trees",
-    "heap",
-    "binary_search",
-    "greedy",
-    "dynamic_programming",
-    "math",
-)
 
 REQUIRED_FIELDS = (
     "slug",
@@ -99,11 +89,13 @@ def validate(proposal: dict) -> None:
                 raise CuratorError(f"{field} does not compile: {exc}") from exc
 
 
-def propose(backend, statement: str) -> dict:
-    """Run the curator agent and validate its artifact set."""
+def propose(backend, statement: str, hints: dict | None = None) -> dict:
+    """Run the curator agent and validate its artifact set. ``hints``
+    carries starter-code intel (function_name / signature / pattern) from
+    the fetcher — the curator prefers it unless clearly wrong."""
     from dojo.curator.prompts import CURATOR_SYSTEM, build_curator_prompt
 
-    raw = backend.chat_json(CURATOR_SYSTEM, build_curator_prompt(statement))
+    raw = backend.chat_json(CURATOR_SYSTEM, build_curator_prompt(statement, hints))
     if "error" in raw:
         raise CuratorError(f"curator returned non-JSON: {raw['error']}")
     validate(raw)

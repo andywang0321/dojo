@@ -11,7 +11,7 @@ dojo is an AI-guided interview-prep trainer: a CLI (`dojo`) that runs a daily lo
 ```
 src/dojo/
   cli.py            # argparse entry: init / list / day / warmup / check / profile /
-                    # history / show / progress / curate
+                    # history / show / progress / curate / fetch
   config.py         # paths + env (DEEPSEEK_API_KEY, DOJO_AI_BACKEND=mock|deepseek)
   editor.py         # $EDITOR launching: GUI -> detached process; terminal ->
                     # tmux new-window / macOS osascript; unknown -> blocking
@@ -19,6 +19,7 @@ src/dojo/
                     # migrate() + attempt-history queries; MIGRATIONS MUST BE ADDITIVE
   bank.py           # problems/**/*.py docstring -> problems importer (upsert on slug)
   complexity.py     # O(...) canonicalization; only KNOWN_CLASSES participate in mismatch()
+  patterns.py       # pattern taxonomy + LeetCode topic-tag -> pattern mapping (one source of truth)
   scheduler.py      # FSRS-lite (stability/difficulty/forgetting curve), due cards,
                     # record_grade, warmup + new-problem picks, backfill
   judge/
@@ -36,13 +37,17 @@ src/dojo/
   curator/
     prompts.py      # CURATOR_SYSTEM (separate agent; never tutor context)
     curator.py      # propose / validate / apply-with-rollback + verification gate
+  fetcher/
+    htmltext.py     # HTML -> plain text for LeetCode content (stdlib HTMLParser)
+    leetcode.py     # GraphQL intake, snippet -> signature, land() into the bank
   session/
     state.py        # workbench/<slug>.state.json (tier, hints, attempt id, kind)
     flow.py         # run_day (solve & warmup modes) + run_warmups
 data/problem_overrides.json   # curated metadata: function_name + visible_tests + signatures
 problems/           # seed corpus: one problem per file, prompt in module docstring,
                     # grouped by pattern (arrays_and_hashing, stack, two_pointers,
-                    # trees, heap, binary_search, greedy, dynamic_programming, math)
+                    # trees, heap, binary_search, greedy, dynamic_programming, math,
+                    # linked_list, graph, backtracking, sliding_window, bit_manipulation)
 tests/              # offline; mock backend
 workbench/          # gitignored scratch; attempt code persists in the DB, not here
 Makefile            # sync/test/demo targets with a workspace-local UV_CACHE_DIR
@@ -77,6 +82,7 @@ Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by ha
 - **Registries:** per-slug decorators in `judge/registry.py`: `@oracle(slug)` (correctness reference), `@judge_case(slug)` (small random cases with expected values; may return a third extras dict carrying the same verdict tags), `@profiler_input(slug)` (worst-case-shaped inputs of size n — never early-exit inputs; see the random-bracket lesson in README), and `@checker(name)` (predicate verdicts). Generators must clamp n into the problem's constraints (the caller sends 0..12).
 - **Measurement protocol:** one timed call per subprocess; GC disabled around the call; tracemalloc started after module import; median across repeats. The subprocess boundary exists to contain hangs — don't replace it with in-process timing.
 - **Curating a new problem:** add `function_name` + `visible_tests` + a `signature` (string for one function, `{"functions": {...}}` for multi-function problems, `{"methods": {...}}` for class problems) to `data/problem_overrides.json`, and a generator/oracle pair in `judge/registry.py` (a `@checker` for predicate problems, a `@profiler_input` unless measurement is meaningless). Then `dojo init` re-seeds (an upsert, so it never deletes rows attempts reference). The judge's verdict modes mean prompts can honestly say "any order": tag those cases `"compare": "sorted"` and emit canonical form from the oracle. Trees are nested lists `[value, left, right]` (`None` = missing child / empty tree). `tests/test_registry.py` pins the contract — update it when the curated set changes. `dojo curate` automates the recipe via the curator agent (a separate agent from the tutor — its oracle output must never enter tutor context; `tests/test_never_solve.py` pins that boundary) and applies only when the verification gate passes, rolling back otherwise.
+- **Fetcher (v0.3):** `dojo fetch <title-slug>` pulls a LeetCode problem (GraphQL), converts content HTML to plain text (`fetcher/htmltext.py`, stdlib only), maps topic tags → pattern via `patterns.py` (unmapped tags fail loudly — never a silent wrong bucket), parses the python3 starter snippet into `function_name` + `signature` hints (annotation normalization: `List[int]` → `list[int]`, `Optional[X]` → `X | None`; empty snippet bodies get padded), lands the seed file via `fetcher.land()`, then auto-curates through the curator + verification gate. The HTTP transport is an injected callable — tests pin the contract against canned GraphQL fixtures and must never hit the network.
 - **Scheduler:** the FSRS-lite model lives entirely in `scheduler.py` with documented constants (FACTOR/DECAY/S0/D0/TARGET_R). Grades are 1-4 (Anki convention). Don't swap in a scheduler library without porting `tests/test_scheduler.py`; same-day reviews legitimately yield no stability growth (R ≈ 1).
 - **Warm-up semantics:** `run_warmups` forces a fresh template (re-solve from scratch), creates an attempt with `kind='warmup'`, skips reflection (the recall grade replaces it), and quits record a lapse. Workbench state is per (slug, kind) and lasts exactly one session: it is retired (deleted) on submit and on quit, so every `dojo day` invocation gets a fresh attempt row — a warm-up never reuses a solve session's tier/hints, and repeat sessions never overwrite earlier attempt rows. Quitting persists code + hints to the abandoned attempt row. **Every new session writes a blank template over the workbench file** (solves and warm-ups alike); previous solutions live on attempt rows and are recoverable via `dojo history` / `dojo show <id>`.
 - **Terminal-safe AI output:** tutor and reviewer prompts instruct plain text (no Markdown); `de_markdown` in `tutor/tutor.py` is the belt-and-braces cleanup applied at display time. Underscores are never stripped (they may be identifiers like `two_sum`); pin this with tests in `tests/test_tutor.py`.

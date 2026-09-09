@@ -13,6 +13,7 @@ def test_tutor_sources_never_reference_judge_or_curator():
         text = path.read_text()
         assert "dojo.judge" not in text, f"{path.name} references dojo.judge"
         assert "dojo.curator" not in text, f"{path.name} references dojo.curator"
+        assert "dojo.fetcher" not in text, f"{path.name} references dojo.fetcher"
         assert "ORACLES" not in text, f"{path.name} references ORACLES"
         assert "CHECKERS" not in text, f"{path.name} references CHECKERS"
 

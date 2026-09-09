@@ -59,5 +59,12 @@ Respond with the JSON object only.
 """
 
 
-def build_curator_prompt(statement: str) -> str:
-    return f"Curate this problem:\n\n{statement}\n\nReturn the JSON artifact set."
+def build_curator_prompt(statement: str, hints: dict | None = None) -> str:
+    hint_block = ""
+    if hints:
+        lines = "\n".join(f"- {key}: {value}" for key, value in hints.items())
+        hint_block = (
+            "\n\nStarter-code hints extracted from the source — prefer them "
+            f"unless clearly wrong:\n{lines}"
+        )
+    return f"Curate this problem:\n\n{statement}{hint_block}\n\nReturn the JSON artifact set."

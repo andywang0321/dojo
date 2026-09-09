@@ -75,6 +75,8 @@ All 31 problems are curated. The judge's verdict is per-case, not global: strict
 
 **`dojo curate`** automates the recipe: paste a problem statement (`dojo curate`, or `--text` / `--file`), and a curator agent — a separate agent from the tutor, structurally isolated so reference solutions never approach tutor context — generates the full artifact set, writes the seed file, registry entries, and overrides entry, and applies them **only if the verification gate (`tests/test_registry.py`) passes**; otherwise it rolls everything back. The proposal is kept in gitignored `data/curation/` for provenance. Human curation still works: the recipe is the same, the gate is the same.
 
+**`dojo fetch <title-slug>`** completes the loop (v0.3): it pulls the problem's statement from LeetCode's GraphQL API (HTML → plain text, topic tags → pattern via the mapping in `dojo/patterns.py` — unmapped tags fail loudly rather than landing in a wrong bucket), parses the python3 starter snippet into the `function_name` + `signature` hints, lands the seed-format statement in the bank, and hands it to the curator, which paraphrases the statement, adds the complexity line, generates the artifacts, and applies them through the verification gate. If the curator fails or no API key is set, the statement stays in the bank uncurated (`—` in `dojo list`) for later `dojo curate --file`. Tests pin the fetcher's contract against canned GraphQL fixtures — never the live endpoint.
+
 ## The grading engine
 
 **Judge.** Student code runs in an isolated subprocess with a JSON protocol: import the workbench file, call the problem's function, compare results with the case's verdict mode, kill on timeout. Verdicts: strict JSON equality (default), deep-sorted equality (`"compare": "sorted"`), float tolerance (`"approx"` / `"rounded"`), predicate checkers (round-trips, any-valid-sample, any-peak), and ops sequences for class problems. Cases come from three layers: visible examples (curated in `data/problem_overrides.json`), randomized generated cases, and oracle-checked cases where a brute-force reference exists (`dojo/judge/registry.py`). Oracle code is correctness infrastructure only — never tutor context.
@@ -93,7 +95,7 @@ Two build-time lessons are baked into the tests: CPython 3.12+ resizes unshared 
 ```
 src/dojo/
   cli.py            # init / list / day / warmup / check / profile /
-                    # history / show / progress / curate
+                    # history / show / progress / curate / fetch
   config.py         # paths, env, backend selection (DEEPSEEK_API_KEY, DOJO_AI_BACKEND)
   editor.py         # $EDITOR launching: detached GUI, tmux/macOS windows for terminal editors
   db.py             # SQLite schema (users, problems, attempts, pattern_cards) +
@@ -101,15 +103,18 @@ src/dojo/
   bank.py           # seed importer: problems/**/*.py docstrings -> problems
   complexity.py     # O(...) normalization + mismatch logic
   scheduler.py      # FSRS-lite cards, due reviews, warm-up + new-problem picks
+  patterns.py       # the pattern taxonomy + LeetCode tag -> pattern mapping
   judge/            # registry (oracles, generators, checkers) + subprocess runner
   profiler/         # fit (curve fitting) + measure (doubling sizes, tracemalloc)
   tutor/            # backend (mock | deepseek), prompts, hint ladder, reviewer
   curator/          # AI curation pipeline (propose, validate, apply-with-rollback)
+  fetcher/          # LeetCode GraphQL intake: HTML -> text, snippet -> signature
   session/          # workbench state + the day flow (solve & warmup modes)
 problems/           # the seed corpus: one problem per file, prompt in the module
                     # docstring, organized by pattern (arrays_and_hashing, stack,
                     # two_pointers, trees, heap, binary_search, greedy,
-                    # dynamic_programming, math) — your original solving files
+                    # dynamic_programming, math, linked_list, graph, backtracking,
+                    # sliding_window, bit_manipulation) — your original solving files
 data/problem_overrides.json   # curated metadata: function names + visible tests + signatures
 tests/                        # offline; mock backend
 workbench/                    # scratch space (gitignored); attempt code lives in the DB
@@ -127,6 +132,7 @@ uv run dojo day --user andy      # warm-ups (if due) + scheduler-picked problem
 uv run dojo history              # your attempts, newest first
 uv run dojo show 12              # full detail of attempt 12 (--code for just the code)
 uv run dojo curate --text "..."  # AI-curate a new problem from a statement
+uv run dojo fetch two-sum        # fetch a LeetCode problem + auto-curate it
 ```
 
 **The uv cache note.** uv writes its package cache to `~/.cache/uv` by default, which is outside this repo. If you run inside a sandbox (CI, an agent harness, a container), use `make sync` / `make test` — the Makefile sets `UV_CACHE_DIR=.uv-cache`, keeping everything inside the workspace so no permission escalation is ever needed.
@@ -152,12 +158,11 @@ Commands that need a user resolve `--user` against the DB's single existing user
 uv run pytest
 ```
 
-70 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout and every verdict mode, the curation contract (overrides ↔ signatures ↔ oracles ↔ checkers ↔ generated cases, plus references through the real judge), the never-solve boundary (tutor never sees judge or curator code), the curator pipeline (validation and apply-with-rollback), hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
+88 tests cover complexity normalization, curve fitting (including the ambiguity tiebreak), bank parsing/import (including the repo corpus itself), judge correctness/crash/timeout and every verdict mode, the curation contract (overrides ↔ signatures ↔ oracles ↔ checkers ↔ generated cases, plus references through the real judge), the never-solve boundary (tutor never sees judge, curator, or fetcher code), the curator pipeline (validation and apply-with-rollback), the fetcher (HTML conversion, snippet parsing, tag mapping, transport errors, landing — all against canned fixtures), hint-ladder tiering and leak regeneration, Markdown stripping, editor classification, the `open` command, real measurement of linear vs. quadratic code, the FSRS-lite model and card lifecycle, warm-up flows (grade + lapse), full mocked day flows, session lifecycle (fresh attempts, blank templates, state retirement), and the history/show queries. Tests never touch the network and use `DOJO_AI_BACKEND=mock` semantics.
 
 ## Roadmap
 
-- **v0.3 — the updating bank:** LeetCode GraphQL fetcher feeding fresh statements into `dojo curate` (or a human). Personal, private use: fetched statements and test data live in the bank as normal — see the copyright note.
-- **v0.4 — deeper grading:** static analysis (radon cyclomatic complexity, ruff), the hinted-solution penalty, review score trends per pattern.
+- **v0.4 — deeper grading:** static analysis (radon cyclomatic complexity, ruff), the hinted-solution penalty, review score trends per pattern, the dual-oracle differential check for AI curation.
 - **Later:** TUI polish (Textual), two-machine sync, warm-up problem variants. A web UI only if the CLI loop proves insufficient — never first.
 
 ## Known limitations (v0)

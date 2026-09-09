@@ -10,6 +10,7 @@
   dojo show ATTEMPT_ID          full detail of one attempt (hints, code, review)
   dojo progress [--user NAME]   per-pattern proficiency + card schedule
   dojo curate [--text S|--file] AI-curate a new problem from a statement
+  dojo fetch TITLE_SLUG         fetch a LeetCode problem and auto-curate it
 """
 
 from __future__ import annotations
@@ -408,6 +409,71 @@ def _cmd_curate(args) -> int:
     return 0
 
 
+def _cmd_fetch(args) -> int:
+    """v0.3: fetch a LeetCode problem, land its statement in the bank, then
+    auto-curate it (statement stays if curation fails or no backend)."""
+    import json
+
+    from dojo.config import REPO_ROOT
+    from dojo.curator import CuratorError, apply, propose
+    from dojo.fetcher import LeetCodeError, fetch_problem, land
+    from dojo.tutor import get_backend
+
+    console = Console()
+    try:
+        problem = fetch_problem(args.title_slug)
+    except LeetCodeError as exc:
+        console.print(f"[red]Fetch failed: {exc}[/red]")
+        return 1
+    try:
+        path = land(problem, problems_dir=PROBLEMS_DIR, db_path=DB_PATH)
+    except LeetCodeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 1
+    console.print(
+        f"[green]Landed {problem.title} ({problem.title_slug}) — "
+        f"{problem.pattern}, {problem.difficulty}.[/green]\n{path}"
+    )
+    try:
+        backend = get_backend()
+    except RuntimeError as exc:
+        console.print(
+            f"[yellow]Statement landed uncurated — no AI backend ({exc}). "
+            "Curate later with `dojo curate --file <path>`.[/yellow]"
+        )
+        return 0
+    hints = {"pattern": problem.pattern}
+    if problem.function_name:
+        hints["function_name"] = problem.function_name
+    if problem.signature:
+        hints["signature"] = json.dumps(problem.signature)
+    try:
+        proposal = propose(backend, problem.statement, hints)
+    except CuratorError as exc:
+        console.print(
+            f"[yellow]Statement landed, but the curator proposal was "
+            f"rejected: {exc}[/yellow]"
+        )
+        return 1
+    proposal_dir = REPO_ROOT / "data" / "curation"
+    proposal_dir.mkdir(parents=True, exist_ok=True)
+    (proposal_dir / f"{proposal['slug']}.proposal.json").write_text(
+        json.dumps(proposal, indent=2)
+    )
+    try:
+        summary = apply(proposal)
+    except CuratorError as exc:
+        console.print(
+            f"[red]Curation failed and was rolled back; the statement stays "
+            f"in the bank uncurated: {exc}[/red]"
+        )
+        return 1
+    console.print(
+        f"[green]Curated {summary['slug']} — verification gate passed.[/green]"
+    )
+    return 0
+
+
 def _cmd_progress(args) -> int:
     console = Console()
     with connect(DB_PATH) as conn:
@@ -525,6 +591,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_curate.add_argument("--file", help="read the statement from a file")
     p_curate.set_defaults(func=_cmd_curate)
+
+    p_fetch = sub.add_parser("fetch", help="fetch a LeetCode problem and auto-curate it")
+    p_fetch.add_argument(
+        "title_slug", help="LeetCode problem slug (URL path), e.g. two-sum"
+    )
+    p_fetch.set_defaults(func=_cmd_fetch)
 
     args = parser.parse_args(argv)
     try:

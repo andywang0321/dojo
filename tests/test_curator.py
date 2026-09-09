@@ -124,6 +124,23 @@ def test_propose_returns_validated_proposal():
     assert proposal == CANNED_PROPOSAL
 
 
+def test_curator_prompt_carries_fetcher_hints():
+    from dojo.curator.prompts import build_curator_prompt
+
+    prompt = build_curator_prompt(
+        "Two Sum [Easy]\n\n...",
+        hints={
+            "function_name": "twoSum",
+            "signature": "(nums: list[int], target: int) -> list[int]",
+            "pattern": "arrays_and_hashing",
+        },
+    )
+    assert "Starter-code hints" in prompt
+    assert "function_name: twoSum" in prompt
+    assert "pattern: arrays_and_hashing" in prompt
+    assert "Two Sum [Easy]" in prompt
+
+
 def test_apply_writes_artifacts_and_passes_gate(paths):
     problems_dir, overrides_path, registry_path, db_path = paths
     namespace = _make_namespace()
