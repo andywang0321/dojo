@@ -16,22 +16,21 @@ Three pillars: a **never-solve tutor** (gated hint ladder, leak-audited), a **gr
 Prerequisites: Python ≥ 3.13 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-make sync                       # install dojo into the project venv
-export DEEPSEEK_API_KEY=...     # or put it in a gitignored .env
-uv run dojo init --user you     # one-time setup (see below)
-uv run dojo day                 # the daily loop: warm-ups + a scheduler-picked problem
+make sync                  # install dojo into the project venv
+uv run dojo                # first run: a one-time setup wizard, then the daily routine
+dojo                       # afterwards (the wizard can put `dojo` on your PATH)
 ```
 
-No API key? `DOJO_AI_BACKEND=mock uv run dojo day` runs the entire pipeline with canned responses — everything except real AI text works.
+The setup wizard asks for your DeepSeek API key (masked, saved to a gitignored `.env` — press Enter to skip and use `DOJO_AI_BACKEND=mock` later), your name, and offers to install a `dojo` wrapper on your PATH so every day is just `dojo`. No API key? `DOJO_AI_BACKEND=mock uv run dojo` runs the entire pipeline with canned responses — everything except real AI text works.
 
-**What `dojo init` does.** One-time setup, safe to re-run: it creates the SQLite database, imports every problem in `problems/` into the problem bank, registers the user(s) you name, and backfills spaced-repetition cards from any solved history. Afterwards most commands don't need `--user` (dojo resolves the single registered user automatically).
+One computer, one user: dojo remembers you in a gitignored config. `dojo user` switches the rare exception, `git switch`-style.
 
 ## The daily loop
 
 ```bash
-uv run dojo day               # scheduler picks the problem (weakest pattern first)
-uv run dojo day <slug>        # or pick one yourself
-uv run dojo warmup            # due retrievals only
+dojo                        # the daily routine: warm-ups + a scheduler-picked problem
+dojo <slug>                 # the same, on a specific problem
+dojo warmup                 # due retrievals only
 ```
 
 Inside a session the prompt always lists the commands: `check` (run the visible tests), `hint <what you're stuck on>` (one rung up the ladder), `open` (re-open your editor), `submit` (judge → self-report → measure → review → reflect), `quit` (saves your progress; the next session starts fresh from a blank template). Every session becomes one attempt row in your history.
@@ -50,13 +49,15 @@ Inside a session the prompt always lists the commands: `check` (run the visible 
 ## Other commands
 
 ```bash
-uv run dojo list              # the problem bank (✓ = curated, ready for `dojo day`)
-uv run dojo progress          # per-pattern proficiency, card schedule, score trends
-uv run dojo history           # your attempts, newest first
-uv run dojo show <id>         # one attempt in full (hints, code, review; --code for code only)
-uv run dojo check [<slug>]    # visible tests against the active workbench
-uv run dojo curate --text "…" # AI-curate a new problem from a pasted statement
-uv run dojo fetch <slug>      # fetch a LeetCode problem and auto-curate it
+dojo list                   # the problem bank (✓ = curated, ready for the daily loop)
+dojo progress               # per-pattern proficiency, card schedule, score trends
+dojo history                # your attempts, newest first
+dojo show <id>              # one attempt in full (hints, code, review; --code for code only)
+dojo check [<slug>]         # visible tests against the active workbench
+dojo user [<name>]          # switch the active user (numbered picker without a name)
+dojo setup                  # re-run the setup wizard (change key, reinstall PATH)
+dojo curate --text "…"      # AI-curate a new problem from a pasted statement
+dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
 ```
 
 ## Honest caveats

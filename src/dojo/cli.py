@@ -1,21 +1,28 @@
 """The dojo CLI.
 
-  dojo init [--user NAME ...]   create the DB, seed the problem bank
-  dojo list [--pattern P]       catalog, with solved status
-  dojo day [SLUG] [--user N]    warm-ups (if due) + solve session
-  dojo warmup [--user NAME]     run due warm-up retrievals only
-  dojo check [SLUG]             visible tests on the current workbench
-  dojo profile [--user NAME]    your attempt history
-  dojo history [--user NAME]    attempts, newest first (see `show <id>`)
-  dojo show ATTEMPT_ID          full detail of one attempt (hints, code, review)
-  dojo progress [--user NAME]   per-pattern proficiency + card schedule
+  dojo                        the daily routine (warm-ups + a picked problem)
+  dojo <slug>                 the daily routine on a specific problem
+  dojo day [SLUG]             the same, explicitly (alias)
+  dojo warmup                 run due warm-up retrievals only
+  dojo learn [TOPIC]          learning mode (planned — see roadmap/next.md)
+  dojo list [--pattern P]     the problem bank, with your solved status
+  dojo check [SLUG]           visible tests on the current workbench
+  dojo profile                your attempt history
+  dojo history                attempts, newest first (see `show <id>`)
+  dojo show ATTEMPT_ID        full detail of one attempt
+  dojo progress               per-pattern proficiency, cards, score trends
+  dojo user [NAME]            switch the active user (numbered picker without NAME)
   dojo curate [--text S|--file] AI-curate a new problem from a statement
-  dojo fetch TITLE_SLUG         fetch a LeetCode problem and auto-curate it
+  dojo fetch TITLE_SLUG       fetch a LeetCode problem and auto-curate it
+  dojo setup                  re-run the setup wizard (key, user, PATH)
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -24,13 +31,12 @@ from rich.panel import Panel
 from rich.table import Table
 
 from dojo import scheduler
-from dojo.bank import seed_problems
-from dojo.config import DB_PATH, PROBLEMS_DIR
+from dojo.bank import ensure_seeded
+from dojo.config import DB_PATH, PROBLEMS_DIR, REPO_ROOT, load_conf, save_conf
 from dojo.db import (
     connect,
     get_attempt,
     get_or_create_user,
-    init_db,
     list_attempts,
     loads_json,
     now,
@@ -38,39 +44,150 @@ from dojo.db import (
 )
 
 
-def _resolve_user(conn, name: str | None) -> str:
-    """The user for commands that need one. An explicit --user always wins;
-    otherwise the DB's single existing user; otherwise an error — never
-    silently invent a user and split the learner's history."""
-    if name:
-        return name
+class NeedsSetup(RuntimeError):
+    """No user exists yet — the caller should run the setup wizard."""
+
+
+def _active_user(conn, conf_user: str | None) -> str:
+    """The active user: the conf file wins (validated), else the DB's sole
+    user. Zero users means first run (NeedsSetup → wizard); a conf user
+    missing from the DB is an error, never a silent typo'd account."""
+    if conf_user:
+        if not conn.execute(
+            "SELECT 1 FROM users WHERE name = ?", (conf_user,)
+        ).fetchone():
+            raise RuntimeError(
+                f"configured user '{conf_user}' is not in the database — "
+                "run `dojo user` to list, or `dojo setup`."
+            )
+        return conf_user
     rows = conn.execute("SELECT name FROM users ORDER BY name").fetchall()
     if len(rows) == 1:
         return rows[0]["name"]
     if not rows:
-        raise RuntimeError(
-            "No users yet — run `dojo init --user NAME` first, or pass --user."
-        )
-    raise RuntimeError("Multiple users in the DB — pass --user to say who is practicing.")
+        raise NeedsSetup("no users yet")
+    raise RuntimeError(
+        "multiple users — run `dojo user` to pick the active one."
+    )
 
 
-def _cmd_init(args) -> int:
-    init_db(DB_PATH)
-    n = seed_problems(connect(DB_PATH), PROBLEMS_DIR)
+def _choose_user(console: Console, names: list[str]) -> str | None:
+    """The `dojo user` numbered picker: returns the chosen name, or None on
+    'q'."""
+    while True:
+        console.print("Users:")
+        for i, name in enumerate(names, start=1):
+            console.print(f"  {i}. {name}")
+        raw = console.input("Pick a number (q to cancel): ").strip()
+        if raw.lower() == "q":
+            return None
+        try:
+            index = int(raw)
+            if 1 <= index <= len(names):
+                return names[index - 1]
+        except ValueError:
+            pass
+        console.print("[red]Not a valid choice — try again.[/red]")
+
+
+def _normalize_argv(argv: list[str], commands: set[str] | None = None) -> list[str]:
+    """Bare `dojo` runs the daily routine; `dojo <slug>` targets a specific
+    problem; anything else passes through untouched."""
+    commands = COMMANDS if commands is None else commands
+    if not argv:
+        return ["day"]
+    if argv[0] in commands or argv[0].startswith("-"):
+        return argv
+    return ["day"] + argv
+
+
+def _cmd_user(args) -> int:
     console = Console()
-    console.print(f"[green]Seeded {n} problems into {DB_PATH}[/green]")
     with connect(DB_PATH) as conn:
-        for name in args.user or []:
-            conn.execute(
-                "INSERT OR IGNORE INTO users (name, created_at) VALUES (?, ?)",
-                (name, now()),
+        names = [r["name"] for r in conn.execute("SELECT name FROM users ORDER BY name")]
+    if args.name:
+        target = args.name
+        if target not in names:
+            console.print(
+                f"[red]Unknown user '{target}' — `dojo user` to list, "
+                "`dojo setup` to add one.[/red]"
             )
-        conn.commit()
-        n_cards = scheduler.backfill_cards(conn)
-        users = [r["name"] for r in conn.execute("SELECT name FROM users")]
-    console.print(f"Users: {', '.join(users) or '(none yet — run `dojo init --user NAME`)'}")
-    if n_cards:
-        console.print(f"[dim]Backfilled {n_cards} pattern card(s) from solved attempts (due now).[/dim]")
+            return 1
+    elif not names:
+        console.print("[red]No users yet — run `dojo setup`.[/red]")
+        return 1
+    elif len(names) == 1:
+        target = names[0]
+    else:
+        target = _choose_user(console, names)
+        if target is None:
+            return 0
+    current = load_conf().get("user")
+    if target == current:
+        console.print(f"[dim]'{target}' is already the active user.[/dim]")
+        return 0
+    save_conf({**load_conf(), "user": target})
+    console.print(f"[green]Active user: {target}[/green]")
+    return 0
+
+
+def _make_path_installer(console: Console):
+    """The interactive PATH step, shared by `dojo setup` and the first-run
+    auto-trigger. Returns True when the wrapper was installed."""
+    from dojo.setup import append_rc, install_wrapper, rc_line
+
+    def path_install() -> bool:
+        bin_dir = Path(os.path.expanduser("~")) / ".local" / "bin"
+        console.print(
+            f"[bold]Put `dojo` on your PATH?[/bold] I'll install a tiny wrapper "
+            f"at {bin_dir / 'dojo'} that runs the live repo via `uv run`."
+        )
+        answer = console.input("Install? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            return False
+        install_wrapper(bin_dir, str(REPO_ROOT))
+        if str(bin_dir) not in os.environ.get("PATH", "").split(os.pathsep):
+            shell = os.path.basename(os.environ.get("SHELL", ""))
+            rc_name = ".zshrc" if "zsh" in shell else ".bashrc"
+            rc_path = Path(os.path.expanduser("~")) / rc_name
+            line = rc_line(str(bin_dir))
+            if (
+                console.input(
+                    f"Append this line to {rc_path}? [y/N]\n  {line}\n"
+                ).strip().lower()
+                in ("y", "yes")
+            ):
+                append_rc(rc_path, line)
+                console.print(
+                    f"[dim]Appended to {rc_path} — restart your shell.[/dim]"
+                )
+            else:
+                console.print(
+                    f"[dim]Skipped. Add it yourself when ready: {line}[/dim]"
+                )
+        return True
+
+    return path_install
+
+
+def _cmd_setup(args) -> int:
+    from dojo.setup import default_user_name, run_wizard
+
+    console = Console()
+    console.print("[dim]Checks: python ✓ · uv ✓ (wrapper uses `uv run`)[/dim]")
+    run_wizard(
+        console,
+        dotenv_path=REPO_ROOT / ".env",
+        conf_path=REPO_ROOT / "data" / "dojo.conf",
+        db_path=DB_PATH,
+        problems_dir=PROBLEMS_DIR,
+        default_name=default_user_name(os.environ.get("USER"), _git_user_name()),
+        user_override=args.user,
+        key_getter=(lambda: "")
+        if args.skip_key
+        else (lambda: getpass.getpass("DeepSeek API key (Enter to skip): ")),
+        path_install=None if args.no_path else _make_path_installer(console),
+    )
     return 0
 
 
@@ -85,13 +202,14 @@ def _cmd_list(args) -> int:
         query += " ORDER BY pattern, difficulty, title"
         rows = conn.execute(query, params).fetchall()
         solved: dict[int, str] = {}
-        if args.user:
+        user = getattr(args, "_user", None)
+        if user:
             for r in conn.execute(
                 """
                 SELECT problem_id, status FROM attempts
                 WHERE user_id = (SELECT id FROM users WHERE name = ?)
                 """,
-                (args.user,),
+                (user,),
             ):
                 solved[r["problem_id"]] = r["status"]
     table = Table(title="Problem bank")
@@ -99,7 +217,7 @@ def _cmd_list(args) -> int:
     table.add_column("Difficulty")
     table.add_column("Pattern")
     table.add_column("Curated")
-    table.add_column("Status" if args.user else "Solved")
+    table.add_column("Status")
     for r in rows:
         table.add_row(
             f"{r['title']} [dim]({r['slug']})[/dim]",
@@ -116,29 +234,44 @@ def _cmd_list(args) -> int:
     return 0
 
 
+def _print_footer(console: Console, conn, user_id: int) -> None:
+    parts = [f"tomorrow: {scheduler.due_next_day_count(conn, user_id)} card(s) due"]
+    trends = review_trends(conn, user_id)
+    if trends:
+        best = max(trends, key=lambda t: t["overall"])
+        parts.append(f"best pattern: {best['pattern']} ({best['overall']})")
+    console.print("[dim]" + " · ".join(parts) + "[/dim]")
+
+
 def _cmd_day(args) -> int:
     from dojo.session import run_day, run_warmups
     from dojo.tutor import get_backend
 
     console = Console()
+    user = getattr(args, "_user", None)
+    if not user:
+        console.print("[red]No active user — run `dojo setup`.[/red]")
+        return 1
     with connect(DB_PATH) as conn:
         try:
-            user = _resolve_user(conn, args.user)
             backend = get_backend()
         except RuntimeError as exc:
             console.print(f"[red]{exc}[/red]")
             return 1
+        user_id = get_or_create_user(conn, user)
+        due = scheduler.due_now_count(conn, user_id)
+        console.print(f"[dim]Status: {due} warm-up card(s) due.[/dim]")
         if not args.skip_warmup:
             run_warmups(conn, console, backend, user, limit=2)
         slug = args.slug
         if slug is None:
-            user_id = get_or_create_user(conn, user)
             problem = scheduler.pick_new_problem(conn, user_id)
             if problem is None:
                 console.print(
                     "[green]Every curated problem is solved — nothing new to pick. "
                     "Run `dojo warmup` to keep patterns alive.[/green]"
                 )
+                _print_footer(console, conn, user_id)
                 return 0
             slug = problem["slug"]
             console.print(
@@ -146,6 +279,7 @@ def _cmd_day(args) -> int:
                 f"({problem['pattern']}, {problem['difficulty']}) — weakest pattern first."
             )
         outcome = run_day(conn, console, backend, slug, user, open_editor=args.open)
+        _print_footer(console, conn, user_id)
     return 0 if outcome in ("solved", "quit", "warmup_done") else 1
 
 
@@ -154,9 +288,12 @@ def _cmd_warmup(args) -> int:
     from dojo.tutor import get_backend
 
     console = Console()
+    user = getattr(args, "_user", None)
+    if not user:
+        console.print("[red]No active user — run `dojo setup`.[/red]")
+        return 1
     with connect(DB_PATH) as conn:
         try:
-            user = _resolve_user(conn, args.user)
             backend = get_backend()
         except RuntimeError as exc:
             console.print(f"[red]{exc}[/red]")
@@ -186,12 +323,11 @@ def _cmd_check(args) -> int:
 
 def _cmd_profile(args) -> int:
     console = Console()
+    user = getattr(args, "_user", None)
+    if not user:
+        console.print("[red]No active user — run `dojo setup`.[/red]")
+        return 1
     with connect(DB_PATH) as conn:
-        try:
-            user = _resolve_user(conn, args.user)
-        except RuntimeError as exc:
-            console.print(f"[red]{exc}[/red]")
-            return 1
         rows = conn.execute(
             """
             SELECT p.slug, p.title, p.difficulty, a.status, a.hint_count,
@@ -228,12 +364,11 @@ def _cmd_profile(args) -> int:
 
 def _cmd_history(args) -> int:
     console = Console()
+    user = getattr(args, "_user", None)
+    if not user:
+        console.print("[red]No active user — run `dojo setup`.[/red]")
+        return 1
     with connect(DB_PATH) as conn:
-        try:
-            user = _resolve_user(conn, args.user)
-        except RuntimeError as exc:
-            console.print(f"[red]{exc}[/red]")
-            return 1
         user_id = get_or_create_user(conn, user)
         rows = list_attempts(conn, user_id, slug=args.slug, limit=args.limit)
     table = Table(title=f"Attempts — {user}")
@@ -493,12 +628,11 @@ def _cmd_fetch(args) -> int:
 
 def _cmd_progress(args) -> int:
     console = Console()
+    user = getattr(args, "_user", None)
+    if not user:
+        console.print("[red]No active user — run `dojo setup`.[/red]")
+        return 1
     with connect(DB_PATH) as conn:
-        try:
-            user = _resolve_user(conn, args.user)
-        except RuntimeError as exc:
-            console.print(f"[red]{exc}[/red]")
-            return 1
         user_id = get_or_create_user(conn, user)
         attempt_rows = conn.execute(
             """
@@ -576,30 +710,23 @@ def _cmd_progress(args) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dojo", description="AI-guided interview prep: never-solve tutor + empirical grader."
     )
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    p_init = sub.add_parser("init", help="create DB, seed problem bank")
-    p_init.add_argument("--user", action="append", help="create a user (repeatable)")
-    p_init.set_defaults(func=_cmd_init)
+    sub = parser.add_subparsers(dest="command")
 
     p_list = sub.add_parser("list", help="list the problem bank")
     p_list.add_argument("--pattern", help="filter by pattern directory")
-    p_list.add_argument("--user", help="show per-user solved status")
     p_list.set_defaults(func=_cmd_list)
 
-    p_day = sub.add_parser("day", help="warm-ups (if due) + a solve session")
+    p_day = sub.add_parser("day", help="the daily routine (bare `dojo` runs this)")
     p_day.add_argument("slug", nargs="?", help="problem slug (scheduler picks if omitted)")
-    p_day.add_argument("--user", help="who is solving (default: 'default')")
     p_day.add_argument("--open", action="store_true", help="open $EDITOR right away (use the in-session `open` command instead)")
     p_day.add_argument("--skip-warmup", action="store_true", help="skip due warm-up retrievals")
     p_day.set_defaults(func=_cmd_day)
 
     p_warmup = sub.add_parser("warmup", help="run due warm-up retrievals only")
-    p_warmup.add_argument("--user", help="who is practicing (default: 'default')")
     p_warmup.set_defaults(func=_cmd_warmup)
 
     p_check = sub.add_parser("check", help="run visible tests on the active workbench")
@@ -607,11 +734,9 @@ def main(argv: list[str] | None = None) -> int:
     p_check.set_defaults(func=_cmd_check)
 
     p_profile = sub.add_parser("profile", help="show attempt history")
-    p_profile.add_argument("--user", help="whose profile (default: the sole DB user)")
     p_profile.set_defaults(func=_cmd_profile)
 
     p_history = sub.add_parser("history", help="list your attempts, newest first")
-    p_history.add_argument("--user", help="whose history (default: the sole DB user)")
     p_history.add_argument("--slug", help="filter to one problem")
     p_history.add_argument("--limit", type=int, help="show only the last N attempts")
     p_history.set_defaults(func=_cmd_history)
@@ -624,8 +749,17 @@ def main(argv: list[str] | None = None) -> int:
     p_show.set_defaults(func=_cmd_show)
 
     p_progress = sub.add_parser("progress", help="per-pattern proficiency + card schedule")
-    p_progress.add_argument("--user", help="whose progress (default: the sole DB user)")
     p_progress.set_defaults(func=_cmd_progress)
+
+    p_user = sub.add_parser("user", help="switch the active user (numbered picker without a name)")
+    p_user.add_argument("name", nargs="?", help="the user to switch to")
+    p_user.set_defaults(func=_cmd_user)
+
+    p_setup = sub.add_parser("setup", help="re-run the setup wizard (key, user, PATH)")
+    p_setup.add_argument("--user", help="register this user without prompting")
+    p_setup.add_argument("--skip-key", action="store_true", help="don't prompt for an API key")
+    p_setup.add_argument("--no-path", action="store_true", help="don't offer the PATH install")
+    p_setup.set_defaults(func=_cmd_setup)
 
     p_curate = sub.add_parser("curate", help="AI-curate a new problem from a statement")
     p_curate.add_argument(
@@ -639,8 +773,81 @@ def main(argv: list[str] | None = None) -> int:
         "title_slug", help="LeetCode problem slug (URL path), e.g. two-sum"
     )
     p_fetch.set_defaults(func=_cmd_fetch)
+    return parser
 
-    args = parser.parse_args(argv)
+
+PARSER = _build_parser()
+COMMANDS = set(PARSER._subparsers._group_actions[0].choices)  # noqa: SLF001
+USER_COMMANDS = {"day", "warmup", "profile", "history", "progress", "list"}
+
+
+def _resolve_for_dispatch(args, console: Console):
+    """Attach args._user, running the setup wizard on first run. Returns the
+    user name or None (dispatch prints guidance and exits 1)."""
+    from dojo.setup import default_user_name, run_wizard
+
+    conf = load_conf()
+    with connect(DB_PATH) as conn:
+        try:
+            return _active_user(conn, conf.get("user"))
+        except NeedsSetup:
+            if not sys.stdin.isatty():
+                console.print(
+                    "[red]First run — no user yet. Run `dojo setup` "
+                    "interactively, or `dojo setup --user NAME --skip-key --no-path` "
+                    "for a scripted install.[/red]"
+                )
+                return None
+            console.print("[yellow]Welcome to dojo — one-time setup first.[/yellow]")
+            try:
+                run_wizard(
+                    console,
+                    dotenv_path=REPO_ROOT / ".env",
+                    conf_path=REPO_ROOT / "data" / "dojo.conf",
+                    db_path=DB_PATH,
+                    problems_dir=PROBLEMS_DIR,
+                    default_name=default_user_name(
+                        os.environ.get("USER"), _git_user_name()
+                    ),
+                    key_getter=lambda: getpass.getpass(
+                        "DeepSeek API key (Enter to skip): "
+                    ),
+                    path_install=_make_path_installer(console),
+                )
+            except Exception as exc:  # noqa: BLE001 - surface, then exit cleanly
+                console.print(f"[red]Setup failed: {exc}[/red]")
+                return None
+            conf = load_conf()
+            return _active_user(conn, conf.get("user"))
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return None
+
+
+def _git_user_name() -> str | None:
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "config", "user.name"], capture_output=True, text=True, timeout=5
+        )
+        return proc.stdout.strip() or None
+    except Exception:  # noqa: BLE001 - git may be absent; the default just degrades
+        return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    argv = _normalize_argv(raw, COMMANDS)
+    args = PARSER.parse_args(argv)
+    if args.command is None:
+        PARSER.print_help()
+        return 0
+    console = Console()
+    if args.command != "setup":
+        ensure_seeded(DB_PATH)
+    if args.command in USER_COMMANDS:
+        args._user = _resolve_for_dispatch(args, console)
     try:
         return args.func(args)
     except KeyboardInterrupt:

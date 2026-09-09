@@ -22,3 +22,6 @@ workbench/
 
 # Curator provenance (scratch proposals)
 data/curation/
+
+# Active-user config
+data/dojo.conf

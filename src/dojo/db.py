@@ -86,11 +86,15 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Additive migrations only (AGENTS.md rule 4: user data is real)."""
+    """Additive migrations only (AGENTS.md rule 4: user data is real).
+    connect() owns the schema: a fresh DB gets the full SCHEMA here, and
+    existing DBs get any missing additive columns."""
     if not conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'attempts'"
     ).fetchone():
-        return  # fresh DB; SCHEMA will create everything
+        conn.executescript(SCHEMA)  # fresh (or partial) DB: create everything
+        conn.commit()
+        return
     attempts_cols = {r["name"] for r in conn.execute("PRAGMA table_info(attempts)")}
     if "kind" not in attempts_cols:
         conn.execute(

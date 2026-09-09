@@ -7,6 +7,7 @@ whole pipeline is exercisable without an API key.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -19,6 +20,24 @@ PROBLEM_OVERRIDES = REPO_ROOT / "data" / "problem_overrides.json"
 #: organized by pattern directory (imported by dojo.bank).
 PROBLEMS_DIR = REPO_ROOT / "problems"
 DB_PATH = DATA_DIR / "dojo.db"
+#: Active-user config (gitignored): {"user": "name"} — one computer, one user.
+DOJO_CONF = DATA_DIR / "dojo.conf"
+
+
+def load_conf(path: Path | None = None) -> dict:
+    path = path or DOJO_CONF
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_conf(data: dict, path: Path | None = None) -> None:
+    path = path or DOJO_CONF
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
 
 
 def ai_backend() -> str:

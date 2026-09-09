@@ -50,7 +50,7 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 - `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, static_analysis JSON, timings)` — the learner model. One invocation = one attempt row.
 - `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_review_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern).
 
-`data/dojo.db` and `workbench/` are gitignored: personal state, not source. Migrations are additive only (`ALTER TABLE ... ADD COLUMN` or new tables); user data is never reset as a side effect.
+`data/dojo.db`, `workbench/`, and `data/dojo.conf` are gitignored: personal state, not source. Migrations are additive only (`ALTER TABLE ... ADD COLUMN` or new tables); user data is never reset as a side effect. `db.connect()` owns the schema — a fresh DB gets the full `SCHEMA` on first connect.
 
 ## The daily flow, mechanically
 
@@ -68,7 +68,12 @@ All `$EDITOR` behavior lives in `editor.py`. GUI editors detach via `Popen(start
 
 ## CLI conventions
 
-argparse subcommands in `cli.py`; each returns an exit code. Interactive flows read from `console.input`. Commands that need a user resolve `--user` against the DB's single existing user and error otherwise — a forgotten flag never invents a `default` user. `history` (list attempts, newest first) and `show <id>` (full attempt detail) render rows fetched by `db.list_attempts` / `db.get_attempt`.
+- **Entry point (v0.5):** bare `dojo` runs the daily routine (argv normalization: a first non-flag, non-subcommand argument is a slug); `dojo day` is the documented alias. A status line ("N warm-up card(s) due") precedes the session; a footer ("tomorrow: … · best pattern: …") follows it.
+- **One computer, one user:** no `--user` flags anywhere. The active user resolves from gitignored `data/dojo.conf` → the DB's sole user; zero users means first run, which triggers the setup wizard (`dojo/setup.py`, pure injectable logic) and then continues the original command. Non-TTY first runs print guidance instead of prompting.
+- **Auto-reseed:** every CLI entry (except `setup`) runs `bank.ensure_seeded` — the bank always mirrors `problems/` (idempotent upsert, additive-only, at the CLI layer, not in `db.connect()`).
+- **`dojo user [name]`** switches the active user; no name → numbered picker. A conf user missing from the DB is an error, never a silent typo'd account.
+- `history` (list attempts, newest first) and `show <id>` (full attempt detail) render rows fetched by `db.list_attempts` / `db.get_attempt`.
+- Interactive flows read from `console.input`; tests use the `FakeConsole` fixture (its `actions` hook simulates editing the workbench mid-session).
 
 ## Known limitations
 

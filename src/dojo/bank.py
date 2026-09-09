@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from dojo.config import PROBLEMS_DIR, PROBLEM_OVERRIDES
-from dojo.db import dumps_json, now
+from dojo.db import connect, dumps_json, now
 
 _HEADER_RE = re.compile(r"^(.*?)\s*[\[\(]\s*(Easy|Medium|Hard)\s*[\]\)]")
 _COMPLEXITY_RE = re.compile(
@@ -162,3 +162,11 @@ def seed_problems(conn: sqlite3.Connection, root: Path = PROBLEMS_DIR) -> int:
         inserted += 1
     conn.commit()
     return inserted
+
+
+def ensure_seeded(db_path: Path, root: Path = PROBLEMS_DIR) -> int:
+    """The startup reseed (v0.5): the bank always mirrors problems/.
+    Idempotent upsert — never deletes rows attempts reference. Runs at the
+    CLI entry layer, not in db.connect() (bank imports db; the reverse
+    would be circular)."""
+    return seed_problems(connect(db_path), root)

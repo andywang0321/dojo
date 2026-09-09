@@ -10,8 +10,8 @@ sync: ## install deps + editable dojo (incl. dev group for pytest)
 test: ## run the full test suite (offline, mock AI backend)
 	$(UV) run python -m pytest -q
 
-seed: ## create DB and seed the problem bank from dsa/
-	$(UV) run dojo init --user andy
+seed: ## scripted first-run setup (no key prompt, no PATH step)
+	$(UV) run dojo setup --user andy --skip-key --no-path
 
 demo: ## offline end-to-end demo on valid_parentheses
 	DOJO_AI_BACKEND=mock $(UV) run dojo day valid_parentheses --user andy

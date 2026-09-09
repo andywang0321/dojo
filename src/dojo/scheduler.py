@@ -253,3 +253,25 @@ def humanize_due(due_iso: str) -> str:
         return f"in {round(hours)} hours"
     days = hours / 24
     return f"in {round(days, 1)} days"
+
+
+def due_now_count(conn: sqlite3.Connection, user_id: int) -> int:
+    """Cards due right now — the `dojo` status line."""
+    return conn.execute(
+        "SELECT COUNT(*) AS n FROM pattern_cards WHERE user_id = ? AND due_at <= ?",
+        (user_id, now()),
+    ).fetchone()["n"]
+
+
+def due_next_day_count(conn: sqlite3.Connection, user_id: int) -> int:
+    """Cards coming due within 24 hours — the session-end footer."""
+    tomorrow = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(
+        timespec="seconds"
+    )
+    return conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM pattern_cards
+        WHERE user_id = ? AND due_at > ? AND due_at <= ?
+        """,
+        (user_id, now(), tomorrow),
+    ).fetchone()["n"]

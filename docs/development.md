@@ -5,6 +5,7 @@
 ```bash
 make sync    # uv sync with a workspace-local UV_CACHE_DIR (.uv-cache)
 make test    # uv run python -m pytest -q
+make seed    # scripted first-run: dojo setup --user andy --skip-key --no-path
 ```
 
 Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by hand-editing the lockfile. **Always route uv through the Makefile targets (or set `UV_CACHE_DIR=$(pwd)/.uv-cache` yourself)** — the default uv cache lives outside the workspace and trips sandbox file policies. The test target uses `python -m pytest` so entry-script shebangs (which broke once after the repo was renamed) can never break it again.
