@@ -33,7 +33,7 @@ dojo <slug>                 # the same, on a specific problem
 dojo warmup                 # due retrievals only
 ```
 
-Inside a session the prompt always lists the commands: `open` (re-open your editor), `check` (run the visible tests + advisory lint/complexity findings), `hint <what you're stuck on>` (one rung up the ladder), `report` (audit this problem's curation), `submit` (judge → self-report → measure → reflect → review), `quit` (saves your progress; the next session starts fresh from a blank template). A bare question — with or without the `hint` prefix, even starting with another command word — reaches the tutor directly. Every session becomes one attempt row in your history.
+Inside a session the prompt always lists the commands: `open` (re-open your editor), `check` (run the visible tests + advisory lint/complexity findings), `hint <what you're stuck on>` (one rung up the ladder), `learn` (park this attempt and study its pattern — or another topic — with the teacher), `report` (audit this problem's curation), `submit` (judge → self-report → measure → reflect → review), `quit` (saves your progress; the next session starts fresh from a blank template). A bare question — with or without the `hint` prefix, even starting with another command word — reaches the tutor directly. Every session becomes one attempt row in your history.
 
 After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), **`discuss <question>`** opens a post-solve conversation (solutions allowed now), **`done`** closes the session.
 
@@ -48,10 +48,19 @@ After the review you're not done: **`polish`** re-grades your edited code and up
 | 4 | Edge cases | Point at input shapes the code must survive |
 | 5 | Skeleton (no code) | Outline the steps in words |
 
+## Learning mode
+
+`dojo learn [topic]` opens a conversation with the **teacher** — a different agent from the tutor. It opens with a short primer (the concept, why it exists, core operations with their complexity, one canonical example), then answers freely, Socratic-style, with ML/statistics analogies. `practice` hands off to the easiest unsolved problem in the topic; `done` ends the session.
+
+Inside a solve, `learn` **parks** your attempt (progress saved, stays 'unsolved') and opens the same conversation on the problem's pattern — accepting the handoff retries **the same problem** with a fresh blank template, so the graded solve stays honest. When the daily scheduler picks a problem from a pattern you've never studied or attempted, dojo offers to learn first — one keystroke declines, and the session proceeds either way.
+
+The never-solve boundary narrows here, deliberately: the teacher's context is the topic and the conversation only — never a problem statement — so it may show topic-canonical code (implementing a heap is legitimate teaching). Grading oracles still never enter any agent's context.
+
 ## Other commands
 
 ```bash
 dojo list                   # the problem bank (✓ = curated, ready for the daily loop)
+dojo learn [TOPIC]          # learning mode: a topic primer with a practice handoff
 dojo progress               # per-pattern proficiency, card schedule, score trends
 dojo history                # your attempts, newest first
 dojo show <id>              # one attempt in full (hints, code, review; --code for code only)
@@ -68,6 +77,7 @@ dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
 - The profiler reports *evidence* ("consistent with O(n) at tested scales", R², confidence), never proofs; a mismatch between expected / claimed / measured is a signal to investigate.
 - Warm-ups re-solve the least recently solved problem in a pattern; a pattern needs at least one solved problem to warm up.
 - `dojo fetch` / `dojo curate` need the API key (the curated oracle is AI-generated and gated by an automated verification suite).
+- The teacher has no grader behind it — it's instructed to be humble about uncertainty, but pedagogy is unverified by construction. If a definition feels off, double-check it elsewhere.
 
 ## Where the rest lives
 

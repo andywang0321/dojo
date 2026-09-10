@@ -77,6 +77,21 @@ CREATE TABLE IF NOT EXISTS pattern_cards (
 );
 """
 
+# v0.8 learning mode: one row per learn session; the transcript is rewritten
+# after every exchange (crash-safe), completed flips to 1 on graceful exit.
+LEARN_SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS learn_sessions (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    pattern     TEXT NOT NULL,
+    transcript  TEXT NOT NULL,  -- JSON: [{"role": "student"|"teacher", "text": ...}]
+    created_at  TEXT NOT NULL,
+    completed   INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+SCHEMA = SCHEMA + LEARN_SESSIONS_DDL
+
 
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,6 +128,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     problems_cols = {r["name"] for r in conn.execute("PRAGMA table_info(problems)")}
     if "signature" not in problems_cols:
         conn.execute("ALTER TABLE problems ADD COLUMN signature TEXT")
+    conn.execute(LEARN_SESSIONS_DDL)  # v0.8: idempotent table creation
     conn.commit()
 
 
@@ -189,6 +205,61 @@ def loads_json(value: str | None, default=None):
     if value is None:
         return default
     return json.loads(value)
+
+
+def record_learn_session(
+    conn: sqlite3.Connection, user_id: int, pattern: str, transcript: list[dict]
+) -> int:
+    """Start a learning-mode session (v0.8) with its initial transcript.
+    Returns the session id; `update_learn_transcript` rewrites the JSON as
+    the conversation grows."""
+    cur = conn.execute(
+        """
+        INSERT INTO learn_sessions (user_id, pattern, transcript, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (user_id, pattern, dumps_json(transcript), now()),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_learn_transcript(
+    conn: sqlite3.Connection,
+    session_id: int,
+    transcript: list[dict],
+    completed: bool = False,
+) -> None:
+    """Persist the conversation so far — called after every exchange, so a
+    crash loses at most one turn. ``completed`` marks a graceful end."""
+    conn.execute(
+        "UPDATE learn_sessions SET transcript = ?, completed = ? WHERE id = ?",
+        (dumps_json(transcript), 1 if completed else 0, session_id),
+    )
+    conn.commit()
+
+
+def studied_patterns(conn: sqlite3.Connection, user_id: int) -> set[str]:
+    """Patterns the user has engaged with: any learn session OR any attempt
+    in the pattern. One shared notion feeding the proactive offer and the
+    `dojo progress` markers."""
+    rows = conn.execute(
+        """
+        SELECT pattern FROM learn_sessions WHERE user_id = ?
+        UNION
+        SELECT p.pattern FROM attempts a JOIN problems p ON p.id = a.problem_id
+        WHERE a.user_id = ?
+        """,
+        (user_id, user_id),
+    ).fetchall()
+    return {r["pattern"] for r in rows}
+
+
+def unstudied(conn: sqlite3.Connection, user_id: int, pattern: str | None) -> bool:
+    """True when the pattern has no learn session and no attempt yet — the
+    trigger for the proactive learn offer. A missing pattern is never
+    offered (there is nothing coherent to teach it about)."""
+    return bool(pattern) and pattern not in studied_patterns(conn, user_id)
 
 
 REVIEW_DIMS = (

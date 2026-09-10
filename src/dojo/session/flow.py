@@ -1,7 +1,8 @@
 """The daily flow: one problem, end to end.
 
   solve in $EDITOR (via `open`, non-blocking) → check (visible tests)
-  → hint ladder → submit → judge (visible + generated + oracle)
+  → hint ladder → learn (park + teach the pattern, optional retry handoff)
+  → submit → judge (visible + generated + oracle)
   → self-report complexity → empirical profiler → three-way complexity table
   → AI review → reflection → persist attempt
 
@@ -27,6 +28,7 @@ from dojo.db import dumps_json, get_or_create_user, loads_json, now
 from dojo.editor import launch as launch_editor
 from dojo.judge import JUDGE_CASES, ORACLES, PROFILER_INPUTS, run_cases
 from dojo.profiler import classify, measure
+from dojo.session.learn import resolve_pattern, run_learn
 from dojo.session.state import (
     WorkbenchState,
     load_state,
@@ -42,7 +44,7 @@ GENERATED_CASES = 30
 
 COMMANDS_HINT = (
     "[dim]Commands: [b]open[/b] · [b]check[/b] · [b]hint <text>[/b] · "
-    "[b]submit[/b] · [b]quit[/b][/dim]"
+    "[b]learn[/b] · [b]submit[/b] · [b]quit[/b][/dim]"
 )
 
 POST_COMMANDS_HINT = (
@@ -528,6 +530,27 @@ def _post_solve_loop(conn: sqlite3.Connection, console: Console, backend, proble
             console.print("[dim]Unknown command.[/dim]")
 
 
+def _persist_abandoned(conn: sqlite3.Connection, state: WorkbenchState, console: Console, message: str) -> None:
+    """The quit/learn parking persistence: code and hints land on the
+    attempt row, status stays 'unsolved' — grading honesty is preserved
+    because a later solve is a fresh attempt."""
+    conn.execute(
+        """
+        UPDATE attempts SET
+            code = ?, status = 'unsolved', hint_count = ?, hints = ?
+        WHERE id = ?
+        """,
+        (
+            state.code_path.read_text(),
+            len(state.hints),
+            dumps_json(state.hints),
+            state.attempt_id,
+        ),
+    )
+    conn.commit()
+    console.print(message)
+
+
 def _ask_grade(console: Console, hints: int) -> int:
     suggested = 4 if hints == 0 else 3 if hints == 1 else 2
     raw = make_prompt(console)(
@@ -683,23 +706,12 @@ def run_day(
             continue
         cmd, _, rest = raw.partition(" ")
         if cmd in ("q", "quit") and not rest:
-            conn.execute(
-                """
-                UPDATE attempts SET
-                    code = ?, status = 'unsolved', hint_count = ?, hints = ?
-                WHERE id = ?
-                """,
-                (
-                    state.code_path.read_text(),
-                    len(state.hints),
-                    dumps_json(state.hints),
-                    state.attempt_id,
-                ),
-            )
-            conn.commit()
-            console.print(
+            _persist_abandoned(
+                conn,
+                state,
+                console,
                 "[dim]Progress saved; attempt stays 'unsolved'. Next session "
-                "starts fresh.[/dim]"
+                "starts fresh.[/dim]",
             )
             if warmup and card is not None:
                 summary = scheduler.record_grade(conn, card, 1)
@@ -712,6 +724,45 @@ def run_day(
             console.print(launch_editor(state.code_path))
         elif cmd in ("h", "hint"):
             do_hint(rest or "I'm stuck")
+        elif cmd in ("l", "learn"):
+            if warmup:
+                console.print(
+                    "[dim]Learn mode isn't available during a warm-up — a "
+                    "warm-up is a graded recall, so leaving it records a "
+                    "lapse. Finish or quit it, then `dojo learn`.[/dim]"
+                )
+                continue
+            if rest.strip():
+                pattern, suggestion = resolve_pattern(rest.strip())
+                if pattern is None:
+                    if suggestion:
+                        console.print(
+                            f"[yellow]Unknown pattern '{rest.strip()}' — did you "
+                            f"mean '{suggestion}'?[/yellow]"
+                        )
+                    else:
+                        console.print(f"[red]Unknown pattern '{rest.strip()}'.[/red]")
+                    continue
+            else:
+                pattern = problem["pattern"]
+                if not pattern:
+                    console.print(
+                        "[yellow]This problem has no pattern — try "
+                        "`learn <topic>` instead.[/yellow]"
+                    )
+                    continue
+            _persist_abandoned(
+                conn,
+                state,
+                console,
+                "[dim]Paused for learning — progress saved; the attempt stays "
+                "'unsolved'. The learn session can hand you back to it.[/dim]",
+            )
+            retire_state(state.slug)
+            result = run_learn(
+                conn, console, backend, user_name, pattern, handoff_slug=state.slug
+            )
+            return "practice" if result.get("practice") else "quit"
         elif cmd in ("r", "report") and not rest:
             try:
                 from dojo.curator import CuratorError, audit_curation
@@ -790,7 +841,7 @@ def run_warmups(
             open_editor=False, warmup=True, card=card,
         )
         outcomes.append(outcome)
-        if outcome == "quit":
+        if outcome in ("quit", "practice"):
             break
     return outcomes
 

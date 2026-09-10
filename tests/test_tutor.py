@@ -160,3 +160,15 @@ def test_de_markdown_blockquotes_rules_and_dunder_bold():
     out = de_markdown(text)
     assert out == "a quoted insight\n\nbold move\n\n• item"
     assert "---" not in out and "***" not in out and "__" not in out
+
+
+def test_mock_backend_teacher_branch():
+    """The teacher branch keys on 'teacher' in the system prompt (learning
+    mode, v0.8); a queue serves one canned reply per call and falls back to
+    a default when exhausted, so a long conversation never crashes."""
+    backend = MockBackend(teacher=["Primer about heaps.", "Because the root holds the min."])
+    system = "You are a data structures teacher."
+    assert backend.chat(system, "TOPIC: heap") == "Primer about heaps."
+    assert backend.chat(system, "TOPIC: heap") == "Because the root holds the min."
+    fallback = backend.chat(system, "TOPIC: heap")
+    assert "heap" in fallback.lower() and len(fallback) > 0

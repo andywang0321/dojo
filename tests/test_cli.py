@@ -6,7 +6,7 @@ from dojo.bank import ensure_seeded
 from dojo.cli import NeedsSetup, _active_user, _choose_user, _normalize_argv
 from dojo.config import load_conf, save_conf
 from dojo.db import get_or_create_user
-
+from dojo.tutor.backend import MockBackend
 
 # ------------------------------------------------------- active-user resolution
 
@@ -116,3 +116,238 @@ def test_due_counts(db):
     scheduler.ensure_card(db, uid, "heap")  # first review due tomorrow-ish
     assert scheduler.due_now_count(db, uid) == 1
     assert scheduler.due_next_day_count(db, uid) >= 1
+
+
+# ----------------------------------------------------- shared picker + learn
+
+def test_choose_picker_generic(fake_console):
+    from dojo.cli import _choose
+
+    assert _choose(fake_console(["2"]), "Topics", ["heap", "graph"]) == "graph"
+
+
+def test_choose_picker_retries_and_cancels(fake_console):
+    from dojo.cli import _choose
+
+    assert _choose(fake_console(["0", "2"]), "Topics", ["heap", "graph"]) == "graph"
+    assert _choose(fake_console(["q"]), "Topics", ["heap"]) is None
+
+
+def test_learn_command_normalizes_and_dispatches(db, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from dojo.cli import _cmd_learn
+
+    calls = []
+    monkeypatch.setattr(
+        "dojo.session.run_learn",
+        lambda conn, console, backend, user, pattern, handoff_slug=None: calls.append(
+            (pattern, handoff_slug)
+        )
+        or {"practice": None},
+    )
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.tutor.get_backend", lambda: MockBackend())
+
+    assert _cmd_learn(SimpleNamespace(topic="binary search", _user="andy")) == 0
+    assert calls == [("binary_search", None)]
+
+
+def test_learn_command_topic_picker(db, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from dojo.cli import _cmd_learn
+
+    calls = []
+    monkeypatch.setattr(
+        "dojo.session.run_learn",
+        lambda *args, **kwargs: calls.append(args) or {"practice": None},
+    )
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.tutor.get_backend", lambda: MockBackend())
+    answers = iter(["3"])
+    monkeypatch.setattr("dojo.cli.make_prompt", lambda console: lambda text: next(answers))
+
+    assert _cmd_learn(SimpleNamespace(topic=None, _user="andy")) == 0
+    assert calls and calls[0][4] == "two_pointers"  # third entry of PATTERNS
+
+
+def test_learn_command_typo_errors(db, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from dojo.cli import _cmd_learn
+
+    calls = []
+    monkeypatch.setattr(
+        "dojo.session.run_learn",
+        lambda *args, **kwargs: calls.append(args) or {"practice": None},
+    )
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.tutor.get_backend", lambda: MockBackend())
+
+    assert _cmd_learn(SimpleNamespace(topic="heep", _user="andy")) == 1
+    assert _cmd_learn(SimpleNamespace(topic="zzzqqq", _user="andy")) == 1
+    assert calls == []
+
+
+def test_learn_command_practice_handoff_runs_session(db, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from dojo.cli import _cmd_learn
+
+    day_calls = []
+    monkeypatch.setattr(
+        "dojo.session.run_learn",
+        lambda *args, **kwargs: {"practice": "valid_parentheses"},
+    )
+    monkeypatch.setattr(
+        "dojo.session.run_day",
+        lambda conn, console, backend, slug, user, **kwargs: day_calls.append(slug)
+        or "solved",
+    )
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.tutor.get_backend", lambda: MockBackend())
+
+    assert _cmd_learn(SimpleNamespace(topic="stack", _user="andy")) == 0
+    assert day_calls == ["valid_parentheses"]
+
+
+# --------------------------------------------------- the day loop (v0.8 glue)
+
+def _seed_curated_problem(conn, slug="kth_largest", pattern="heap"):
+    from dojo.db import dumps_json, now
+
+    conn.execute(
+        """
+        INSERT INTO problems (slug, title, difficulty, pattern, statement,
+            function_name, expected_time, expected_space, visible_tests, created_at)
+        VALUES (?, ?, 'Easy', ?, 's', 'solve_it', 'O(n)', 'O(n)', ?, ?)
+        """,
+        (slug, f"T {slug}", pattern, dumps_json([{"args": [[1]], "expected": 1}]), now()),
+    )
+    conn.commit()
+    return conn.execute("SELECT id FROM problems WHERE slug = ?", (slug,)).fetchone()["id"]
+
+
+def _day_args(**kwargs):
+    from types import SimpleNamespace
+
+    base = {"slug": None, "skip_warmup": True, "open": False, "_user": "andy"}
+    base.update(kwargs)
+    return SimpleNamespace(**base)
+
+
+def _mock_day_session(monkeypatch, learn_result=None):
+    """Patch run_learn/run_day/get_backend/DB_PATH for _cmd_day tests;
+    returns (learn_calls, day_calls)."""
+    from dojo.tutor.backend import MockBackend
+
+    learn_calls, day_calls = [], []
+    monkeypatch.setattr(
+        "dojo.session.run_learn",
+        lambda conn, console, backend, user, pattern, handoff_slug=None: learn_calls.append(
+            (pattern, handoff_slug)
+        )
+        or (learn_result or {"practice": None}),
+    )
+    monkeypatch.setattr(
+        "dojo.session.run_day",
+        lambda conn, console, backend, slug, user, **kwargs: day_calls.append(slug)
+        or "solved",
+    )
+    monkeypatch.setattr("dojo.tutor.get_backend", lambda: MockBackend())
+    return learn_calls, day_calls
+
+
+def test_day_proactive_offer_accepted_proceeds(db, monkeypatch, tmp_path):
+    from dojo.cli import _cmd_day
+
+    _seed_curated_problem(db)
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    learn_calls, day_calls = _mock_day_session(monkeypatch)
+    answers = iter(["y"])
+    monkeypatch.setattr("dojo.cli.make_prompt", lambda console: lambda text: next(answers))
+
+    assert _cmd_day(_day_args()) == 0
+    assert learn_calls == [("heap", "kth_largest")]
+    assert day_calls == ["kth_largest"]  # the session proceeds either way
+
+
+def test_day_proactive_offer_declined_skips_learn(db, monkeypatch, tmp_path):
+    from dojo.cli import _cmd_day
+
+    _seed_curated_problem(db)
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    learn_calls, day_calls = _mock_day_session(monkeypatch)
+    answers = iter(["n"])
+    monkeypatch.setattr("dojo.cli.make_prompt", lambda console: lambda text: next(answers))
+
+    assert _cmd_day(_day_args()) == 0
+    assert learn_calls == []
+    assert day_calls == ["kth_largest"]
+
+
+def test_day_studied_pattern_never_offers(db, monkeypatch, tmp_path):
+    """Any attempt in the pattern makes it studied — the offer must not even
+    prompt (the empty answer queue would raise if it did)."""
+    from dojo.cli import _cmd_day
+
+    pid = _seed_curated_problem(db)
+    uid = get_or_create_user(db, "andy")
+    from dojo.db import now
+
+    db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at) "
+        "VALUES (?, ?, 'solve', 'unsolved', ?)",
+        (uid, pid, now()),
+    )
+    db.commit()
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    learn_calls, day_calls = _mock_day_session(monkeypatch)
+    monkeypatch.setattr(
+        "dojo.cli.make_prompt",
+        lambda console: lambda text: (_ for _ in ()).throw(StopIteration()),
+    )
+
+    assert _cmd_day(_day_args()) == 0
+    assert learn_calls == []
+    assert day_calls == ["kth_largest"]
+
+
+def test_day_explicit_slug_never_offers(db, monkeypatch, tmp_path):
+    """Explicit slugs are deliberate choices — the proactive offer is for
+    scheduler picks only."""
+    from dojo.cli import _cmd_day
+
+    _seed_curated_problem(db)
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    learn_calls, day_calls = _mock_day_session(monkeypatch)
+    monkeypatch.setattr(
+        "dojo.cli.make_prompt",
+        lambda console: lambda text: (_ for _ in ()).throw(StopIteration()),
+    )
+
+    assert _cmd_day(_day_args(slug="kth_largest")) == 0
+    assert learn_calls == []
+    assert day_calls == ["kth_largest"]
+
+
+def test_day_practice_outcome_loops_on_same_slug(db, monkeypatch, tmp_path):
+    """The in-session learn handoff returns 'practice'; _cmd_day loops back
+    into a fresh session on the same slug."""
+    from dojo.cli import _cmd_day
+
+    _seed_curated_problem(db)
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    _, day_calls = _mock_day_session(monkeypatch)
+    answers = iter(["n"])
+    monkeypatch.setattr("dojo.cli.make_prompt", lambda console: lambda text: next(answers))
+    outcomes = iter(["practice", "solved"])
+    monkeypatch.setattr(
+        "dojo.session.run_day",
+        lambda conn, console, backend, slug, user, **kwargs: day_calls.append(slug)
+        or next(outcomes),
+    )
+
+    assert _cmd_day(_day_args()) == 0
+    assert day_calls == ["kth_largest", "kth_largest"]

@@ -1,6 +1,19 @@
 """db.py read helpers backing `dojo history` and `dojo show`."""
 
-from dojo.db import get_attempt, get_or_create_user, list_attempts, now
+import sqlite3
+
+from dojo.db import (
+    get_attempt,
+    get_or_create_user,
+    init_db,
+    list_attempts,
+    loads_json,
+    now,
+    record_learn_session,
+    studied_patterns,
+    unstudied,
+    update_learn_transcript,
+)
 
 
 def _seed_problem(db) -> int:
@@ -55,3 +68,63 @@ def test_get_attempt_joins_problem(db):
     assert row["code"].startswith("def is_valid")
 
     assert get_attempt(db, 9999) is None
+
+
+# ------------------------------------------------------------ learn_sessions
+
+def test_learn_session_record_and_update(db):
+    """A learn session starts with an empty transcript (crash-safe baseline)
+    and is rewritten after each exchange; completed flips only on demand."""
+    uid = get_or_create_user(db, "andy")
+    sid = record_learn_session(db, uid, "heap", [])
+
+    row = db.execute("SELECT * FROM learn_sessions WHERE id = ?", (sid,)).fetchone()
+    assert row["pattern"] == "heap"
+    assert row["completed"] == 0
+    assert loads_json(row["transcript"]) == []
+
+    transcript = [{"role": "teacher", "text": "A heap keeps the min at the root."}]
+    update_learn_transcript(db, sid, transcript)
+    row = db.execute("SELECT * FROM learn_sessions WHERE id = ?", (sid,)).fetchone()
+    assert loads_json(row["transcript"]) == transcript
+    assert row["completed"] == 0
+
+    transcript.append({"role": "student", "text": "why O(1)?"})
+    update_learn_transcript(db, sid, transcript, completed=True)
+    row = db.execute("SELECT * FROM learn_sessions WHERE id = ?", (sid,)).fetchone()
+    assert loads_json(row["transcript"]) == transcript
+    assert row["completed"] == 1
+
+
+def test_studied_patterns_and_unstudied(db):
+    """Studied = any learn session OR any attempt in the pattern — one shared
+    notion for the proactive offer and the progress markers."""
+    uid = get_or_create_user(db, "andy")
+    assert unstudied(db, uid, "heap") is True
+    assert studied_patterns(db, uid) == set()
+
+    record_learn_session(db, uid, "heap", [])
+    assert studied_patterns(db, uid) == {"heap"}
+    assert unstudied(db, uid, "heap") is False
+
+    pid = _seed_problem(db)  # pattern 'stack'
+    _add_attempt(db, uid, pid)
+    assert studied_patterns(db, uid) == {"heap", "stack"}
+    assert unstudied(db, uid, "stack") is False
+    assert unstudied(db, uid, None) is False  # unknown pattern: never offer
+
+
+def test_learn_sessions_migrates_existing_db(tmp_path):
+    """An existing DB (attempts present, no learn_sessions) gains the table
+    on connect — the v0.8 migration is additive."""
+    db_path = tmp_path / "dojo.db"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute("DROP TABLE learn_sessions")
+    conn.commit()
+    conn.close()
+
+    from dojo.db import connect
+
+    with connect(db_path) as migrated:
+        assert migrated.execute("SELECT 1 FROM learn_sessions LIMIT 0").fetchall() == []

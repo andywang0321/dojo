@@ -462,3 +462,95 @@ def test_check_shows_static_findings(db, fake_console, monkeypatch, tmp_path):
     assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
     assert "Static analysis" in console.text
     assert "F401" in console.text
+
+
+# --------------------------------------------------- in-session learn (v0.8)
+
+def test_in_session_learn_parks_and_hands_back(db, fake_console, monkeypatch, tmp_path):
+    """`learn` parks the attempt (code + hints saved, state retired, row
+    'unsolved'), runs the teacher on the problem's pattern, and returns
+    'practice' on an accepted retry — the next run_day on the same slug is a
+    fresh attempt."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(["hint stuck", "learn", "practice", "y"])
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+    assert outcome == "practice"
+
+    parked = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert parked["status"] == "unsolved"
+    assert parked["hint_count"] == 1
+    learn = db.execute("SELECT * FROM learn_sessions").fetchone()
+    assert learn["pattern"] == "stack"  # the current problem's pattern
+    assert learn["completed"] == 1
+    assert not (workbench / "valid_parentheses.state.json").exists()
+    assert "Paused for learning" in console.text
+
+    # The caller loops: a fresh session on the same slug (the _cmd_day path).
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    retry = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "The key insight: the stack.", "done"],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(db, retry, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    rows = db.execute("SELECT id, status FROM attempts ORDER BY id").fetchall()
+    assert [r["status"] for r in rows] == ["unsolved", "correct"]
+
+
+def test_in_session_learn_named_topic(db, fake_console, monkeypatch, tmp_path):
+    """`learn <topic>` teaches another pattern but still parks the current
+    attempt (the handoff, if accepted, targets the parked slug)."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    console = fake_console(["learn heap", "done"])
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+    assert outcome == "quit"  # declined/no handoff: the day ends here
+
+    learn = db.execute("SELECT * FROM learn_sessions").fetchone()
+    assert learn["pattern"] == "heap"
+    parked = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert parked["status"] == "unsolved"
+
+
+def test_in_session_learn_typo_stays_in_session(db, fake_console, monkeypatch, tmp_path):
+    """A typo'd topic must not park the attempt: did-you-mean shows and the
+    session continues."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    console = fake_console(["learn heep", "quit"])
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    assert "did you mean" in console.text
+    assert db.execute("SELECT COUNT(*) AS n FROM learn_sessions").fetchone()["n"] == 0
+
+
+def test_warmup_rejects_learn(db, fake_console, monkeypatch, tmp_path):
+    """A warm-up is a graded recall: `learn` is unavailable there (leaving a
+    warm-up is a lapse via quit, not a pause for study)."""
+    from dojo import scheduler
+    from dojo.db import get_or_create_user
+
+    _seed_problem(db)
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    console = fake_console(["learn", "quit"])
+    assert run_day(
+        db, console, MockBackend(), "valid_parentheses", "andy",
+        open_editor=False, warmup=True, card=card,
+    ) == "quit"
+    assert "isn't available" in console.text
+    assert db.execute("SELECT COUNT(*) AS n FROM learn_sessions").fetchone()["n"] == 0
+    updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    assert updated["lapses"] == 1

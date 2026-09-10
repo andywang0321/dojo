@@ -4,7 +4,7 @@
   dojo <slug>                 the daily routine on a specific problem
   dojo day [SLUG]             the same, explicitly (alias)
   dojo warmup                 run due warm-up retrievals only
-  dojo learn [TOPIC]          learning mode (planned — see roadmap/next.md)
+  dojo learn [TOPIC]          learning mode: a topic primer with a practice handoff
   dojo list [--pattern P]     the problem bank, with your solved status
   dojo check [SLUG]           visible tests on the current workbench
   dojo profile                your attempt history
@@ -33,8 +33,6 @@ from rich.table import Table
 from dojo import scheduler
 from dojo.bank import ensure_seeded
 from dojo.config import DB_PATH, PROBLEMS_DIR, REPO_ROOT, load_conf, save_conf
-from dojo.terminal import make_prompt
-from dojo.ui import table as ui_table
 from dojo.db import (
     connect,
     get_attempt,
@@ -43,7 +41,11 @@ from dojo.db import (
     loads_json,
     now,
     review_trends,
+    unstudied,
 )
+from dojo.patterns import PATTERNS
+from dojo.terminal import make_prompt
+from dojo.ui import table as ui_table
 
 
 class NeedsSetup(RuntimeError):
@@ -73,23 +75,29 @@ def _active_user(conn, conf_user: str | None) -> str:
     )
 
 
-def _choose_user(console: Console, names: list[str]) -> str | None:
-    """The `dojo user` numbered picker: returns the chosen name, or None on
-    'q'."""
+def _choose(console: Console, title: str, options: list[str]) -> str | None:
+    """The shared numbered picker (v0.8 — generalized from the user picker
+    to serve `dojo learn` too): returns the chosen option, or None on 'q'."""
     while True:
-        console.print("Users:")
-        for i, name in enumerate(names, start=1):
+        console.print(f"{title}:")
+        for i, name in enumerate(options, start=1):
             console.print(f"  {i}. {name}")
         raw = make_prompt(console)("Pick a number (q to cancel): ").strip()
         if raw.lower() == "q":
             return None
         try:
             index = int(raw)
-            if 1 <= index <= len(names):
-                return names[index - 1]
+            if 1 <= index <= len(options):
+                return options[index - 1]
         except ValueError:
             pass
         console.print("[red]Not a valid choice — try again.[/red]")
+
+
+def _choose_user(console: Console, names: list[str]) -> str | None:
+    """The `dojo user` numbered picker: returns the chosen name, or None on
+    'q'."""
+    return _choose(console, "Users", names)
 
 
 def _normalize_argv(argv: list[str], commands: set[str] | None = None) -> list[str]:
@@ -245,8 +253,20 @@ def _print_footer(console: Console, conn, user_id: int) -> None:
     console.print("[dim]" + " · ".join(parts) + "[/dim]")
 
 
+def _run_practice_session(conn, console, backend, user, slug, open_editor=False) -> str:
+    """Run solve sessions, looping while the in-session `learn` handoff keeps
+    sending us back ("practice" — v0.8). Shared by `dojo day` and the
+    `dojo learn` handoff; a warm-up never reaches this loop."""
+    from dojo.session import run_day
+
+    outcome = "practice"
+    while outcome == "practice":
+        outcome = run_day(conn, console, backend, slug, user, open_editor=open_editor)
+    return outcome
+
+
 def _cmd_day(args) -> int:
-    from dojo.session import run_day, run_warmups
+    from dojo.session import run_learn, run_warmups
     from dojo.tutor import get_backend
 
     console = Console()
@@ -280,7 +300,27 @@ def _cmd_day(args) -> int:
                 f"[bold]Scheduler pick:[/bold] {problem['title']} "
                 f"({problem['pattern']}, {problem['difficulty']}) — weakest pattern first."
             )
-        outcome = run_day(conn, console, backend, slug, user, open_editor=args.open)
+            # The proactive learn offer (v0.8): only for scheduler picks
+            # (explicit slugs are deliberate choices), only for unstudied
+            # patterns, and a fork, never a gate — either way the session
+            # proceeds.
+            if unstudied(conn, user_id, problem["pattern"]):
+                answer = make_prompt(console)(
+                    f"This is from '{problem['pattern']}' — a pattern you haven't "
+                    "studied yet. Learn it first? [y/N] "
+                ).strip().lower()
+                if answer in ("y", "yes"):
+                    result = run_learn(
+                        conn, console, backend, user, problem["pattern"], handoff_slug=slug
+                    )
+                    if result.get("practice"):
+                        slug = result["practice"]
+                        console.print(
+                            f"[dim]Retrying '{slug}' with a fresh template.[/dim]"
+                        )
+        outcome = _run_practice_session(
+            conn, console, backend, user, slug, open_editor=args.open
+        )
         _print_footer(console, conn, user_id)
     return 0 if outcome in ("solved", "quit", "warmup_done") else 1
 
@@ -301,6 +341,56 @@ def _cmd_warmup(args) -> int:
             console.print(f"[red]{exc}[/red]")
             return 1
         run_warmups(conn, console, backend, user, limit=3)
+    return 0
+
+
+def _cmd_learn(args) -> int:
+    """v0.8 learning mode: a topic primer conversation with a practice
+    handoff. No topic → the shared numbered picker; an unknown topic gets a
+    did-you-mean suggestion, never a silent wrong pattern."""
+    from dojo.session import run_learn
+    from dojo.session.learn import resolve_pattern
+    from dojo.tutor import get_backend
+
+    console = Console()
+    user = getattr(args, "_user", None)
+    if not user:
+        console.print("[red]No active user — run `dojo setup`.[/red]")
+        return 1
+    if args.topic is None:
+        pattern = _choose(console, "Topics", list(PATTERNS))
+        if pattern is None:
+            return 0
+    else:
+        pattern, suggestion = resolve_pattern(args.topic)
+        if pattern is None:
+            if suggestion:
+                console.print(
+                    f"[red]Unknown pattern '{args.topic}' — did you mean "
+                    f"'{suggestion}'?[/red]"
+                )
+            else:
+                console.print(
+                    f"[red]Unknown pattern '{args.topic}' — `dojo learn` opens "
+                    "a picker, `dojo list` shows the bank.[/red]"
+                )
+            return 1
+    with connect(DB_PATH) as conn:
+        try:
+            backend = get_backend()
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 1
+        result = run_learn(conn, console, backend, user, pattern)
+        if result.get("practice"):
+            console.print(
+                f"[bold]Practice:[/bold] {result['practice']} — opening a "
+                "fresh session."
+            )
+            outcome = _run_practice_session(
+                conn, console, backend, user, result["practice"]
+            )
+            return 0 if outcome in ("solved", "quit") else 1
     return 0
 
 
@@ -827,6 +917,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_warmup = sub.add_parser("warmup", help="run due warm-up retrievals only")
     p_warmup.set_defaults(func=_cmd_warmup)
 
+    p_learn = sub.add_parser("learn", help="learning mode: a topic primer with a practice handoff")
+    p_learn.add_argument("topic", nargs="?", help="pattern to learn (picker if omitted)")
+    p_learn.set_defaults(func=_cmd_learn)
+
     p_check = sub.add_parser("check", help="run visible tests on the active workbench")
     p_check.add_argument("slug", nargs="?", help="problem slug (default: active session)")
     p_check.set_defaults(func=_cmd_check)
@@ -885,7 +979,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 PARSER = _build_parser()
 COMMANDS = set(PARSER._subparsers._group_actions[0].choices)  # noqa: SLF001
-USER_COMMANDS = {"day", "warmup", "profile", "history", "progress", "list"}
+USER_COMMANDS = {"day", "warmup", "learn", "profile", "history", "progress", "list"}
 
 
 def _resolve_for_dispatch(args, console: Console):

@@ -216,6 +216,32 @@ def pick_new_problem(
     ).fetchone()
 
 
+def pick_practice_problem(
+    conn: sqlite3.Connection, user_id: int, pattern: str
+) -> sqlite3.Row | None:
+    """The learning-mode practice handoff (v0.8): the easiest curated problem
+    in ``pattern`` the user has not solved. Returns None when the pattern is
+    exhausted — the conversation should continue instead."""
+    return conn.execute(
+        """
+        SELECT p.* FROM problems p
+        WHERE p.pattern = ? AND p.function_name IS NOT NULL
+          AND p.visible_tests IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM attempts a
+              WHERE a.user_id = ? AND a.problem_id = p.id AND a.status = 'correct'
+          )
+        ORDER BY
+          CASE p.difficulty
+              WHEN 'Easy' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Hard' THEN 3 ELSE 4
+          END,
+          p.title
+        LIMIT 1
+        """,
+        (pattern, user_id),
+    ).fetchone()
+
+
 def backfill_cards(conn: sqlite3.Connection) -> int:
     """Create a card for every (user, pattern) with a correct attempt,
     due immediately — v0.1 solves deserve a first warm-up too."""

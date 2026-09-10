@@ -86,6 +86,13 @@ class MockBackend:
         "recent opener; (4) at the end, check nothing is left open.",
     }
 
+    DEFAULT_TEACHER = (
+        "Heap primer: a heap is a tree that keeps the minimum (or maximum) at "
+        "the root, giving O(1) peek and O(log n) insert/remove. Reach for it "
+        "whenever you need repeated 'smallest so far' queries — like a "
+        "priority queue. Why do you think we can't just sort once?"
+    )
+
     def __init__(
         self,
         leak_ratings: list[int] | None = None,
@@ -94,6 +101,7 @@ class MockBackend:
         tutor: dict | list | None = None,
         discussion: str = "Post-solve discussion: you could also sort both arrays and walk two pointers.",
         auditor: dict | None = None,
+        teacher: str | list | None = None,
     ):
         self._leak_ratings = leak_ratings if leak_ratings is not None else [1]
         self._rating_idx = 0
@@ -103,6 +111,7 @@ class MockBackend:
         ]
         self._discussion = discussion
         self._auditor = auditor or {"findings": [], "verdict": "ok", "explanation": "clean"}
+        self._teacher = teacher if teacher is not None else self.DEFAULT_TEACHER
         self._review = review or {
             "correctness": {"score": 4, "comment": "The reasoning holds; check the empty-input case."},
             "approach_quality": {"score": 4, "comment": "Natural choice for this problem class."},
@@ -120,6 +129,10 @@ class MockBackend:
     def chat(self, system: str, user: str) -> str:
         if "discussion" in system.lower():
             return self._discussion
+        if "teacher" in system.lower():  # learning mode (v0.8)
+            if isinstance(self._teacher, list):
+                return self._teacher.pop(0) if self._teacher else self.DEFAULT_TEACHER
+            return self._teacher
         for line in user.splitlines():
             if line.startswith("TIER="):
                 tier = int(line.split("=")[1])

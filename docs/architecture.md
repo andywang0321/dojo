@@ -17,6 +17,8 @@ The never-solve rule is an *architectural* property, not a prompt detail. Refere
 - The curator agent is structurally separate from the tutor; its outputs land in the judge quarantine zone.
 - `tests/test_never_solve.py` pins the boundary mechanically: tutor sources must never reference `dojo.judge`, `dojo.curator`, `dojo.fetcher`, `ORACLES`, or `CHECKERS`, and the built tutor prompt must contain no solution data.
 
+**The one deliberate narrowing (v0.8):** learning mode's teacher may show *topic-canonical* code, because its context contains no pending problem — only the topic name and the conversation. Never-solve protects solves, not knowledge. The narrowing is documented here, pinned by a guard test (`test_teacher_prompt_carries_topic_only`), and does not extend: grading oracles still never enter tutor, teacher, or reviewer context.
+
 ## Component map
 
 ```
@@ -49,6 +51,7 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 - `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests, signature)` — the catalog. `function_name` + `visible_tests` + `signature` = "curated", i.e. ready for `dojo day`. `signature` is a def string, `{"functions": {...}}` for multi-function problems, or `{"methods": {...}}` for class problems.
 - `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, static_analysis JSON, timings)` — the learner model. One invocation = one attempt row.
 - `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_review_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern).
+- `learn_sessions(user, pattern, transcript JSON, created_at, completed)` — one row per learning-mode session (v0.8); the transcript is rewritten after each exchange, `completed` flips to 1 on graceful exit.
 
 `data/dojo.db`, `workbench/`, and `data/dojo.conf` are gitignored: personal state, not source. Migrations are additive only (`ALTER TABLE ... ADD COLUMN` or new tables); user data is never reset as a side effect. `db.connect()` owns the schema — a fresh DB gets the full `SCHEMA` on first connect.
 
@@ -59,6 +62,18 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 ### Tutor modes (v0.6)
 
 One `hint` command, two modes the model classifies: **ladder** (the student is stuck — respond at the current tier and advance, vague messages force tier 0) and **discussion** (the student is exploring — answer directly, no tier, no progression). The never-solve boundary holds in both; every response passes the leak audit, and a response still rated ≥ 3 after retries is discarded, never shown. History entries record the mode.
+
+### Learning mode (v0.8)
+
+A third agent, the **teacher**, for topic education — the mode error "what is a heap" exposed (the hint ladder unblocks problems; it doesn't teach topics). Three entry points share one `run_learn`:
+
+- **`dojo learn [topic]`** — picker without a topic, did-you-mean on typos. Primer, then a free conversation where every bare line is a message. `practice` hands off to the easiest unsolved curated problem in the pattern.
+- **In-session `learn`** — parks the current attempt (quit persistence: code + hints saved, status stays 'unsolved', state retired) and teaches the current pattern (or a named topic). Accepting the handoff returns the outcome `"practice"` with the *same* slug; `_cmd_day` loops into a fresh blank-template session. Declining and `done` end the day — grading honesty is preserved because a post-study solve is a fresh attempt.
+- **The proactive offer** — when the scheduler picks a problem from an unstudied pattern (no learn session, no attempts) and no explicit slug was given: "learn first? [y/N]". One keystroke declines; it is a fork, never a gate.
+
+The transcript persists to `learn_sessions` after every exchange (a crash loses at most one turn); `completed` marks graceful ends. `studied_patterns` (any learn session **or** any attempt) is the single notion feeding both the offer and the `dojo progress` markers. Warm-up sessions reject `learn`: a warm-up is a graded recall, and leaving one is a lapse, not a pause.
+
+The teacher's guard rails: `TEACHER_SYSTEM` avoids the words "tutor" and "discussion" (MockBackend keys its canned branches on system-prompt substrings — pinned by test), shows plain text only, and is instructed to say so when unsure — there is no oracle for pedagogy.
 
 Session semantics:
 
@@ -73,6 +88,8 @@ All `$EDITOR` behavior lives in `editor.py`. GUI editors detach via `Popen(start
 ## CLI conventions
 
 - **Entry point (v0.5):** bare `dojo` runs the daily routine (argv normalization: a first non-flag, non-subcommand argument is a slug); `dojo day` is the documented alias. A status line ("N warm-up card(s) due") precedes the session; a footer ("tomorrow: … · best pattern: …") follows it.
+- **The practice loop (v0.8):** `_cmd_day` and `_cmd_learn` run solve sessions through `_run_practice_session`, which loops while the outcome is `"practice"` (the in-session learn handoff) — always the same slug. `run_warmups` treats `"practice"` like quit.
+- **Learning mode (v0.8):** `dojo learn [TOPIC]` (USER_COMMANDS member — needs the active user); no topic → the shared `_choose` numbered picker (generalized from the user picker); unknown topic → a `difflib` did-you-mean, never a silent wrong pattern.
 - **One computer, one user:** no `--user` flags anywhere. The active user resolves from gitignored `data/dojo.conf` → the DB's sole user; zero users means first run, which triggers the setup wizard (`dojo/setup.py`, pure injectable logic) and then continues the original command. Non-TTY first runs print guidance instead of prompting.
 - **Auto-reseed:** every CLI entry (except `setup`) runs `bank.ensure_seeded` — the bank always mirrors `problems/` (idempotent upsert, additive-only, at the CLI layer, not in `db.connect()`).
 - **`dojo user [name]`** switches the active user; no name → numbered picker. A conf user missing from the DB is an error, never a silent typo'd account.
@@ -87,3 +104,4 @@ All `$EDITOR` behavior lives in `editor.py`. GUI editors detach via `Popen(start
 - Session duration is measured from session start, not across editor time.
 - Terminal editors detach only inside tmux or on macOS; elsewhere `open` falls back to blocking.
 - `dojo fetch`'s contract is pinned against canned GraphQL fixtures — the live LeetCode endpoint is unversioned, so a schema drift surfaces as a `LeetCodeError` rather than a silent half-fetch.
+- The teacher has no grader or oracle behind it; the humble-teacher instruction is a mitigation, not a verification. Learning-mode transcripts are stored but not resumable in v0.8.
