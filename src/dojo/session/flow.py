@@ -295,6 +295,59 @@ def _measure_complexity(
     return measured_time, time_r2, measured_space, space_r2
 
 
+def _ask_question(console: Console, label: str, default: str | None = None) -> str:
+    """A styled question with breathing room: the question line (bold
+    cyan), then the answer typed on its own line. ``default`` prefills
+    the previous answer when editing (TTY only)."""
+    console.print()
+    console.print(f"[bold cyan]{label}[/bold cyan]")
+    return make_prompt(console)("[dim]  ❯[/dim] ", default=default).strip()
+
+
+def _ask_complexity_claims(
+    console: Console,
+    time_default: str | None = None,
+    space_default: str | None = None,
+) -> tuple[str, str]:
+    """The two complexity questions + the double-check gate (v0.9.1),
+    shared by submit and polish. Polish passes the previous claims as
+    prefilled defaults — the edited code may be a different algorithm, so
+    the claims are re-collected instead of silently reused (v0.9.3)."""
+    prompt = make_prompt(console)
+    claimed_time_raw = _ask_question(
+        console, "State your time complexity and why:", default=time_default
+    )
+    claimed_space_raw = _ask_question(
+        console, "State your space complexity and why:", default=space_default
+    )
+    while True:
+        # The double-check gate: two separate questions, one chance to fix
+        # either before the machine measures — `time`/`space` re-asks that
+        # one (prefilled), Enter continues.
+        console.print()
+        console.print("[bold cyan]Double-check before measuring:[/bold cyan]")
+        console.print(f"  [cyan]time:[/cyan]  {claimed_time_raw or '—'}")
+        console.print(f"  [cyan]space:[/cyan] {claimed_space_raw or '—'}")
+        edit = prompt(
+            "[dim]Enter to continue · `time` or `space` to edit: [/dim]"
+        ).strip().lower()
+        if edit in ("", "ok", "y", "yes"):
+            break
+        if edit in ("time", "t"):
+            claimed_time_raw = _ask_question(
+                console, "State your time complexity and why:", default=claimed_time_raw
+            )
+        elif edit in ("space", "s"):
+            claimed_space_raw = _ask_question(
+                console,
+                "State your space complexity and why:",
+                default=claimed_space_raw,
+            )
+        else:
+            console.print("[dim]`time`, `space`, or Enter.[/dim]")
+    return claimed_time_raw, claimed_space_raw
+
+
 def _submit(
     conn: sqlite3.Connection,
     console: Console,
@@ -325,41 +378,7 @@ def _submit(
     if analysis.flags or analysis.notes:
         _show_static(console, analysis)
 
-    prompt = make_prompt(console)
-
-    def ask_question(label: str, default: str | None = None) -> str:
-        """A styled question with breathing room: the question line (bold
-        cyan), then the answer typed on its own line. ``default`` prefills
-        the previous answer when editing (TTY only)."""
-        console.print()
-        console.print(f"[bold cyan]{label}[/bold cyan]")
-        return prompt("[dim]  ❯[/dim] ", default=default).strip()
-
-    claimed_time_raw = ask_question("State your time complexity and why:")
-    claimed_space_raw = ask_question("State your space complexity and why:")
-    while True:
-        # The double-check gate: two separate questions, one chance to fix
-        # either before the machine measures — `time`/`space` re-asks that
-        # one (prefilled), Enter continues.
-        console.print()
-        console.print("[bold cyan]Double-check before measuring:[/bold cyan]")
-        console.print(f"  [cyan]time:[/cyan]  {claimed_time_raw or '—'}")
-        console.print(f"  [cyan]space:[/cyan] {claimed_space_raw or '—'}")
-        edit = prompt(
-            "[dim]Enter to continue · `time` or `space` to edit: [/dim]"
-        ).strip().lower()
-        if edit in ("", "ok", "y", "yes"):
-            break
-        if edit in ("time", "t"):
-            claimed_time_raw = ask_question(
-                "State your time complexity and why:", default=claimed_time_raw
-            )
-        elif edit in ("space", "s"):
-            claimed_space_raw = ask_question(
-                "State your space complexity and why:", default=claimed_space_raw
-            )
-        else:
-            console.print("[dim]`time`, `space`, or Enter.[/dim]")
+    claimed_time_raw, claimed_space_raw = _ask_complexity_claims(console)
     claimed_time = complexity.parse(claimed_time_raw)
     claimed_space = complexity.parse(claimed_space_raw)
 
@@ -382,9 +401,10 @@ def _submit(
     # Reflect first, so the reviewer can comment on the reflection.
     reflection = None
     if not warmup:
-        reflection = ask_question(
+        reflection = _ask_question(
+            console,
             "Reflection — what was the key insight, and when would you reach "
-            "for this again?"
+            "for this again?",
         )
 
     console.print("[bold]AI review[/bold] (post-submission; the reviewer critiques, it never repairs)...")
@@ -498,7 +518,10 @@ def _show_review(console: Console, review_json: dict) -> None:
 
 def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
     """Post-solve re-grade: re-judge, re-measure, re-analyze the edited code
-    and update the same attempt row (polished counter bumps)."""
+    and update the same attempt row (polished counter bumps). Complexity
+    claims are re-collected with the previous answers prefilled — the
+    edited code may be a different algorithm, and comparing a new
+    measurement against stale claims produced spurious flags (v0.9.3)."""
     code_path = state.code_path
     rng = random.Random(f"dojo-{problem['slug']}")
     cases = _build_cases(problem, rng)
@@ -516,6 +539,16 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
     analysis = static.analyze(code_path)
     if analysis.flags or analysis.notes:
         _show_static(console, analysis)
+    # Re-collect the claims for the *edited* code (v0.9.3): comparing a new
+    # measurement against the original claims produced spurious flags. The
+    # previous answers prefill, so an unchanged polish costs three Enters.
+    claimed_time_raw, claimed_space_raw = _ask_complexity_claims(
+        console,
+        time_default=row["self_reported_time"],
+        space_default=row["self_reported_space"],
+    )
+    claimed_time = complexity.parse(claimed_time_raw)
+    claimed_space = complexity.parse(claimed_space_raw)
     measured_time, time_r2, measured_space, space_r2 = _measure_complexity(
         console, problem, code_path
     )
@@ -523,8 +556,8 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
         console,
         problem["expected_time"],
         problem["expected_space"],
-        row["self_reported_time"],
-        row["self_reported_space"],
+        claimed_time,
+        claimed_space,
         measured_time,
         measured_space,
         time_r2,
@@ -537,8 +570,8 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
             backend,
             problem["statement"],
             code_path.read_text(),
-            row["self_reported_time"],
-            row["self_reported_space"],
+            claimed_time_raw,
+            claimed_space_raw,
             measured_time,
             measured_space,
             problem["expected_time"],
@@ -555,6 +588,7 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
         """
         UPDATE attempts SET
             code = ?, submitted_at = ?,
+            self_reported_time = ?, self_reported_space = ?,
             measured_time_class = ?, measured_time_r2 = ?,
             measured_space_class = ?, measured_space_r2 = ?,
             static_analysis = ?, review = ?, polished = polished + 1
@@ -563,6 +597,8 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
         (
             code_path.read_text(),
             now(),
+            claimed_time_raw,
+            claimed_space_raw,
             measured_time,
             time_r2,
             measured_space,

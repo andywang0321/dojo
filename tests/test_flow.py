@@ -409,6 +409,9 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
             "",
             "The key insight: the stack.",
             "polish",
+            "O(n) one pass",
+            "O(n) stack",
+            "",
             "n",  # no second review
             "discuss how else could I solve this?",
             "done",
@@ -681,3 +684,44 @@ def test_complexity_table_color_codes_matches_and_mismatches(db):
     mismatch = _render_complexity_table(claimed_time="O(n^2)")
     assert "\x1b[31m" in mismatch  # the disagreeing time cells go red
     assert "\x1b[32m" in mismatch  # the agreeing space row stays green
+
+
+def test_polish_reasks_complexity_and_updates_claims(db, fake_console, monkeypatch, tmp_path):
+    """Polish re-collects the complexity claims for the edited code
+    (prefilled with the previous ones) instead of silently comparing the
+    new measurement against stale claims — the reported flag bug."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    edited = SOLUTION + "\n# polished: early exit added\n"
+    console = fake_console(
+        [
+            "submit",
+            "O(n) one pass",
+            "O(n) stack",
+            "",
+            "The key insight: the stack.",
+            "polish",
+            "O(n) one pass, now with an early exit",
+            "O(n) stack",
+            "",
+            "n",  # no second review
+            "done",
+        ],
+        actions={
+            "submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION),
+            "polish": lambda: (workbench / "valid_parentheses.py").write_text(edited),
+        },
+    )
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+    assert outcome == "solved"
+
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["polished"] == 1
+    assert row["self_reported_time"] == "O(n) one pass, now with an early exit"
+    assert row["self_reported_space"] == "O(n) stack"
