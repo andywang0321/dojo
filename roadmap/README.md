@@ -11,4 +11,5 @@ Delivered and planned development stages. Each stage file records what shipped a
 | [v0.5](v0.5.md) — setup wizard, single-user ergonomics, bare `dojo` | ✅ delivered | First-run wizard, auto-reseed, `dojo user`, PATH wrapper. |
 | [v0.6](v0.6.md) — practice-run polish | ✅ delivered | Check-time lint, post-solve loop (polish/discuss), reviewer reasoning, tutor modes, leak-audit hardening. |
 | [v0.7](v0.7.md) — the trust fix and terminal ergonomics | ✅ delivered | k_closest validity checker, prompt_toolkit, bare-question hints, `dojo report`. |
-| [next](next.md) — learning mode | 🔜 planned | The remaining design conversation. |
+| [v0.8](v0.8.md) — learning mode | 📝 planned | Topic primer + in-session learn + proactive offer; design settled, build order specified. |
+| [next](next.md) — backlog | 🔜 | TUI polish, sync, warm-up variants. |
