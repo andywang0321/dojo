@@ -40,6 +40,9 @@ src/dojo/
   curator/          # AI curation pipeline (propose, validate, apply-with-rollback, dual-oracle)
   fetcher/          # LeetCode GraphQL intake: HTML -> text, snippet -> signature
   session/          # workbench state + the day flow (solve & warmup modes)
+  roadmap.py        # parses data/roadmap.toml (18 groups x ordered ladders) into
+                    # the structures the scheduler + the roadmap view consume
+data/roadmap.toml   # vendored NeetCode 150 structure (provenance header)
 problems/           # the seed corpus: one problem per file, prompt in the module
                     # docstring, organized by pattern directory
 data/problem_overrides.json   # curated metadata: function_name + visible_tests + signatures
@@ -48,7 +51,7 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 ## Data model
 
 - `users(name)` — one row per person; all data is per-user from day one.
-- `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests, signature)` — the catalog. `function_name` + `visible_tests` + `signature` = "curated", i.e. ready for `dojo day`. `signature` is a def string, `{"functions": {...}}` for multi-function problems, or `{"methods": {...}}` for class problems.
+- `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests, signature, lc_number)` — the catalog. `function_name` + `visible_tests` + `signature` = "curated", i.e. ready for `dojo day`. `signature` is a def string, `{"functions": {...}}` for multi-function problems, or `{"methods": {...}}` for class problems. `lc_number` (v0.10) ties a problem to its LeetCode number — the roadmap ladder matches on it; problems without one (dojo's own) sit outside the ladder.
 - `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, static_analysis JSON, timings)` — the learner model. One invocation = one attempt row.
 - `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_review_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern).
 - `learn_sessions(user, pattern, transcript JSON, created_at, completed)` — one row per learning-mode session (v0.8); the transcript is rewritten after each exchange, `completed` flips to 1 on graceful exit.
@@ -74,6 +77,12 @@ A third agent, the **teacher**, for topic education — the mode error "what is 
 The transcript persists to `learn_sessions` after every exchange (a crash loses at most one turn); `completed` marks graceful ends. `studied_patterns` (any learn session **or** any attempt) is the single notion feeding both the offer and the `dojo progress` markers. Warm-up sessions reject `learn`: a warm-up is a graded recall, and leaving one is a lapse, not a pause.
 
 The teacher's guard rails: `TEACHER_SYSTEM` avoids the words "tutor" and "discussion" (MockBackend keys its canned branches on system-prompt substrings — pinned by test), shows plain text only, and is instructed to say so when unsure — there is no oracle for pedagogy.
+
+### The progression (v0.10)
+
+The pattern set is NeetCode's 18 technique groups in the roadmap's order (`patterns.PATTERNS`), and `data/roadmap.toml` (vendored from the public NeetCode 150 mirror, provenance-credited) defines each group's ordered problem ladder by LeetCode number. `patterns.PREREQS` encodes dojo's reading of the progression — a chain over the verified group order (the mirrored data carries the order, not the site's explicit DAG edges; one-line adjustment if a different edge set is wanted).
+
+The daily pick walks the groups top-down under a **hard prereq gate**: a pattern is eligible only when every prerequisite has no unsolved ladder problem left in the bank; the pick is the earliest unsolved ladder problem of the first eligible pattern. Uncurated rows are invisible to the ladder (it never serves what it can't grade). Once the ladder in the bank is complete, dojo's own problems are the fallback (weakest pattern first, the v0.1 behavior). Explicit `dojo <slug>` bypasses the gate — deliberate choices are exempt, matching the proactive-offer precedent. `dojo roadmap` renders the tree (✓ complete · → next up · locked — finish X); the learn-mode practice handoff (`pick_practice_problem`) respects ladder order within its pattern.
 
 Session semantics:
 

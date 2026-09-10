@@ -1,6 +1,6 @@
 # dojo
 
-An AI-guided interview-prep trainer for people who write production Python and know ML deeply, but never took a formal CS algorithms course. Every day, one command runs the whole loop: warm-up retrievals → a problem picked for your weakest pattern → solve in your own editor with a tutor that never solves for you → an honest grader (isolated judge + empirical profiler + AI review) → reflection, all persisted. dojo is built on one conviction: **the tutor never solves the problem for you — it teaches you to recognize the pattern behind it.**
+An AI-guided interview-prep trainer for people who write production Python and know ML deeply, but never took a formal CS algorithms course. Every day, one command runs the whole loop: warm-up retrievals → a problem picked in roadmap order (the NeetCode 150 progression, prerequisites gated) → solve in your own editor with a tutor that never solves for you → an honest grader (isolated judge + empirical profiler + AI review) → reflection, all persisted. dojo is built on one conviction: **the tutor never solves the problem for you — it teaches you to recognize the pattern behind it.**
 
 ## Getting started
 
@@ -63,6 +63,7 @@ The never-solve boundary narrows here, deliberately: the teacher's context is th
 
 ```bash
 dojo list                   # the problem bank (✓ = curated, ready for the daily loop)
+dojo roadmap                # the progression tree: solved · next up · locked
 dojo learn [TOPIC]          # learning mode: a topic primer with a practice handoff
 dojo progress               # per-pattern proficiency, card schedule, score trends
 dojo history                # your attempts, newest first
@@ -71,6 +72,10 @@ dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
 dojo user [<name>]          # switch the active user (numbered picker without a name)
 dojo setup                  # re-run the setup wizard (change key, reinstall PATH)
 ```
+
+## The progression
+
+The daily pick follows the **NeetCode 150 roadmap** (`data/roadmap.toml`, vendored with provenance): 18 technique groups in prerequisite order, each an ordered problem ladder. The scheduler walks the groups top-down and serves the earliest unsolved ladder problem of the first group whose prerequisites are all complete — `dojo roadmap` shows exactly where you stand (✓ complete · → next up · locked — finish X). Problems fetched but not yet on the ladder, and dojo's own hand-written problems, are served after the ladder in the bank is done. Explicit `dojo <slug>` always bypasses the gate — deliberate choices are exempt.
 
 `dojo help` (or `-h`/`--help`) shows the same short guide in the terminal.
 

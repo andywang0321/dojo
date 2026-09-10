@@ -190,22 +190,24 @@ def test_pattern_for_tags_maps_known_slugs():
     assert pattern_for_tags(["array"]) == "arrays_and_hashing"
     assert pattern_for_tags(["linked-list"]) == "linked_list"
     assert pattern_for_tags(["heap-priority-queue"]) == "heap"
-    assert pattern_for_tags(["union-find"]) == "graph"
+    assert pattern_for_tags(["union-find"]) == "graphs"
     assert pattern_for_tags(["sliding-window"]) == "sliding_window"
     assert pattern_for_tags(["backtracking"]) == "backtracking"
     assert pattern_for_tags(["bit-manipulation"]) == "bit_manipulation"
     assert pattern_for_tags(["binary-search"]) == "binary_search"
-    assert pattern_for_tags(["dynamic-programming"]) == "dynamic_programming"
+    assert pattern_for_tags(["trie"]) == "tries"
+    assert pattern_for_tags(["interval"]) == "intervals"
+    assert pattern_for_tags(["dynamic-programming"]) == "dp_1d"
 
 
 def test_pattern_for_tags_first_match_wins():
-    assert pattern_for_tags(["graph", "depth-first-search"]) == "graph"
+    assert pattern_for_tags(["graph", "depth-first-search"]) == "graphs"
     assert pattern_for_tags(["depth-first-search", "graph"]) == "trees"
 
 
 def test_pattern_for_tags_fails_on_unmapped():
-    with pytest.raises(ValueError, match="trie"):
-        pattern_for_tags(["trie"])
+    with pytest.raises(ValueError, match="rolling-hash"):
+        pattern_for_tags(["rolling-hash"])
     with pytest.raises(ValueError, match="no topic tags"):
         pattern_for_tags([])
 

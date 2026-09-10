@@ -14,7 +14,7 @@ every parameter below is documented, and the whole model is ~50 lines.
 
 Grades follow the Anki convention: 1 = forgot, 2 = hard, 3 = good, 4 = easy.
 
-Also here: which problem to solve next (weakest pattern first) and which
+Also here: which problem to solve next (roadmap order + prereq gate, v0.10) and which
 solved problem to re-solve for a warm-up (least recently solved).
 """
 
@@ -23,8 +23,11 @@ from __future__ import annotations
 import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 from dojo.db import now
+from dojo.patterns import prereqs_of
+from dojo.roadmap import load_roadmap, next_ladder_problem
 
 FACTOR = 19 / 81  # FSRS forgetting-curve factor
 DECAY = -0.5      # FSRS forgetting-curve exponent
@@ -186,16 +189,101 @@ def warmup_problem(
     ).fetchone()
 
 
+@lru_cache(maxsize=1)
+def _roadmap_groups() -> list[dict]:
+    """The roadmap data, loaded once per process (fail loudly at import if
+    the vendored file is malformed)."""
+    return load_roadmap()
+
+
+def _solved_lc(conn: sqlite3.Connection, user_id: int) -> set[int]:
+    """LeetCode numbers of ladder problems the user has solved correctly."""
+    rows = conn.execute(
+        """
+        SELECT p.lc_number FROM attempts a
+        JOIN problems p ON p.id = a.problem_id
+        WHERE a.user_id = ? AND a.status = 'correct' AND p.lc_number IS NOT NULL
+        """,
+        (user_id,),
+    ).fetchall()
+    return {r["lc_number"] for r in rows}
+
+
+def _bank_lc(conn: sqlite3.Connection) -> set[int]:
+    """LeetCode numbers present in the bank *and curated* — uncurated rows
+    are invisible to the ladder (it never serves what it can't grade)."""
+    rows = conn.execute(
+        """
+        SELECT lc_number FROM problems
+        WHERE lc_number IS NOT NULL
+          AND function_name IS NOT NULL AND visible_tests IS NOT NULL
+        """
+    ).fetchall()
+    return {r["lc_number"] for r in rows}
+
+
+def ladder_state(
+    conn: sqlite3.Connection, user_id: int
+) -> tuple[set[int], set[int]]:
+    """(solved ladder LC numbers, curated ladder LC numbers in the bank) —
+    the two sets the roadmap view and the daily picks share."""
+    return _solved_lc(conn, user_id), _bank_lc(conn)
+
+
+def _prereqs_satisfied(
+    conn: sqlite3.Connection,
+    user_id: int,
+    pattern: str,
+    solved: set[int],
+    bank: set[int],
+    groups: list[dict],
+) -> bool:
+    """The hard gate (v0.10): every prerequisite pattern must have no
+    unsolved ladder problem left in the bank."""
+    return all(
+        next_ladder_problem(groups, prereq, solved, bank) is None
+        for prereq in prereqs_of(pattern)
+    )
+
+
+def _problem_by_lc(conn: sqlite3.Connection, lc: int) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT * FROM problems
+        WHERE lc_number = ? AND function_name IS NOT NULL
+          AND visible_tests IS NOT NULL
+        LIMIT 1
+        """,
+        (lc,),
+    ).fetchone()
+
+
 def pick_new_problem(
     conn: sqlite3.Connection, user_id: int
 ) -> sqlite3.Row | None:
-    """The next curated problem the user has not solved: weakest pattern
-    first (average card stability, 0 for untouched patterns), then lowest
-    difficulty."""
+    """The next problem to serve (v0.10): walk the roadmap in order, hard
+    prereq gate per pattern, and serve the earliest unsolved ladder problem
+    of the first eligible pattern. Problems outside the ladder (dojo's own)
+    are the fallback once the ladder is exhausted — weakest pattern first,
+    the v0.1 behavior."""
+    groups = _roadmap_groups()
+    solved = _solved_lc(conn, user_id)
+    bank = _bank_lc(conn)
+    for group in groups:
+        pattern = group["slug"]
+        if not _prereqs_satisfied(conn, user_id, pattern, solved, bank, groups):
+            continue
+        lc = next_ladder_problem(groups, pattern, solved, bank)
+        if lc is None:
+            continue
+        row = _problem_by_lc(conn, lc)
+        if row is not None:
+            return row
     return conn.execute(
         """
         SELECT p.* FROM problems p
         WHERE p.function_name IS NOT NULL AND p.visible_tests IS NOT NULL
+          AND p.lc_number IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM attempts a
               WHERE a.user_id = ? AND a.problem_id = p.id AND a.status = 'correct'
@@ -219,14 +307,19 @@ def pick_new_problem(
 def pick_practice_problem(
     conn: sqlite3.Connection, user_id: int, pattern: str
 ) -> sqlite3.Row | None:
-    """The learning-mode practice handoff (v0.8): the easiest curated problem
-    in ``pattern`` the user has not solved. Returns None when the pattern is
+    """The learning-mode practice handoff (v0.8, ladder-aware v0.10): the
+    earliest unsolved ladder problem of ``pattern``, else the easiest
+    unsolved curated non-ladder problem. Returns None when the pattern is
     exhausted — the conversation should continue instead."""
+    groups = _roadmap_groups()
+    lc = next_ladder_problem(groups, pattern, _solved_lc(conn, user_id), _bank_lc(conn))
+    if lc is not None:
+        return _problem_by_lc(conn, lc)
     return conn.execute(
         """
         SELECT p.* FROM problems p
         WHERE p.pattern = ? AND p.function_name IS NOT NULL
-          AND p.visible_tests IS NOT NULL
+          AND p.visible_tests IS NOT NULL AND p.lc_number IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM attempts a
               WHERE a.user_id = ? AND a.problem_id = p.id AND a.status = 'correct'

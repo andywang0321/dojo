@@ -14,7 +14,7 @@ Grades follow the Anki convention: 1 = forgot, 2 = hard, 3 = good, 4 = easy. Suc
 
 - **Due warm-ups:** cards with `due_at <= now`, most overdue first (`dojo day` runs up to 2, `dojo warmup` up to 3).
 - **Which problem to warm up:** the *least recently solved* correct problem in the pattern — oldest memory, most worth retrieving.
-- **Which problem to solve next:** curated problems not yet solved, ordered by weakest pattern (lowest average card stability; untouched patterns count as 0), then difficulty.
+- **Which problem to solve next (v0.10):** the roadmap order — patterns are walked in progression order under the hard prereq gate, and within a pattern the earliest unsolved ladder problem wins (ladder problems are LeetCode-numbered; dojo's own problems are the fallback once the ladder is exhausted). Stability still governs warm-up scheduling.
 - **Backfill:** `dojo init` creates cards for every (user, pattern) with a solved attempt, due immediately.
 
 ## Warm-up semantics

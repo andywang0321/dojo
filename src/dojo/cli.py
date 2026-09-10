@@ -245,6 +245,88 @@ def _cmd_list(args) -> int:
     return 0
 
 
+def _roadmap_rows(conn, user_id):
+    """The roadmap view's data (v0.10): one row per group — ladder size,
+    what's in the bank, what's solved, and the gate state (complete / next
+    up / locked-by). Pure query logic; `_cmd_roadmap` renders it."""
+    from dojo import scheduler
+    from dojo.patterns import prereqs_of
+    from dojo.roadmap import load_roadmap, next_ladder_problem
+
+    groups = load_roadmap()
+    solved, bank = scheduler.ladder_state(conn, user_id)
+    next_pick = scheduler.pick_new_problem(conn, user_id)
+    rows = []
+    for group in groups:
+        pattern = group["slug"]
+        available = [lc for lc in group["problems"] if lc in bank]
+        done = sum(1 for lc in available if lc in solved)
+        locked_by = None
+        for prereq in prereqs_of(pattern):
+            if next_ladder_problem(groups, prereq, solved, bank) is not None:
+                locked_by = prereq
+                break
+        rows.append(
+            {
+                "pattern": pattern,
+                "ladder": len(group["problems"]),
+                "available": len(available),
+                "solved": done,
+                "complete": bool(available) and done == len(available),
+                "next_up": next_pick is not None and next_pick["pattern"] == pattern,
+                "locked_by": locked_by,
+            }
+        )
+    return rows, next_pick
+
+
+def _cmd_roadmap(args) -> int:
+    console = Console()
+    user = getattr(args, "_user", None)
+    if not user:
+        console.print("[red]No active user — run `dojo setup`.[/red]")
+        return 1
+    with connect(DB_PATH) as conn:
+        user_id = get_or_create_user(conn, user)
+        rows, next_pick = _roadmap_rows(conn, user_id)
+
+        table = ui_table("The roadmap — NeetCode 150 progression")
+        table.add_column("Pattern")
+        table.add_column("Solved")
+        table.add_column("In bank")
+        table.add_column("Ladder")
+        table.add_column("Status")
+        for row in rows:
+            status = ""
+            if row["complete"]:
+                status = "[green]✓ complete[/green]"
+            elif row["next_up"]:
+                status = "[cyan]→ next up[/cyan]"
+            elif row["locked_by"]:
+                status = f"[dim]locked — finish {row['locked_by']}[/dim]"
+            else:
+                status = "[dim]—[/dim]"
+            table.add_row(
+                row["pattern"],
+                f"{row['solved']}/{row['available']}",
+                str(row["available"]),
+                str(row["ladder"]),
+                status,
+            )
+        console.print(table)
+        if next_pick is not None:
+            console.print(
+                f"[bold]Next up:[/bold] {next_pick['title']} "
+                f"[dim]({next_pick['pattern']})[/dim] — run `dojo` to start it."
+            )
+        else:
+            console.print(
+                "[green]Every ladder problem in the bank is solved — `dojo` "
+                "now serves dojo's own problems.[/green]"
+            )
+    return 0
+
+
 def _print_footer(console: Console, conn, user_id: int) -> None:
     parts = [f"tomorrow: {scheduler.due_next_day_count(conn, user_id)} card(s) due"]
     trends = review_trends(conn, user_id)
@@ -299,7 +381,7 @@ def _cmd_day(args) -> int:
             slug = problem["slug"]
             console.print(
                 f"[bold]Scheduler pick:[/bold] {problem['title']} "
-                f"({problem['pattern']}, {problem['difficulty']}) — weakest pattern first."
+                f"({problem['pattern']}, {problem['difficulty']}) — roadmap order, prerequisites gated."
             )
             # The proactive learn offer (v0.8): only for scheduler picks
             # (explicit slugs are deliberate choices), only for unstudied
@@ -829,7 +911,7 @@ def _cmd_progress(args) -> int:
     console.print(table)
     console.print(
         "[dim]Stability = FSRS-lite memory strength in days; the scheduler picks "
-        "new problems from the weakest pattern (lowest avg stability).[/dim]"
+        "new problems follow the roadmap order; stability governs warm-ups.[/dim]"
     )
     if trends:
         t = ui_table("Score trends per pattern (review rubric, recency-weighted)")
@@ -911,6 +993,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_progress = sub.add_parser("progress", help="per-pattern proficiency + retention schedule")
     p_progress.set_defaults(func=_cmd_progress)
 
+    p_roadmap = sub.add_parser("roadmap", help="the progression tree: solved, next up, locked")
+    p_roadmap.set_defaults(func=_cmd_roadmap)
+
     p_user = sub.add_parser("user", help="switch the active user (numbered picker without a name)")
     p_user.add_argument("name", nargs="?", help="the user to switch to")
     p_user.set_defaults(func=_cmd_user)
@@ -947,7 +1032,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 PARSER = _build_parser()
 COMMANDS = set(PARSER._subparsers._group_actions[0].choices)  # noqa: SLF001
-USER_COMMANDS = {"day", "warmup", "learn", "profile", "history", "progress", "list"}
+USER_COMMANDS = {"day", "warmup", "learn", "profile", "history", "progress", "roadmap", "list"}
 
 
 def _resolve_for_dispatch(args, console: Console):
@@ -1009,7 +1094,7 @@ HELP_TEXT = """\
 dojo — AI-guided interview prep
 
 One command a day: `dojo` runs the whole routine — warm-ups, then a
-problem picked for your weakest pattern, solved in your own editor with a
+problem picked in roadmap order (prerequisites gated), solved in your own editor with a
 never-solve tutor, graded honestly (isolated judge + empirical profiler +
 AI review), and scheduled for spaced recall.
 
@@ -1019,6 +1104,7 @@ Usage:
 
 Commands:
   learn [TOPIC]   study a topic with the teacher, then practice a problem
+  roadmap         the progression tree (solved · next up · locked)
   list            the problem bank (✓ = curated, ready to solve)
   progress        per-pattern proficiency + retention schedule
   history         your attempts, newest first (`show <id>` for detail)

@@ -165,11 +165,11 @@ def test_learn_command_topic_picker(db, monkeypatch, tmp_path):
     )
     monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
     monkeypatch.setattr("dojo.tutor.get_backend", lambda: MockBackend())
-    answers = iter(["3"])
+    answers = iter(["2"])
     monkeypatch.setattr("dojo.cli.make_prompt", lambda console: lambda text: next(answers))
 
     assert _cmd_learn(SimpleNamespace(topic=None, _user="andy")) == 0
-    assert calls and calls[0][4] == "two_pointers"  # third entry of PATTERNS
+    assert calls and calls[0][4] == "two_pointers"  # second entry of PATTERNS
 
 
 def test_learn_command_typo_errors(db, monkeypatch, tmp_path):
@@ -364,6 +364,7 @@ def test_help_variants_show_minimal_guide(capsys):
         assert main(argv) == 0
         out = capsys.readouterr().out
         assert "learn [TOPIC]" in out
+        assert "roadmap" in out
         assert "history" in out
         assert "uv run dojo" in out  # the first-run pointer
         for hidden in ("dojo day", "dojo warmup", "dojo check", "dojo report", "dojo curate"):
@@ -381,3 +382,66 @@ def test_hidden_commands_still_dispatch():
     assert args.command == "show" and args.attempt_id == 3
     assert PARSER.parse_args(["day", "two_sum"]).command == "day"
     assert PARSER.parse_args(["report", "--fix", "two_sum"]).command == "report"
+
+
+# ----------------------------------------------------------- roadmap (v0.10)
+
+def _seed_ladder(conn, slug, pattern, lc):
+    from dojo.db import dumps_json, now
+
+    conn.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
+        "function_name, visible_tests, lc_number, created_at) "
+        "VALUES (?, ?, 'Easy', ?, 's', 'fn', ?, ?, ?)",
+        (slug, slug, pattern, dumps_json([{"args": [[]], "expected": None}]), lc, now()),
+    )
+    conn.commit()
+
+
+def _solve_slug(conn, user_id, slug):
+    from dojo.db import now
+
+    pid = conn.execute("SELECT id FROM problems WHERE slug = ?", (slug,)).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
+        "VALUES (?, ?, 'solve', 'correct', ?, ?)",
+        (user_id, pid, now(), now()),
+    )
+    conn.commit()
+
+
+def test_roadmap_rows_gate_state(db):
+    """The roadmap view's data: ladder counts, complete/next-up markers,
+    and the hard prereq gate's locked-by attribution."""
+    from dojo.cli import _roadmap_rows
+
+    uid = get_or_create_user(db, "andy")
+    _seed_ladder(db, "two_sum", "arrays_and_hashing", 1)
+    _seed_ladder(db, "group_anagrams", "arrays_and_hashing", 49)
+    _seed_ladder(db, "valid_palindrome", "two_pointers", 125)
+    _solve_slug(db, uid, "two_sum")
+
+    rows, next_pick = _roadmap_rows(db, uid)
+    arrays = rows[0]
+    assert arrays["available"] == 2 and arrays["solved"] == 1
+    assert arrays["complete"] is False and arrays["next_up"] is True
+    assert arrays["locked_by"] is None
+    two_ptrs = rows[1]
+    assert two_ptrs["locked_by"] == "arrays_and_hashing"
+    assert two_ptrs["next_up"] is False
+    assert next_pick["slug"] == "group_anagrams"
+
+    _solve_slug(db, uid, "group_anagrams")  # arrays ladder complete
+    rows, next_pick = _roadmap_rows(db, uid)
+    assert rows[0]["complete"] is True and rows[0]["next_up"] is False
+    assert rows[1]["next_up"] is True and rows[1]["locked_by"] is None
+    assert next_pick["slug"] == "valid_palindrome"
+
+
+def test_roadmap_command_dispatches(db, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from dojo.cli import _cmd_roadmap
+
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    assert _cmd_roadmap(SimpleNamespace(_user="andy")) == 0

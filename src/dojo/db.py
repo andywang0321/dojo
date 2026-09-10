@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS problems (
     source          TEXT DEFAULT 'seed',
     visible_tests   TEXT,  -- JSON: [{"args": [...], "expected": ...}]
     signature       TEXT,  -- JSON: "def-sig" | {"functions": {...}} | {"methods": {...}}
+    lc_number       INTEGER,  -- v0.10: LeetCode number for roadmap ladder matching
     created_at      TEXT NOT NULL
 );
 
@@ -128,6 +129,8 @@ def migrate(conn: sqlite3.Connection) -> None:
     problems_cols = {r["name"] for r in conn.execute("PRAGMA table_info(problems)")}
     if "signature" not in problems_cols:
         conn.execute("ALTER TABLE problems ADD COLUMN signature TEXT")
+    if "lc_number" not in problems_cols:
+        conn.execute("ALTER TABLE problems ADD COLUMN lc_number INTEGER")
     conn.execute(LEARN_SESSIONS_DDL)  # v0.8: idempotent table creation
     conn.commit()
 

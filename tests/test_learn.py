@@ -78,7 +78,7 @@ def test_pick_practice_problem_nothing_available(db):
     _seed_problem(db, "h_solved", "heap", "Easy", solved=True)
     uid = get_or_create_user(db, "andy")
     assert pick_practice_problem(db, uid, "heap") is None
-    assert pick_practice_problem(db, uid, "graph") is None
+    assert pick_practice_problem(db, uid, "graphs") is None
 
 
 # ------------------------------------------------------------ the conversation

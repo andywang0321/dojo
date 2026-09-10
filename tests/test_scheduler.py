@@ -25,6 +25,37 @@ def _insert_problem(conn, slug, pattern, difficulty="Easy", curated=True):
     conn.commit()
 
 
+def _insert_ladder_problem(conn, slug, pattern, lc, difficulty="Easy"):
+    conn.execute(
+        """
+        INSERT INTO problems
+            (slug, title, difficulty, pattern, statement, function_name,
+             visible_tests, lc_number, created_at)
+        VALUES (?, ?, ?, ?, 'stmt', 'fn', ?, ?, ?)
+        """,
+        (
+            slug,
+            slug.replace("_", " ").title(),
+            difficulty,
+            pattern,
+            dumps_json([{"args": [[]], "expected": None}]),
+            lc,
+            now(),
+        ),
+    )
+    conn.commit()
+
+
+def _solve(conn, user_id, slug):
+    pid = conn.execute("SELECT id FROM problems WHERE slug = ?", (slug,)).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
+        "VALUES (?, ?, 'solve', 'correct', datetime('now'), datetime('now'))",
+        (user_id, pid),
+    )
+    conn.commit()
+
+
 def test_retrievability_curve():
     assert abs(scheduler.retrievability(0.0, 1.0) - 1.0) < 1e-9
     # With FSRS constants, R(t=S) ≈ 0.90 — the design point behind interval = S.
@@ -113,20 +144,78 @@ def test_pick_new_problem_weakest_pattern(db):
     _insert_problem(db, "valid_parentheses", "stack")
     _insert_problem(db, "already_done", "stack")
     # Solve one problem, leave the rest unsolved.
-    pid = db.execute("SELECT id FROM problems WHERE slug='already_done'",).fetchone()["id"]
-    db.execute(
-        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
-        "VALUES (?, ?, 'solve', 'correct', datetime('now'), datetime('now'))",
-        (uid, pid),
-    )
+    _solve(db, uid, "already_done")
     # The stack pattern has a strong card; arrays_and_hashing has none (0 = weakest).
     card = scheduler.ensure_card(db, uid, "stack")
     db.execute("UPDATE pattern_cards SET stability = 10.0 WHERE id = ?", (card["id"],))
     db.commit()
 
     picked = scheduler.pick_new_problem(db, uid)
-    assert picked["slug"] == "two_sum"  # unsolved + weakest pattern
+    assert picked["slug"] == "two_sum"  # unsolved + weakest pattern (non-ladder fallback)
     assert picked["slug"] != "already_done"  # solved problems are excluded
+
+
+# ----------------------------------------------- roadmap picks (v0.10)
+
+def test_pick_follows_ladder_order_within_pattern(db):
+    """Within a pattern, the earliest unsolved ladder problem wins —
+    regardless of difficulty or title."""
+    uid = get_or_create_user(db, "andy")
+    _insert_ladder_problem(db, "contains_duplicate", "arrays_and_hashing", 217)
+    _insert_ladder_problem(db, "group_anagrams", "arrays_and_hashing", 49)
+    _solve(db, uid, "contains_duplicate")
+
+    picked = scheduler.pick_new_problem(db, uid)
+    assert picked["slug"] == "group_anagrams"  # ladder order: 217 → 242 → 1 → 49
+
+
+def test_pick_hard_prereq_gate(db):
+    """A pattern stays locked until its prerequisite pattern's ladder is
+    complete in the bank (v0.10 hard gate)."""
+    uid = get_or_create_user(db, "andy")
+    _insert_ladder_problem(db, "two_sum", "arrays_and_hashing", 1)
+    _insert_ladder_problem(db, "valid_palindrome", "two_pointers", 125)
+
+    # two_pointers requires arrays_and_hashing complete → locked.
+    assert scheduler.pick_new_problem(db, uid)["slug"] == "two_sum"
+    _solve(db, uid, "two_sum")  # arrays ladder complete (bank-wise)
+    assert scheduler.pick_new_problem(db, uid)["slug"] == "valid_palindrome"
+
+
+def test_pick_skips_uncurated_ladder_rows(db):
+    """An uncurated ladder problem is invisible to the ladder — the pick
+    moves on instead of serving an ungradable problem."""
+    uid = get_or_create_user(db, "andy")
+    _insert_ladder_problem(db, "two_sum", "arrays_and_hashing", 1)
+    _insert_problem(db, "custom_stats", "arrays_and_hashing")  # non-ladder fallback
+    db.execute("UPDATE problems SET function_name = NULL, visible_tests = NULL WHERE slug = 'two_sum'")
+    db.commit()
+
+    picked = scheduler.pick_new_problem(db, uid)
+    assert picked["slug"] == "custom_stats"
+
+
+def test_pick_falls_back_after_ladder_exhausted(db):
+    uid = get_or_create_user(db, "andy")
+    _insert_ladder_problem(db, "two_sum", "arrays_and_hashing", 1)
+    _insert_problem(db, "custom_stats", "arrays_and_hashing")
+    _solve(db, uid, "two_sum")  # the only ladder problem in the bank is done
+
+    assert scheduler.pick_new_problem(db, uid)["slug"] == "custom_stats"
+
+
+def test_practice_pick_prefers_ladder_problem(db):
+    """The learn-mode handoff respects the ladder within the pattern."""
+    uid = get_or_create_user(db, "andy")
+    _insert_ladder_problem(db, "valid_palindrome", "two_pointers", 125)
+    _insert_problem(db, "custom_two_pointer", "two_pointers", difficulty="Easy")
+
+    picked = scheduler.pick_practice_problem(db, uid, "two_pointers")
+    assert picked["slug"] == "valid_palindrome"  # ladder first, not the easier custom one
+
+    _solve(db, uid, "valid_palindrome")
+    picked = scheduler.pick_practice_problem(db, uid, "two_pointers")
+    assert picked["slug"] == "custom_two_pointer"  # ladder done → fallback
 
 
 def test_backfill_creates_due_cards(db):

@@ -33,13 +33,13 @@ def test_maybe_clear_on_version_bump(tmp_path, monkeypatch):
     assert (tmp_path / "logs" / "dojo.log").exists()
 
     # same version: nothing cleared
-    assert debuglog.maybe_clear_logs(tmp_path / "logs", "0.9") is False
+    assert debuglog.maybe_clear_logs(tmp_path / "logs", debuglog.MAJOR_VERSION) is False
     assert (tmp_path / "logs" / "dojo.log").exists()
 
     # major version bump: log wiped, marker rewritten
-    assert debuglog.maybe_clear_logs(tmp_path / "logs", "0.10") is True
+    assert debuglog.maybe_clear_logs(tmp_path / "logs", "0.11") is True
     assert not (tmp_path / "logs" / "dojo.log").exists()
-    assert (tmp_path / "logs" / ".version").read_text().strip() == "0.10"
+    assert (tmp_path / "logs" / ".version").read_text().strip() == "0.11"
 
 
 def _live_backend(monkeypatch, tmp_path):
