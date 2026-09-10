@@ -55,11 +55,38 @@ freely — alternative approaches and their trade-offs, deeper pattern \
 connections, how the problem relates to their ML/engineering background, and \
 follow-up problems that extend the same ideas.
 
+You are shown the student's submitted code. Ground your answers in what that \
+code actually does — do not guess at which version is active; if the file \
+mixes active and commented-out code, discuss the active one as submitted and \
+mention the alternative only where it helps.
+
 Keep responses under 10 sentences, plain text only (no Markdown — the student \
 reads a terminal), break long answers into short paragraphs, prefer \
 plain-dash list lines ("- item"), and end with a question when there is a \
 natural one.
 """
+
+
+def build_discussion_prompt(
+    statement: str,
+    code: str,
+    history: list[dict],
+    question: str,
+) -> str:
+    """Post-solve discussion context: statement, submitted code, recent
+    exchange, and the new question. The code is the student's own — the
+    never-solve boundary lifted once the solve is graded."""
+    history_block = "\n".join(
+        f"- student: {entry['user']}\n  tutor: {entry['tutor'][:200]}"
+        for entry in history[-4:]
+    ) or "(none yet)"
+    return (
+        f"PROBLEM: {statement}\n\n"
+        f"SUBMITTED CODE:\n{code[-4000:] or '(none)'}\n\n"
+        "Discussion so far:\n"
+        f"{history_block}\n\n"
+        f"STUDENT: {question}"
+    )
 
 LEAK_CHECK_SYSTEM = """\
 You are a strict auditor protecting a no-spoilers tutoring policy. A tutor \
@@ -97,6 +124,9 @@ relevant — never invent findings that are not there.
 - "broader_picture" should connect this problem to the wider pattern family \
 and, where natural, to the student's ML background, plus one follow-up idea \
 to try next time they see this pattern.
+
+Every score is an integer from 1 (poor) to 5 (excellent) — never outside \
+that range.
 
 Respond with JSON only, using exactly these keys:
 {"correctness": {"score": int, "comment": str},

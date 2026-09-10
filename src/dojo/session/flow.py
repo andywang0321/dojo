@@ -27,7 +27,7 @@ from dojo.config import WORKBENCH_DIR
 from dojo.db import dumps_json, get_or_create_user, loads_json, now
 from dojo.editor import launch as launch_editor
 from dojo.judge import JUDGE_CASES, ORACLES, PROFILER_INPUTS, run_cases
-from dojo.profiler import classify, measure
+from dojo.profiler import classify, measure, staircase_safe_points
 from dojo.session.learn import resolve_pattern, run_learn
 from dojo.session.state import (
     WorkbenchState,
@@ -37,7 +37,7 @@ from dojo.session.state import (
 )
 from dojo.terminal import make_prompt
 from dojo.tutor import TIER_NAMES, ask_tutor, de_markdown, review
-from dojo.tutor.prompts import DISCUSSION_SYSTEM
+from dojo.tutor.prompts import DISCUSSION_SYSTEM, build_discussion_prompt
 from dojo.ui import table as ui_table
 
 GENERATED_CASES = 30
@@ -233,7 +233,11 @@ def _measure_complexity(
             fit = classify([n for n, _ in m.time_points], [t for _, t in m.time_points])
             measured_time, time_r2 = fit.best_class, round(fit.r2, 3)
         if m.space_points:
-            sfit = classify([n for n, _ in m.space_points], [s for _, s in m.space_points])
+            # Space fits on every-second point: container allocations are a
+            # power-of-two staircase, and exact-doubling sampling aliases a
+            # linear structure as O(n^2) (see fit.staircase_safe_points).
+            safe = staircase_safe_points(m.space_points)
+            sfit = classify([n for n, _ in safe], [s for _, s in safe])
             measured_space, space_r2 = sfit.best_class, round(sfit.r2, 3)
         if m.dropped:
             console.print(f"[dim](dropped sizes: {', '.join(m.dropped)})[/dim]")
@@ -488,21 +492,16 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
 
 def _discuss(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState, question: str) -> None:
     """Post-solve chat: the never-solve boundary lifts, the transcript
-    persists on the attempt row."""
+    persists on the attempt row. The prompt carries the submitted code so
+    the model grounds on what actually ran (v0.8.1)."""
     history = loads_json(
         conn.execute(
             "SELECT discussion FROM attempts WHERE id = ?", (state.attempt_id,)
         ).fetchone()["discussion"],
         [],
     )
-    prompt = (
-        f"PROBLEM: {problem['statement']}\n\n"
-        "The student solved this and was graded. Discussion so far:\n"
-        + "\n".join(
-            f"- student: {entry['user']}\n  tutor: {entry['tutor'][:200]}"
-            for entry in history[-4:]
-        )
-        + f"\n\nSTUDENT: {question}"
+    prompt = build_discussion_prompt(
+        problem["statement"], state.code_path.read_text(), history, question
     )
     answer = de_markdown(backend.chat(DISCUSSION_SYSTEM, prompt))
     console.print(Panel(answer, title="tutor — post-solve discussion", border_style="green"))

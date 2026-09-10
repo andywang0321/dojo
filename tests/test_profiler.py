@@ -69,3 +69,63 @@ def test_quadratic_solution_measures_quadratic(tmp_path):
     time_fit, _, _ = _profile(QUADRATIC, tmp_path, [50, 100, 200, 400])
     assert time_fit.best_class in ("O(n^2)", "O(n^3)"), time_fit
     assert time_fit.loglog_slope is None or time_fit.loglog_slope > 1.3
+
+
+# --------------------------------------------------- allocator staircase (v0.8.1)
+
+def test_staircase_sampling_aliases_and_the_fix():
+    """Regression: a linear allocation whose size is a power-of-two
+    staircase (Python set/dict tables) sampled at exact doublings aliases as
+    O(n^2) — the reported contains_duplicate false flag. Fitting every
+    second point (spacing x4) restores the honest O(n)."""
+    from dojo.profiler.fit import staircase_safe_points
+
+    sizes = [100, 200, 400, 800, 1600, 3200, 6400]
+    values = [1, 1, 4, 4, 16, 16, 64]  # table steps x4, sampled x2 → paired plateaus
+
+    aliased = classify(sizes, values)
+    assert aliased.best_class == "O(n^2)"  # the bug, pinned (r² ≈ 0.97 — the live case)
+
+    safe = staircase_safe_points(list(zip(sizes, values)))
+    fixed = classify([n for n, _ in safe], [v for _, v in safe])
+    assert fixed.best_class == "O(n)", fixed
+
+
+def test_staircase_safe_keeps_smooth_series_intact():
+    """The subsample must not distort smooth O(n) or genuine O(n^2) data —
+    slopes 1 and 2 both survive doubling the spacing."""
+    from dojo.profiler.fit import staircase_safe_points
+
+    linear = list(zip([100, 200, 400, 800, 1600, 3200], [1, 2, 4, 8, 16, 32]))
+    assert classify(*zip(*staircase_safe_points(linear))).best_class == "O(n)"
+
+    quadratic = list(zip([100, 200, 400, 800, 1600, 3200], [1, 4, 16, 64, 256, 1024]))
+    assert classify(*zip(*staircase_safe_points(quadratic))).best_class == "O(n^2)"
+
+
+DUPLICATE_SET = textwrap.dedent(
+    """
+    def contains_duplicate(nums: list[int]) -> bool:
+        return len(set(nums)) != len(nums)
+    """
+)
+
+
+def test_hash_table_space_measures_linear(tmp_path):
+    """The real reported case: a set-based O(n)-space solution must measure
+    O(n), not O(n^2), once the allocator staircase is un-aliased."""
+    from dojo.profiler.fit import staircase_safe_points
+
+    path = tmp_path / "solution.py"
+    path.write_text(DUPLICATE_SET)
+    m = measure(
+        path,
+        "contains_duplicate",
+        PROFILER_INPUTS["contains_duplicate"],
+        sizes=[100, 200, 400, 800, 1600, 3200],
+        repeats=1,
+    )
+    safe = staircase_safe_points(m.space_points)
+    fit = classify([n for n, _ in safe], [v for _, v in safe])
+    assert fit.best_class == "O(n)", (fit, m.space_points)
+    assert fit.r2 > 0.9

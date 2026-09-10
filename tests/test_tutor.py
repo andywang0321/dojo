@@ -172,3 +172,35 @@ def test_mock_backend_teacher_branch():
     assert backend.chat(system, "TOPIC: heap") == "Because the root holds the min."
     fallback = backend.chat(system, "TOPIC: heap")
     assert "heap" in fallback.lower() and len(fallback) > 0
+
+
+def test_mock_backend_discussion_branch_matches_system_prompt():
+    """The discussion branch must actually match DISCUSSION_SYSTEM — the
+    prompt says 'discuss', never the literal word 'discussion', and the
+    branch silently died once while tests passed against the wrong
+    fallback."""
+    from dojo.tutor.prompts import DISCUSSION_SYSTEM
+
+    backend = MockBackend(discussion="CANNED discussion reply")
+    assert backend.chat(DISCUSSION_SYSTEM, "STUDENT: why?") == "CANNED discussion reply"
+
+
+def test_discussion_prompt_includes_submitted_code():
+    """The post-solve discussion must ground on the submitted code — a
+    real-session failure had the model invert which implementation was
+    active because it never saw the file (v0.8.1)."""
+    from dojo.tutor.prompts import build_discussion_prompt
+
+    code = "def contains_duplicate(nums):\n    return len(set(nums)) != len(nums)\n"
+    prompt = build_discussion_prompt(
+        "Return true if any duplicate.",
+        code,
+        [{"user": "which is better?", "tutor": "the loop version"}],
+        "which is better?",
+    )
+    assert "len(set(nums))" in prompt  # the submitted code is there
+    assert "Return true" in prompt
+    assert "STUDENT: which is better?" in prompt
+    lowered = prompt.lower()
+    for forbidden in ("oracles", "registry", "expected_time", "profiler"):
+        assert forbidden not in lowered, f"'{forbidden}' leaked into the discussion prompt"

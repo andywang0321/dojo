@@ -127,7 +127,10 @@ class MockBackend:
         }
 
     def chat(self, system: str, user: str) -> str:
-        if "discussion" in system.lower():
+        # DISCUSSION_SYSTEM contains "post-solve" but not the literal word
+        # "discussion" — key on both so the canned branch can't silently die
+        # (it did once, and long tests passed against the wrong fallback).
+        if "discussion" in system.lower() or "post-solve" in system.lower():
             return self._discussion
         if "teacher" in system.lower():  # learning mode (v0.8)
             if isinstance(self._teacher, list):

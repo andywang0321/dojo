@@ -11,6 +11,7 @@ Learning mode has moved to [v0.8](v0.8.md) and is being implemented.
 5. **Reviewer calibration in `dojo progress`.** Reviewer scores vs. subsequent warm-up grades per pattern, plus hint-count correlation — an audit loop for the *reviewer*, mirroring what `report` does for the *curator*.
 6. **Learner-model steering.** Stall detection (tier at abandon, hint counts) feeding problem selection and the proactive learn offer — close the loop on "the learner model is the asset".
 7. **Write-up.** The never-solve-as-architecture idea, the honesty contract, and the grader self-audit loop are worth a public write-up; the design docs are the second-most-valuable artifact.
+8. **Terminal rendering polish.** Render AI output with rich `Markdown` (headings, lists, emphasis) instead of the flatten-then-strip `de_markdown` display path, and syntax-highlight code blocks with rich `Syntax` (teacher/discussion output, `dojo show` code panels). Keep `de_markdown` for transcript persistence and the non-TTY fallback, and pin the plain-text prompt contract tests when the display path changes. The prompt-color regression (`[bold cyan]dojo ›` flattening under prompt_toolkit) shipped fixed in v0.8.1 via rich-markup→ANSI conversion.
 
 ## Backlog (unchanged)
 

@@ -554,3 +554,44 @@ def test_warmup_rejects_learn(db, fake_console, monkeypatch, tmp_path):
     assert db.execute("SELECT COUNT(*) AS n FROM learn_sessions").fetchone()["n"] == 0
     updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
     assert updated["lapses"] == 1
+
+
+def test_discuss_sees_submitted_code(db, fake_console, monkeypatch, tmp_path):
+    """The post-solve discussion prompt carries the submitted code — the
+    model must ground on what actually ran, not guess (v0.8.1 real-session
+    failure: the model inverted which implementation was active)."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    class CapturingBackend(MockBackend):
+        def __init__(self):
+            super().__init__()
+            self.chat_prompts = []
+
+        def chat(self, system, user):
+            self.chat_prompts.append((system, user))
+            return super().chat(system, user)
+
+    backend = CapturingBackend()
+    console = fake_console(
+        [
+            "submit",
+            "O(n) one pass",
+            "O(n) stack",
+            "The key insight.",
+            "discuss which is better?",
+            "done",
+        ],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(db, console, backend, "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    discussion_prompts = [u for s, u in backend.chat_prompts if "post-solve" in s.lower()]
+    assert discussion_prompts, "no discussion call captured"
+    assert "SUBMITTED CODE" in discussion_prompts[0]
+    assert "pairs = {" in discussion_prompts[0]  # SOLUTION's distinctive line

@@ -84,6 +84,29 @@ def _loglog_slope(sizes: list[int], values: list[float]) -> float | None:
     return sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denom
 
 
+def staircase_safe_points(points: list[tuple[int, float]]) -> list[tuple[int, float]]:
+    """Anti-alias a measurement series before fitting (v0.8.1).
+
+    Peak space for container-heavy solutions is a power-of-two staircase:
+    a set/dict table serves the same capacity across a 2-4x range of n,
+    then jumps. Sampled at exact doublings, consecutive points land in
+    pairs on the same step, and a linear structure aliases as exponent 2 —
+    the reported contains_duplicate "O(n^2)" space flag. Taking every
+    second point quadruples the sample spacing: in both CPython growth
+    regimes (x4 for small tables, x2 for large ones) a whole number of
+    steps is crossed per sample, so linear growth reads as slope 1. Smooth
+    O(n) and genuine O(n^2) data are unaffected — slopes 1 and 2 both
+    survive a spacing change.
+
+    This is a measurement fix, not a verdict shortcut: it removes a known
+    systematic artifact from the points the classifier sees; R² and the
+    honesty flags still come from the data.
+    """
+    if (len(points) + 1) // 2 < MIN_POINTS:
+        return points  # subsampling would starve the fit; keep the raw data
+    return points[::2]
+
+
 def classify(sizes: list[int], values: list[float]) -> FitResult:
     """Fit measured values across sizes to candidate growth classes."""
     points = [(n, v) for n, v in zip(sizes, values) if n > 0 and v is not None]

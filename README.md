@@ -74,7 +74,7 @@ dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
 
 ## Honest caveats
 
-- The profiler reports *evidence* ("consistent with O(n) at tested scales", R², confidence), never proofs; a mismatch between expected / claimed / measured is a signal to investigate.
+- The profiler reports *evidence* ("consistent with O(n) at tested scales", R², confidence), never proofs; a mismatch between expected / claimed / measured is a signal to investigate. Space fits sample every second probe point — set/dict tables are power-of-two staircases that would otherwise make linear code measure as O(n²) (see docs/grading.md).
 - Warm-ups re-solve the least recently solved problem in a pattern; a pattern needs at least one solved problem to warm up.
 - `dojo fetch` / `dojo curate` need the API key (the curated oracle is AI-generated and gated by an automated verification suite).
 - The teacher has no grader behind it — it's instructed to be humble about uncertainty, but pedagogy is unverified by construction. If a definition feels off, double-check it elsewhere.
