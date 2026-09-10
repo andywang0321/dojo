@@ -13,5 +13,5 @@ Delivered and planned development stages. Each stage file records what shipped a
 | [v0.7](v0.7.md) — the trust fix and terminal ergonomics | ✅ delivered | k_closest validity checker, prompt_toolkit, bare-question hints, `dojo report`. |
 | [v0.8](v0.8.md) — learning mode | ✅ delivered | Topic teacher + in-session learn + proactive offer; the documented never-solve narrowing. |
 | [v0.9](v0.9.md) — onboarding | ✅ delivered | Minimal help (`dojo help`), new-user README, setup key detection, `profile` → history alias. |
-| [v0.10](v0.10.md) — systemic pattern progression | 📝 planned | Prereq graph + per-pattern ladders + roadmap view + NeetCode-150 content; forks pending. |
+| [v0.10](v0.10.md) — systemic pattern progression | 📝 planned | Prereq graph + per-pattern ladders + roadmap view + NeetCode-150 content; design settled (18 groups, hard gate, batched import). |
 | [next](next.md) — backlog | 🔜 | Audit proposals (judge ground-truth anchor, warm-up rotation, streak + reminder, …), TUI polish, sync, warm-up variants. |
