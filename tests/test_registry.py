@@ -76,6 +76,8 @@ def test_visible_tests_agree_with_references():
                 assert CHECKERS["sample_valid"](None, sample, case["args"]), where
             elif case.get("predicate") == "is_peak":
                 assert CHECKERS["is_peak"](None, ORACLES[slug](*case["args"]), case["args"]), where
+            elif case.get("predicate") == "k_closest_valid":
+                assert CHECKERS["k_closest_valid"](None, ORACLES[slug](*case["args"]), case["args"]), where
             else:
                 got = ORACLES[slug](*case["args"])
                 assert _equal(got, case["expected"]), f"{where}: {got!r} vs {case['expected']!r}"
@@ -96,6 +98,8 @@ def test_generated_cases_agree_with_references():
             elif extras.get("predicate") == "sample_valid":
                 sample = reg._reference_sample(*args)
                 assert CHECKERS["sample_valid"](None, sample, args), where
+            elif extras.get("predicate") == "k_closest_valid":
+                assert CHECKERS["k_closest_valid"](None, ORACLES[slug](*args), args), where
             elif extras.get("ops") is not None:
                 assert _equal(ORACLES[slug](extras["ops"]), expected), where
             else:
@@ -123,6 +127,50 @@ def test_profiler_inputs_match_curated_slugs_and_scale():
     # Plain linear problems produce an input of size n.
     assert len(PROFILER_INPUTS["contains_duplicate"](100, rng)[0]) == 100
     assert len(PROFILER_INPUTS["daily_temperatures"](100, rng)[0]) == 100
+
+
+def test_k_closest_boundary_ties_accept_any_valid_choice():
+    """Regression for the trust bug: with a distance tie straddling the
+    k-boundary, ANY valid tie choice must pass — the oracle's canonical
+    choice is one answer, not the answer."""
+    from dojo.judge import CHECKERS
+
+    args = [2, [[2, 2], [-3, 2], [-2, 3]]]  # distances 8, 13, 13
+    assert CHECKERS["k_closest_valid"](None, [[2, 2], [-3, 2]], args)  # oracle choice
+    assert CHECKERS["k_closest_valid"](None, [[2, 2], [-2, 3]], args)  # tied alternative
+    assert not CHECKERS["k_closest_valid"](None, [[-3, 2], [-2, 3]], args)  # skips the closer (2,2)
+    assert not CHECKERS["k_closest_valid"](None, [[2, 2], [9, 9]], args)  # includes a farther point
+    assert not CHECKERS["k_closest_valid"](None, [[2, 2]], args)  # wrong size
+    # duplicate coordinates in the input: both copies are legitimately selectable
+    dup_args = [2, [[0, 0], [0, 0], [5, 5]]]
+    assert CHECKERS["k_closest_valid"](None, [[0, 0], [0, 0]], dup_args)
+    assert not CHECKERS["k_closest_valid"](None, [[0, 0], [5, 5]], dup_args)  # skipped a closer copy
+
+
+def test_k_closest_generated_cases_are_gradeable_by_checker():
+    from dojo.judge import CHECKERS
+
+    for seed in range(50):
+        rng = random.Random(f"kclosest-{seed}")
+        for n in (0, 3, 7, 12):
+            generated = JUDGE_CASES["k_closest_points"](n, rng)
+            args, _, extras = generated[0], generated[1], generated[2]
+            assert extras.get("predicate") == "k_closest_valid"
+            assert CHECKERS["k_closest_valid"](None, ORACLES["k_closest_points"](*args), args)
+
+
+def test_top_k_generated_frequencies_are_unique():
+    """The prompt promises 'the answer is always unique' — the generator must
+    uphold it (frequency ties would make equality judging false-fail)."""
+    from collections import Counter
+
+    for seed in range(50):
+        rng = random.Random(f"topk-{seed}")
+        for n in (1, 4, 8, 12):
+            args, expected, _ = JUDGE_CASES["top_k_frequent_elements"](n, rng)
+            nums, k = args
+            counts = Counter(nums).values()
+            assert len(set(counts)) == len(counts), f"seed={seed} n={n}: {sorted(counts)}"
 
 
 def _oracle_wrapper(slug: str, function_name: str) -> str:

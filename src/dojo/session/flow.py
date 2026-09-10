@@ -127,11 +127,17 @@ def _show_case_failures(console: Console, report) -> None:
             continue
         table.add_row(
             r.label,
-            str(r.expected)[:60],
-            str(r.got)[:60],
+            _truncate(str(r.expected)),
+            _truncate(str(r.got)),
             (r.error or "")[:60],
         )
     console.print(table)
+
+
+def _truncate(text: str, limit: int = 60) -> str:
+    """Truncate with an ellipsis — a hard cut mid-list reads as malformed
+    data (it once convinced a student the expected value was corrupt)."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _show_complexity_table(
