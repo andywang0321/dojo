@@ -5,6 +5,7 @@ purpose (never-solve rule 1)."""
 from dojo.curator.curator import (
     CuratorError,
     apply,
+    audit_curation,
     curate_dual,
     differential_check,
     make_isolated_namespace,
@@ -15,6 +16,7 @@ from dojo.curator.curator import (
 __all__ = [
     "CuratorError",
     "apply",
+    "audit_curation",
     "curate_dual",
     "differential_check",
     "make_isolated_namespace",

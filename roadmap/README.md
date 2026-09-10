@@ -10,4 +10,5 @@ Delivered and planned development stages. Each stage file records what shipped a
 | [v0.4](v0.4.md) — deeper grading | ✅ delivered | Static analysis, score trends, dual-oracle differential. |
 | [v0.5](v0.5.md) — setup wizard, single-user ergonomics, bare `dojo` | ✅ delivered | First-run wizard, auto-reseed, `dojo user`, PATH wrapper. |
 | [v0.6](v0.6.md) — practice-run polish | ✅ delivered | Check-time lint, post-solve loop (polish/discuss), reviewer reasoning, tutor modes, leak-audit hardening. |
+| [v0.7](v0.7.md) — the trust fix and terminal ergonomics | ✅ delivered | k_closest validity checker, prompt_toolkit, bare-question hints, `dojo report`. |
 | [next](next.md) — learning mode | 🔜 planned | The remaining design conversation. |

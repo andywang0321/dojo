@@ -294,3 +294,113 @@ def test_dual_oracle_skips_predicate_only_pairs():
     backend = MockBackend(curator=[CANNED_NO_ORACLE, dict(CANNED_NO_ORACLE)])
     proposal = curate_dual(backend, "some statement")
     assert proposal["slug"] == "matrix_diagonal_sum"
+
+
+# ------------------------------------------------------------------- report
+
+
+def test_audit_curation_detects_live_fresh_disagreement():
+    from dojo.curator.curator import _exec_proposal, audit_curation, make_isolated_namespace
+
+    ns = make_isolated_namespace()
+    _exec_proposal(CANNED_PROPOSAL, ns)
+    live_oracle = ns["ORACLES"]["matrix_diagonal_sum"]
+    live_generator = ns["JUDGE_CASES"]["matrix_diagonal_sum"]
+
+    backend = MockBackend(
+        curator=[CANNED_DISAGREE],
+        auditor={"findings": ["ties graded by equality"], "verdict": "fix", "explanation": "…"},
+    )
+    audit = audit_curation(
+        backend,
+        CANNED_PROPOSAL["statement"],
+        CANNED_PROPOSAL["visible_tests"],
+        live_oracle=live_oracle,
+        live_generator=live_generator,
+    )
+    assert audit["verdict"] == "fix"
+    assert any("disagree" in f for f in audit["automated_findings"])
+    assert "ties graded by equality" in audit["findings"]
+
+
+def test_audit_curation_clean_when_oracles_agree():
+    from dojo.curator.curator import _exec_proposal, audit_curation, make_isolated_namespace
+
+    ns = make_isolated_namespace()
+    _exec_proposal(CANNED_PROPOSAL, ns)
+    backend = MockBackend(curator=[CANNED_ALT])
+    audit = audit_curation(
+        backend,
+        CANNED_PROPOSAL["statement"],
+        CANNED_PROPOSAL["visible_tests"],
+        live_oracle=ns["ORACLES"]["matrix_diagonal_sum"],
+        live_generator=ns["JUDGE_CASES"]["matrix_diagonal_sum"],
+    )
+    assert audit["verdict"] == "ok"
+    assert audit["automated_findings"] == []
+
+
+def test_apply_overwrite_replaces_existing(paths):
+    problems_dir, overrides_path, registry_path, db_path = paths
+    namespace = _make_namespace()
+    existing_file = problems_dir / "arrays_and_hashing" / "matrix_diagonal_sum.py"
+    existing_file.parent.mkdir(parents=True, exist_ok=True)
+    existing_file.write_text('"""old statement"""\n')
+    overrides_path.write_text(
+        json.dumps(
+            {
+                "matrix_diagonal_sum": {
+                    "function_name": "old_fn",
+                    "signature": "(x) -> int",
+                    "visible_tests": [],
+                }
+            }
+        )
+    )
+
+    summary = apply(
+        CANNED_PROPOSAL,
+        problems_dir=problems_dir,
+        overrides_path=overrides_path,
+        registry_path=registry_path,
+        registry_namespace=namespace,
+        db_path=db_path,
+        verify=lambda: (True, "ok"),
+        overwrite=True,
+    )
+    assert summary["slug"] == "matrix_diagonal_sum"
+    assert json.loads(overrides_path.read_text())["matrix_diagonal_sum"]["function_name"] == "diagonal_sum"
+    assert "old statement" not in existing_file.read_text()
+    assert "@oracle('matrix_diagonal_sum')" in registry_path.read_text()
+
+
+def test_apply_overwrite_rolls_back_to_original(paths):
+    problems_dir, overrides_path, registry_path, db_path = paths
+    namespace = _make_namespace()
+    existing_file = problems_dir / "arrays_and_hashing" / "matrix_diagonal_sum.py"
+    existing_file.parent.mkdir(parents=True, exist_ok=True)
+    existing_file.write_text('"""old statement"""\n')
+    original_overrides = {
+        "matrix_diagonal_sum": {
+            "function_name": "old_fn",
+            "signature": "(x) -> int",
+            "visible_tests": [],
+        }
+    }
+    overrides_path.write_text(json.dumps(original_overrides))
+    registry_text = registry_path.read_text()
+
+    with pytest.raises(CuratorError, match="verification gate failed"):
+        apply(
+            CANNED_PROPOSAL,
+            problems_dir=problems_dir,
+            overrides_path=overrides_path,
+            registry_path=registry_path,
+            registry_namespace=namespace,
+            db_path=db_path,
+            verify=lambda: (False, "boom"),
+            overwrite=True,
+        )
+    assert json.loads(overrides_path.read_text()) == original_overrides
+    assert existing_file.read_text() == '"""old statement"""\n'
+    assert registry_path.read_text() == registry_text

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "openai>=3.8.0",
+    "prompt-toolkit>=3.0.53",
     "radon>=6.0.1",
     "rich>=15.0.0",
     "ruff>=0.16.6",

@@ -62,6 +62,15 @@ def test_vague_message_forces_tier_zero():
     assert any("tier 0" in p.lower() for p in backend.tutor_prompts())
 
 
+def test_short_discussion_question_is_not_forced_to_tier_zero():
+    """'what is a heap' is short but it is a discussion question, not a
+    blockage — only ultra-short zero-information messages force tier 0."""
+    backend = RecordingBackend()
+    ask_tutor(backend, STATEMENT, CODE, tier=2, user_message="what is a heap", history=[])
+    assert any("answer at tier 2" in p for p in backend.tutor_prompts())
+    assert not any("answer at tier 0" in p for p in backend.tutor_prompts())
+
+
 def test_ladder_kind_reports_tier_and_delivers():
     backend = RecordingBackend(tutor=[dict(CANNED_LADDER)])
     result = ask_tutor(
@@ -144,3 +153,10 @@ def test_de_markdown_keeps_underscores():
     # Underscores may be real identifiers (two_sum); only asterisk/backtick
     # artifacts are stripped.
     assert de_markdown("see `two_sum` and **hash_map**") == "see two_sum and hash_map"
+
+
+def test_de_markdown_blockquotes_rules_and_dunder_bold():
+    text = "> a quoted insight\n\n__bold__ move\n\n---\n\n- item\n\n***"
+    out = de_markdown(text)
+    assert out == "a quoted insight\n\nbold move\n\n• item"
+    assert "---" not in out and "***" not in out and "__" not in out

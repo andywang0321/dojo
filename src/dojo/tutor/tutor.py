@@ -23,7 +23,10 @@ from dojo.tutor.prompts import (
 )
 
 MAX_TIER = 5
-VAGUE_LENGTH = 20
+# Only ultra-short messages ("stuck", "help" — zero information) force the
+# metacognition tier. Slightly longer short questions ("what is a heap")
+# are discussion, and the model classifies them.
+VAGUE_LENGTH = 6
 LEAK_THRESHOLD = 3
 LEAK_RETRIES = 2
 
@@ -55,21 +58,29 @@ def de_markdown(text: str) -> str:
 
     The prompts instruct plain text, but models occasionally emit Markdown
     anyway; this is the belt-and-braces pass. Bullets are captured first,
-    then all asterisks and backticks are removed, '#' headers are flattened,
-    numbered lists are left as-is. Underscores are deliberately untouched —
-    stripping them would mangle identifiers like ``two_sum``.
+    then all asterisks, backticks, and double-underscore bolds are removed,
+    '#' headers are flattened, blockquote markers are stripped, and pure
+    horizontal-rule lines are dropped. Underscores are deliberately kept
+    otherwise — stripping them would mangle identifiers like ``two_sum``.
     """
     lines = []
-    for line in text.replace("**", "").replace("`", "").splitlines():
+    for line in text.replace("**", "").replace("`", "").replace("__", "").splitlines():
         stripped = line.lstrip()
+        if not stripped:
+            lines.append(line)  # paragraph breaks survive
+            continue
+        if set(stripped) <= {"-", "*", "_", "="}:
+            continue  # horizontal rules
         if stripped.startswith("#") and " " in stripped:
             header, _, rest = stripped.partition(" ")
             if set(header) == {"#"}:
                 line = rest
         elif stripped.startswith("- ") or stripped.startswith("* "):
             line = "• " + stripped[2:]
+        elif stripped.startswith(">"):
+            line = stripped[1:].lstrip()
         lines.append(line)
-    return "\n".join(lines).replace("*", "")
+    return "\n".join(lines).replace("*", "").rstrip().replace("\n\n\n", "\n\n")
 
 
 def _tutor_call(backend: AIBackend, prompt: str, default_tier: int) -> tuple[str, int | None, str]:

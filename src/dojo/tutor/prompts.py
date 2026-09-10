@@ -28,6 +28,8 @@ next-tier hint instead.
 - Output PLAIN TEXT ONLY — never Markdown: no asterisks for emphasis, no \
 backticks, no '#' headers, no list markup. The student reads your answer in a \
 terminal, where Markdown renders as noise.
+- Break long answers into short paragraphs. Prefer plain-dash list lines \
+("- item") over prose walls — the terminal is narrow.
 
 Classify the student's query:
 - kind "ladder": they are stuck or blocked, asking to be unblocked or for the \
@@ -54,7 +56,9 @@ connections, how the problem relates to their ML/engineering background, and \
 follow-up problems that extend the same ideas.
 
 Keep responses under 10 sentences, plain text only (no Markdown — the student \
-reads a terminal), and end with a question when there is a natural one.
+reads a terminal), break long answers into short paragraphs, prefer \
+plain-dash list lines ("- item"), and end with a question when there is a \
+natural one.
 """
 
 LEAK_CHECK_SYSTEM = """\

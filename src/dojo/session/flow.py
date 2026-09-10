@@ -25,7 +25,7 @@ from dojo import complexity, scheduler, static
 from dojo.config import WORKBENCH_DIR
 from dojo.db import dumps_json, get_or_create_user, loads_json, now
 from dojo.editor import launch as launch_editor
-from dojo.judge import JUDGE_CASES, PROFILER_INPUTS, run_cases
+from dojo.judge import JUDGE_CASES, ORACLES, PROFILER_INPUTS, run_cases
 from dojo.profiler import classify, measure
 from dojo.session.state import (
     WorkbenchState,
@@ -33,8 +33,10 @@ from dojo.session.state import (
     retire_state,
     save_state,
 )
+from dojo.terminal import make_prompt
 from dojo.tutor import TIER_NAMES, ask_tutor, de_markdown, review
 from dojo.tutor.prompts import DISCUSSION_SYSTEM
+from dojo.ui import table as ui_table
 
 GENERATED_CASES = 30
 
@@ -117,7 +119,7 @@ def _build_cases(problem: sqlite3.Row, rng: random.Random) -> list[dict]:
 
 
 def _show_case_failures(console: Console, report) -> None:
-    table = Table(title="Failed cases")
+    table = ui_table("Failed cases")
     table.add_column("Case")
     table.add_column("Expected")
     table.add_column("Got")
@@ -149,7 +151,7 @@ def _show_complexity_table(
     measured_time: str | None,
     measured_space: str | None,
 ) -> None:
-    table = Table(title="Complexity: expected vs. claimed vs. measured")
+    table = ui_table("Complexity: expected vs. claimed vs. measured")
     table.add_column("")
     table.add_column("Expected")
     table.add_column("You claimed")
@@ -268,8 +270,9 @@ def _submit(
     if analysis.flags or analysis.notes:
         _show_static(console, analysis)
 
-    claimed_time_raw = console.input("State your time complexity and why: ")
-    claimed_space_raw = console.input("State your space complexity and why: ")
+    prompt = make_prompt(console)
+    claimed_time_raw = prompt("State your time complexity and why: ")
+    claimed_space_raw = prompt("State your space complexity and why: ")
     claimed_time = complexity.parse(claimed_time_raw)
     claimed_space = complexity.parse(claimed_space_raw)
 
@@ -290,7 +293,7 @@ def _submit(
     # Reflect first, so the reviewer can comment on the reflection.
     reflection = None
     if not warmup:
-        reflection = console.input(
+        reflection = prompt(
             "Reflection — what was the key insight, and when would you reach for this again? "
         )
 
@@ -367,7 +370,7 @@ def _show_static(console: Console, analysis) -> None:
 
 
 def _show_review(console: Console, review_json: dict) -> None:
-    table = Table(title="AI review")
+    table = ui_table("AI review")
     table.add_column("Dimension")
     table.add_column("Score")
     table.add_column("Comment")
@@ -437,7 +440,7 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
     )
 
     review_json = loads_json(row["review"], {})
-    if console.input("Review again? [y/N]: ").strip().lower() in ("y", "yes"):
+    if make_prompt(console)("Review again? [y/N]: ").strip().lower() in ("y", "yes"):
         review_json = review(
             backend,
             problem["statement"],
@@ -511,9 +514,10 @@ def _discuss(conn: sqlite3.Connection, console: Console, backend, problem: sqlit
 def _post_solve_loop(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
     """After review + reflection: polish (re-grade edits), discuss (free
     post-solve chat), done (retire)."""
+    prompt = make_prompt(console)
     while True:
         console.print(POST_COMMANDS_HINT)
-        raw = console.input("[bold cyan]dojo ›[/bold cyan] ").strip()
+        raw = prompt("[bold cyan]dojo ›[/bold cyan] ").strip()
         if raw in ("done", "quit", "q"):
             return
         if raw in ("polish", "p"):
@@ -526,7 +530,7 @@ def _post_solve_loop(conn: sqlite3.Connection, console: Console, backend, proble
 
 def _ask_grade(console: Console, hints: int) -> int:
     suggested = 4 if hints == 0 else 3 if hints == 1 else 2
-    raw = console.input(
+    raw = make_prompt(console)(
         f"Recall grade [4=easy 3=good 2=hard 1=forgot] (suggested {suggested}): "
     ).strip()
     try:
@@ -630,13 +634,55 @@ def run_day(
     if open_editor:
         console.print(launch_editor(state.code_path))
 
+    def do_hint(question: str) -> None:
+        result = ask_tutor(
+            backend,
+            problem["statement"],
+            state.code_path.read_text(),
+            state.tier,
+            question,
+            state.hints,
+        )
+        if not result.delivered:
+            console.print(
+                "[yellow]Tutor couldn't answer without leaking the solution "
+                "— try rephrasing.[/yellow]"
+            )
+            return
+        cleaned = de_markdown(result.text)
+        state.hints.append(
+            {
+                "kind": result.kind,
+                "tier": result.tier,
+                "user": question,
+                "hint": cleaned,
+            }
+        )
+        if result.kind == "ladder":
+            state.tier = min(result.tier + 1, 5)
+        save_state(state)
+        if result.kind == "ladder":
+            console.print(
+                Panel(
+                    cleaned,
+                    title=f"hint · tier {result.tier} ({TIER_NAMES[result.tier]})",
+                    border_style="blue",
+                )
+            )
+            console.print(
+                f"[dim]Next hint will be tier {state.tier} ({TIER_NAMES[state.tier]}).[/dim]"
+            )
+        else:
+            console.print(Panel(cleaned, title="tutor", border_style="blue"))
+
+    prompt = make_prompt(console)
     while True:
         console.print(COMMANDS_HINT)
-        raw = console.input("[bold cyan]dojo ›[/bold cyan] ").strip()
+        raw = prompt("[bold cyan]dojo ›[/bold cyan] ").strip()
         if not raw:
             continue
         cmd, _, rest = raw.partition(" ")
-        if cmd in ("q", "quit"):
+        if cmd in ("q", "quit") and not rest:
             conn.execute(
                 """
                 UPDATE attempts SET
@@ -660,51 +706,36 @@ def run_day(
                 _show_card_update(console, card, summary, lapse=True)
             retire_state(state.slug)
             return "quit"
-        if cmd in ("c", "check"):
+        if cmd in ("c", "check") and not rest:
             _check(console, problem, state.code_path)
-        elif cmd in ("o", "open"):
+        elif cmd in ("o", "open") and not rest:
             console.print(launch_editor(state.code_path))
         elif cmd in ("h", "hint"):
-            result = ask_tutor(
-                backend,
-                problem["statement"],
-                state.code_path.read_text(),
-                state.tier,
-                rest or "I'm stuck",
-                state.hints,
-            )
-            if not result.delivered:
-                console.print(
-                    "[yellow]Tutor couldn't answer without leaking the solution "
-                    "— try rephrasing.[/yellow]"
-                )
-                continue
-            cleaned = de_markdown(result.text)
-            state.hints.append(
-                {
-                    "kind": result.kind,
-                    "tier": result.tier,
-                    "user": rest or "I'm stuck",
-                    "hint": cleaned,
-                }
-            )
-            if result.kind == "ladder":
-                state.tier = min(result.tier + 1, 5)
-            save_state(state)
-            if result.kind == "ladder":
-                console.print(
-                    Panel(
-                        cleaned,
-                        title=f"hint · tier {result.tier} ({TIER_NAMES[result.tier]})",
-                        border_style="blue",
-                    )
+            do_hint(rest or "I'm stuck")
+        elif cmd in ("r", "report") and not rest:
+            try:
+                from dojo.curator import CuratorError, audit_curation
+
+                audit = audit_curation(
+                    backend,
+                    problem["statement"],
+                    loads_json(problem["visible_tests"], []),
+                    live_oracle=ORACLES.get(problem["slug"]),
+                    live_generator=JUDGE_CASES.get(problem["slug"]),
                 )
                 console.print(
-                    f"[dim]Next hint will be tier {state.tier} ({TIER_NAMES[state.tier]}).[/dim]"
+                    f"[bold]Curation audit[/bold] — verdict: {audit.get('verdict', '?')}"
                 )
-            else:
-                console.print(Panel(cleaned, title="tutor", border_style="blue"))
-        elif cmd in ("s", "submit"):
+                for finding in audit.get("findings") or []:
+                    console.print(f"[yellow]• {finding}[/yellow]")
+                if not (audit.get("findings") or []):
+                    console.print("[green]No contract violations found.[/green]")
+                console.print(
+                    "[dim]`dojo report --fix <slug>` re-curates when the verdict is 'fix'.[/dim]"
+                )
+            except CuratorError as exc:
+                console.print(f"[red]Audit failed: {exc}[/red]")
+        elif cmd in ("s", "submit") and not rest:
             outcome, reflection = _submit(
                 conn, console, backend, problem, state, warmup=warmup
             )
@@ -723,7 +754,9 @@ def run_day(
                 retire_state(state.slug)
                 return "solved"
         else:
-            console.print("[dim]Unknown command.[/dim]")
+            # Bare questions — and command words with extra text ("check my
+            # solution...") — are hints, never "Unknown command".
+            do_hint(raw)
 
 
 def run_warmups(

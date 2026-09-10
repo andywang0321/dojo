@@ -59,6 +59,40 @@ Respond with the JSON object only.
 """
 
 
+AUDIT_SYSTEM = """\
+You are the dojo curation auditor. A student reported a problem with the \
+grading of one problem — or an automated check found one. You receive the \
+problem statement, the curated visible tests, and any automated findings \
+(disagreements between the live oracle and a fresh oracle run).
+
+Audit the CURATION, not the student's code. Hunt for contract violations \
+between the prompt and the judge:
+- "any order" / "ties may be broken in any order" graded by equality instead \
+of a comparator or checker;
+- "the answer is always unique" promises the generator does not enforce;
+- input constraints the generator can violate (sortedness, uniqueness, \
+nonzero divisors, empty-input promises);
+- case-size or worst-case-shape problems in profiler inputs;
+- verdict tags (compare / predicate / ops) that don't match the semantics.
+
+Respond with JSON only: {"findings": [strings — empty if none], \
+"verdict": "ok"|"fix", "explanation": "one short paragraph"}.
+"""
+
+
+def build_audit_prompt(statement: str, visible_tests, automated_findings: list[str]) -> str:
+    tests = "\n".join(
+        f"- {case}" for case in visible_tests
+    ) or "(no visible tests)"
+    findings = "\n".join(f"- {f}" for f in automated_findings) or "(none)"
+    return (
+        f"PROBLEM STATEMENT:\n{statement}\n\n"
+        f"VISIBLE TESTS:\n{tests}\n\n"
+        f"AUTOMATED FINDINGS (fresh oracle vs live oracle):\n{findings}\n\n"
+        "Audit the curation per the system prompt."
+    )
+
+
 def build_curator_prompt(statement: str, hints: dict | None = None) -> str:
     hint_block = ""
     if hints:

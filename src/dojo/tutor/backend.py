@@ -42,7 +42,7 @@ class DeepSeekBackend:
                 {"role": "user", "content": user},
             ],
             temperature=0.3,
-            max_tokens=1024,
+            max_tokens=2048,
         )
         return response.choices[0].message.content or ""
 
@@ -93,6 +93,7 @@ class MockBackend:
         curator: dict | None = None,
         tutor: dict | list | None = None,
         discussion: str = "Post-solve discussion: you could also sort both arrays and walk two pointers.",
+        auditor: dict | None = None,
     ):
         self._leak_ratings = leak_ratings if leak_ratings is not None else [1]
         self._rating_idx = 0
@@ -101,6 +102,7 @@ class MockBackend:
             {"kind": "ladder", "tier": 0, "text": self.TIER_RESPONSES[0]}
         ]
         self._discussion = discussion
+        self._auditor = auditor or {"findings": [], "verdict": "ok", "explanation": "clean"}
         self._review = review or {
             "correctness": {"score": 4, "comment": "The reasoning holds; check the empty-input case."},
             "approach_quality": {"score": 4, "comment": "Natural choice for this problem class."},
@@ -125,6 +127,8 @@ class MockBackend:
         return self.TIER_RESPONSES[1]
 
     def chat_json(self, system: str, user: str) -> dict:
+        if "curation auditor" in system.lower():
+            return self._auditor
         if "auditor" in system.lower():
             rating = self._leak_ratings[min(self._rating_idx, len(self._leak_ratings) - 1)]
             self._rating_idx += 1

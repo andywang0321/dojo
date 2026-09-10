@@ -33,6 +33,8 @@ from rich.table import Table
 from dojo import scheduler
 from dojo.bank import ensure_seeded
 from dojo.config import DB_PATH, PROBLEMS_DIR, REPO_ROOT, load_conf, save_conf
+from dojo.terminal import make_prompt
+from dojo.ui import table as ui_table
 from dojo.db import (
     connect,
     get_attempt,
@@ -78,7 +80,7 @@ def _choose_user(console: Console, names: list[str]) -> str | None:
         console.print("Users:")
         for i, name in enumerate(names, start=1):
             console.print(f"  {i}. {name}")
-        raw = console.input("Pick a number (q to cancel): ").strip()
+        raw = make_prompt(console)("Pick a number (q to cancel): ").strip()
         if raw.lower() == "q":
             return None
         try:
@@ -142,7 +144,7 @@ def _make_path_installer(console: Console):
             f"[bold]Put `dojo` on your PATH?[/bold] I'll install a tiny wrapper "
             f"at {bin_dir / 'dojo'} that runs the live repo via `uv run`."
         )
-        answer = console.input("Install? [y/N]: ").strip().lower()
+        answer = make_prompt(console)("Install? [y/N]: ").strip().lower()
         if answer not in ("y", "yes"):
             return False
         install_wrapper(bin_dir, str(REPO_ROOT))
@@ -152,7 +154,7 @@ def _make_path_installer(console: Console):
             rc_path = Path(os.path.expanduser("~")) / rc_name
             line = rc_line(str(bin_dir))
             if (
-                console.input(
+                make_prompt(console)(
                     f"Append this line to {rc_path}? [y/N]\n  {line}\n"
                 ).strip().lower()
                 in ("y", "yes")
@@ -212,7 +214,7 @@ def _cmd_list(args) -> int:
                 (user,),
             ):
                 solved[r["problem_id"]] = r["status"]
-    table = Table(title="Problem bank")
+    table = ui_table("Problem bank")
     table.add_column("Problem")
     table.add_column("Difficulty")
     table.add_column("Pattern")
@@ -339,7 +341,7 @@ def _cmd_profile(args) -> int:
             """,
             (user,),
         ).fetchall()
-    table = Table(title=f"Attempts — {user}")
+    table = ui_table(f"Attempts — {user}")
     for col in (
         "Problem", "Difficulty", "Status", "Hints", "Claimed time", "Measured time",
         "r²", "Claimed space", "Measured space", "Submitted",
@@ -371,7 +373,7 @@ def _cmd_history(args) -> int:
     with connect(DB_PATH) as conn:
         user_id = get_or_create_user(conn, user)
         rows = list_attempts(conn, user_id, slug=args.slug, limit=args.limit)
-    table = Table(title=f"Attempts — {user}")
+    table = ui_table(f"Attempts — {user}")
     for col in (
         "id", "problem", "kind", "status", "hints",
         "claimed", "measured", "r²", "submitted",
@@ -472,7 +474,7 @@ def _cmd_show(args) -> int:
         f"duration: {row['duration_seconds'] or '—'}s · "
         f"hints: {row['hint_count']} · polished: {row['polished'] or 0}x[/dim]"
     )
-    table = Table(title="Complexity: claimed vs. measured")
+    table = ui_table("Complexity: claimed vs. measured")
     table.add_column("")
     table.add_column("You claimed")
     table.add_column("Measured")
@@ -482,7 +484,7 @@ def _cmd_show(args) -> int:
 
     hints = loads_json(row["hints"], [])
     if hints:
-        hint_table = Table(title="Hint transcript")
+        hint_table = ui_table("Hint transcript")
         hint_table.add_column("tier")
         hint_table.add_column("you asked")
         hint_table.add_column("tutor said")
@@ -641,6 +643,87 @@ def _cmd_fetch(args) -> int:
     return 0
 
 
+def _cmd_report(args) -> int:
+    import json
+
+    from dojo.config import REPO_ROOT, WORKBENCH_DIR
+    from dojo.curator import CuratorError, apply, audit_curation, curate_dual
+    from dojo.judge import JUDGE_CASES, ORACLES
+    from dojo.tutor import get_backend
+
+    console = Console()
+    try:
+        backend = get_backend()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 1
+    slug = args.slug
+    with connect(DB_PATH) as conn:
+        if slug is None:
+            state_files = (
+                sorted(WORKBENCH_DIR.glob("*.state.json"))
+                if WORKBENCH_DIR.exists()
+                else []
+            )
+            slug = state_files[0].stem.removesuffix(".state") if state_files else None
+        if slug is None:
+            console.print(
+                "[red]No problem to report — pass a slug or start a session.[/red]"
+            )
+            return 1
+        problem = conn.execute(
+            "SELECT * FROM problems WHERE slug = ?", (slug,)
+        ).fetchone()
+    if problem is None:
+        console.print(f"[red]Unknown problem '{slug}'.[/red]")
+        return 1
+    try:
+        audit = audit_curation(
+            backend,
+            problem["statement"],
+            loads_json(problem["visible_tests"], []),
+            live_oracle=ORACLES.get(slug),
+            live_generator=JUDGE_CASES.get(slug),
+        )
+    except CuratorError as exc:
+        console.print(f"[red]Audit failed: {exc}[/red]")
+        return 1
+    report_dir = REPO_ROOT / "data" / "curation"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / f"{slug}.report.json").write_text(json.dumps(audit, indent=2))
+    findings = audit.get("findings") or []
+    console.print(
+        f"[bold]Curation audit: {slug}[/bold] — verdict: {audit.get('verdict', '?')}"
+    )
+    for finding in findings:
+        console.print(f"[yellow]• {finding}[/yellow]")
+    if audit.get("explanation"):
+        console.print(f"[dim]{audit['explanation']}[/dim]")
+    if not findings:
+        console.print("[green]No contract violations found.[/green]")
+    if args.fix:
+        if audit.get("verdict") != "fix":
+            console.print("[dim]Verdict is 'ok' — skipping re-curation.[/dim]")
+            return 0
+        console.print("[bold]Re-curating[/bold] (dual-oracle + verification gate)...")
+        try:
+            proposal = curate_dual(backend, problem["statement"])
+            summary = apply(proposal, overwrite=True)
+        except CuratorError as exc:
+            console.print(
+                f"[red]Re-curation failed and was rolled back: {exc}[/red]"
+            )
+            return 1
+        console.print(
+            f"[green]Re-curated {summary['slug']} — verification gate passed.[/green]"
+        )
+    else:
+        console.print(
+            "[dim]`dojo report --fix <slug>` re-curates when the verdict is 'fix'.[/dim]"
+        )
+    return 0
+
+
 def _cmd_progress(args) -> int:
     console = Console()
     user = getattr(args, "_user", None)
@@ -677,7 +760,7 @@ def _cmd_progress(args) -> int:
         }
         trends = review_trends(conn, user_id)
     patterns = sorted({r["pattern"] for r in attempt_rows} | set(card_rows))
-    table = Table(title=f"Pattern proficiency — {user}")
+    table = ui_table(f"Pattern proficiency — {user}")
     for col in ("pattern", "solved", "attempts", "avg hints", "cards", "due now", "avg stability", "avg difficulty"):
         table.add_column(col)
     for pattern in patterns:
@@ -699,7 +782,7 @@ def _cmd_progress(args) -> int:
         "new problems from the weakest pattern (lowest avg stability).[/dim]"
     )
     if trends:
-        t = Table(title="Score trends per pattern (review rubric, recency-weighted)")
+        t = ui_table("Score trends per pattern (review rubric, recency-weighted)")
         for col in (
             "pattern", "solves", "corr", "appr", "styl", "name", "edge", "comp", "overall",
         ):
@@ -788,6 +871,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "title_slug", help="LeetCode problem slug (URL path), e.g. two-sum"
     )
     p_fetch.set_defaults(func=_cmd_fetch)
+
+    p_report = sub.add_parser("report", help="audit a problem's curation (AI); --fix re-curates")
+    p_report.add_argument("slug", nargs="?", help="problem slug (default: active session)")
+    p_report.add_argument(
+        "--fix",
+        action="store_true",
+        help="re-curate through the pipeline when the audit verdict is 'fix'",
+    )
+    p_report.set_defaults(func=_cmd_report)
     return parser
 
 

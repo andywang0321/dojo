@@ -422,6 +422,28 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
     assert "Post-solve" in console.text
 
 
+def test_bare_questions_and_command_words_with_text_are_hints(db, fake_console, monkeypatch, tmp_path):
+    """No more 'Unknown command' friction: a bare question, and a command
+    word followed by extra text ('check my solution...'), both reach the
+    tutor as hints."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(["what is a heap", "check my solution please", "quit"])
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    assert "Unknown command" not in console.text
+    assert "visible cases passed" not in console.text  # check never ran
+
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    hints = json.loads(row["hints"])
+    assert [h["user"] for h in hints] == ["what is a heap", "check my solution please"]
+    assert row["hint_count"] == 2
+
+
 def test_check_shows_static_findings(db, fake_console, monkeypatch, tmp_path):
     """Static analysis is advisory at check time: lint findings appear with
     the visible-test run, so the student can fix them before submitting."""

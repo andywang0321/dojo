@@ -33,7 +33,7 @@ dojo <slug>                 # the same, on a specific problem
 dojo warmup                 # due retrievals only
 ```
 
-Inside a session the prompt always lists the commands: `open` (re-open your editor), `check` (run the visible tests + advisory lint/complexity findings), `hint <what you're stuck on>` (one rung up the ladder), `submit` (judge → self-report → measure → reflect → review), `quit` (saves your progress; the next session starts fresh from a blank template). Every session becomes one attempt row in your history.
+Inside a session the prompt always lists the commands: `open` (re-open your editor), `check` (run the visible tests + advisory lint/complexity findings), `hint <what you're stuck on>` (one rung up the ladder), `report` (audit this problem's curation), `submit` (judge → self-report → measure → reflect → review), `quit` (saves your progress; the next session starts fresh from a blank template). A bare question — with or without the `hint` prefix, even starting with another command word — reaches the tutor directly. Every session becomes one attempt row in your history.
 
 After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), **`discuss <question>`** opens a post-solve conversation (solutions allowed now), **`done`** closes the session.
 
@@ -56,6 +56,7 @@ dojo progress               # per-pattern proficiency, card schedule, score tren
 dojo history                # your attempts, newest first
 dojo show <id>              # one attempt in full (hints, code, review; --code for code only)
 dojo check [<slug>]         # visible tests against the active workbench
+dojo report [<slug>]        # AI-audit a problem's curation (--fix re-curates it)
 dojo user [<name>]          # switch the active user (numbered picker without a name)
 dojo setup                  # re-run the setup wizard (change key, reinstall PATH)
 dojo curate --text "…"      # AI-curate a new problem from a pasted statement

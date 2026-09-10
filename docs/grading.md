@@ -9,7 +9,7 @@ Student code runs in an isolated subprocess with a JSON protocol: the harness im
 - `strict` (default): JSON equality with `sort_keys`. No leniency — a non-serializable return fails the case.
 - `"compare": "sorted"` — deep-sorts both sides before equality; the honest way to support "any order" prompts.
 - `"compare": "approx:1e-4"` / `"compare": "rounded:n"` — recursive float tolerance / rounding.
-- `"predicate": name` — a `@checker(name)` in the registry validates `(module, got, args)`; for round-trips, any-valid-sample, any-peak.
+- `"predicate": name` — a `@checker(name)` in the registry validates `(module, got, args)`; for round-trips, any-valid-sample, any-peak, and any-valid-k-closest-set (boundary distance ties: the checker accepts any valid tie choice — equality judging there once false-failed correct solutions, the trust bug).
 - `{"ops": [...], "expected": [...]}` — class problems: instantiate `function_name`, replay the method sequence, compare per-op outputs.
 
 ### Registries (`judge/registry.py`)
@@ -43,6 +43,10 @@ Runs at **every `check`** as advisory findings (radon cyclomatic complexity per 
 ## The post-solve loop (v0.6)
 
 After review + reflection, the session continues with `polish` (re-judge + re-measure + re-analyze the edited code, updating the same attempt row and bumping its `polished` counter; an optional second review), `discuss <question>` (free post-solve chat — the never-solve boundary lifts after solving; the transcript persists on the attempt row), and `done` (retire the state).
+
+## The report command (v0.7)
+
+`dojo report [slug]` (and in-session `report`) audits a problem's *curation*, not the student's code: it runs a fresh curator pass, cross-checks the fresh oracle against the live one on generated cases, then asks the audit agent to hunt prompt-vs-judge contract violations (ties graded by equality, "unique answer" promises the generator doesn't enforce, constraint fidelity, verdict-tag mismatches). Findings land in gitignored `data/curation/<slug>.report.json` and print to the terminal; `dojo report --fix <slug>` re-curates through the dual-oracle pipeline + verification gate when the verdict is "fix" (the new registry block wins at import; rollback restores the original files, overrides, and registrations).
 
 ## Per-pattern score trends (v0.4)
 

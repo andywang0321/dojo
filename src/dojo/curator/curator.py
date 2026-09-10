@@ -245,12 +245,71 @@ def _run_verification() -> tuple[bool, str]:
     return proc.returncode == 0, output[-2000:]
 
 
+def _restore_problem_file(path: Path, original: str | None) -> None:
+    """Rollback for the seed file: restore the pre-apply text, or remove the
+    file if it did not exist before."""
+    if original is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(original)
+
+
 def _delete_problem_row(db_path: Path, slug: str) -> None:
     """Remove a problem row the apply step just created (rollback only; the
     slug is guaranteed fresh, so no attempts can reference it)."""
     with connect(db_path) as conn:
         conn.execute("DELETE FROM problems WHERE slug = ?", (slug,))
         conn.commit()
+
+
+def audit_curation(
+    backend,
+    statement: str,
+    visible_tests: list,
+    *,
+    live_oracle=None,
+    live_generator=None,
+) -> dict:
+    """Cross-check the live oracle against a fresh curator run, then let the
+    audit agent reason about the prompt-vs-judge contract. Returns the audit
+    JSON: {"findings": [...], "verdict": "ok"|"fix", "explanation": ...}."""
+    from dojo.curator.prompts import AUDIT_SYSTEM, build_audit_prompt
+
+    automated: list[str] = []
+    try:
+        fresh = propose(backend, statement)
+        if live_oracle is not None and live_generator is not None and fresh.get("oracle_code"):
+            ns = make_isolated_namespace()
+            _exec_proposal(fresh, ns)
+            slug = fresh["slug"]
+            if slug in ns["ORACLES"] and slug in ns["JUDGE_CASES"]:
+                for n in (0, 3, 7, 12):
+                    for seed in range(5):
+                        rng = random.Random(f"audit-{slug}-{n}-{seed}")
+                        generated = live_generator(n, rng)
+                        args, expected = generated[0], generated[1]
+                        extras = generated[2] if len(generated) > 2 else {}
+                        if extras.get("predicate"):
+                            continue
+                        call_args = [extras["ops"]] if extras.get("ops") is not None else args
+                        if not _strict_equal(live_oracle(*call_args), ns["ORACLES"][slug](*call_args)):
+                            automated.append(
+                                f"n={n} seed={seed}: live oracle and fresh oracle disagree "
+                                f"(live={live_oracle(*call_args)!r})"
+                            )
+                            break
+                    if len(automated) >= 5:
+                        break
+    except CuratorError:
+        automated.append("fresh curator run failed — cannot cross-check")
+
+    audit = backend.chat_json(
+        AUDIT_SYSTEM, build_audit_prompt(statement, visible_tests, automated)
+    )
+    if "error" in audit:
+        raise CuratorError(f"auditor returned non-JSON: {audit['error']}")
+    audit["automated_findings"] = automated
+    return audit
 
 
 def apply(
@@ -262,9 +321,11 @@ def apply(
     registry_namespace: dict | None = None,
     db_path: Path = DB_PATH,
     verify: Callable[[], tuple[bool, str]] = _run_verification,
+    overwrite: bool = False,
 ) -> dict:
     """Write the proposal's artifacts, re-seed, and run the verification
-    gate. Rolls everything back if the gate fails."""
+    gate. Rolls everything back if the gate fails. ``overwrite`` re-curates
+    an existing slug (the new registry block wins at import)."""
     validate(proposal)
     if registry_namespace is None or registry_path is None:
         registry_namespace, registry_path = _default_registry_namespace()
@@ -272,10 +333,12 @@ def apply(
     slug = proposal["slug"]
     registry_text = registry_path.read_text()
     overrides = json.loads(overrides_path.read_text())
-    if slug in overrides:
+    original_overrides = dict(overrides)
+    if slug in overrides and not overwrite:
         raise CuratorError(f"'{slug}' is already curated — pick a new slug")
     problem_path = problems_dir / proposal["pattern"] / f"{slug}.py"
-    if problem_path.exists():
+    existing_problem_text = problem_path.read_text() if problem_path.exists() else None
+    if problem_path.exists() and not overwrite:
         raise CuratorError(f"problem file already exists: {problem_path}")
 
     # 1. Register the code in the live namespace (and validate it runs).
@@ -316,9 +379,9 @@ def apply(
         bank.seed_problems(connect(db_path), problems_dir)
     except Exception as exc:  # noqa: BLE001
         _restore(registry_namespace, namespace_snapshot)
-        overrides_path.write_text(json.dumps(overrides, indent=2) + "\n")
+        overrides_path.write_text(json.dumps(original_overrides, indent=2) + "\n")
         registry_path.write_text(registry_text)
-        problem_path.unlink(missing_ok=True)
+        _restore_problem_file(problem_path, existing_problem_text)
         _delete_problem_row(db_path, slug)
         raise CuratorError(f"apply failed: {exc}") from exc
 
@@ -326,10 +389,9 @@ def apply(
     ok, output = verify()
     if not ok:
         _restore(registry_namespace, namespace_snapshot)
-        overrides.pop(slug, None)
-        overrides_path.write_text(json.dumps(overrides, indent=2) + "\n")
+        overrides_path.write_text(json.dumps(original_overrides, indent=2) + "\n")
         registry_path.write_text(registry_text)
-        problem_path.unlink(missing_ok=True)
+        _restore_problem_file(problem_path, existing_problem_text)
         bank.seed_problems(connect(db_path), problems_dir)
         _delete_problem_row(db_path, slug)
         raise CuratorError(f"verification gate failed; rolled back.\n{output}")
