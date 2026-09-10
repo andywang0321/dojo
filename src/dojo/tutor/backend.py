@@ -8,12 +8,45 @@ requires ``DEEPSEEK_API_KEY`` in the environment or a gitignored ``.env``.
 from __future__ import annotations
 
 import json
+import re
 from typing import Protocol
 
 from dojo.config import ai_backend, deepseek_api_key
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
+
+#: Output cap for JSON responses — generous because the reviewer's rubric is
+#: the longest object the pipeline asks for, and a truncated (mid-object)
+#: response is exactly the "non-JSON" failure real sessions saw.
+JSON_MAX_TOKENS = 4096
+
+
+def parse_json_content(content: str) -> dict:
+    """Parse model output as JSON, tolerating the shapes the API actually
+    emits: the object may arrive fenced (```json ... ```) or wrapped in
+    prose. Only content with no JSON object at all is an error."""
+    if not content:
+        return {"error": "model returned non-JSON"}
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```[a-zA-Z]*\s*", "", stripped)
+        stripped = re.sub(r"\s*```$", "", stripped)
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            pass
+    start, end = content.find("{"), content.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(content[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+    return {"error": "model returned non-JSON"}
 
 
 class AIBackend(Protocol):
@@ -54,13 +87,10 @@ class DeepSeekBackend:
                 {"role": "user", "content": user},
             ],
             temperature=0.0,
-            max_tokens=2048,
+            max_tokens=JSON_MAX_TOKENS,
             response_format={"type": "json_object"},
         )
-        try:
-            return json.loads(response.choices[0].message.content or "{}")
-        except json.JSONDecodeError:
-            return {"error": "model returned non-JSON"}
+        return parse_json_content(response.choices[0].message.content or "")
 
 
 class MockBackend:

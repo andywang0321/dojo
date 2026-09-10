@@ -27,7 +27,7 @@ def _to_ansi(text: str) -> str:
 
 
 def make_prompt(console):
-    def prompt(text: str) -> str:
+    def prompt(text: str, default: str | None = None) -> str:
         global _session
         if not sys.stdin.isatty():
             return console.input(text)
@@ -37,7 +37,10 @@ def make_prompt(console):
 
             if _session is None:
                 _session = PromptSession()
-            return _session.prompt(ANSI(_to_ansi(text)))
+            # ``default`` prefills the answer (editing a previous response);
+            # the non-TTY path ignores it — tests and piped sessions re-ask
+            # plainly, and the confirm screen shows the previous value.
+            return _session.prompt(ANSI(_to_ansi(text)), default=default)
         except Exception:  # noqa: BLE001 - fall back to the plain prompt
             return console.input(text)
 

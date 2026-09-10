@@ -162,6 +162,19 @@ def test_de_markdown_blockquotes_rules_and_dunder_bold():
     assert "---" not in out and "***" not in out and "__" not in out
 
 
+def test_parse_json_content_tolerates_api_shapes():
+    """The reviewer's intermittent 'non-JSON' failures: the transport must
+    survive fenced and prose-wrapped objects, not just pristine JSON."""
+    from dojo.tutor.backend import parse_json_content
+
+    assert parse_json_content('{"kind": "ladder"}')["kind"] == "ladder"
+    assert parse_json_content('```json\n{"a": 1}\n```')["a"] == 1
+    assert parse_json_content('```\n{"a": 1}\n```')["a"] == 1
+    assert parse_json_content('Sure, here you go:\n{"a": 1}\nHope that helps.')["a"] == 1
+    assert parse_json_content("")["error"]
+    assert parse_json_content("no JSON here at all")["error"]
+
+
 def test_mock_backend_teacher_branch():
     """The teacher branch keys on 'teacher' in the system prompt (learning
     mode, v0.8); a queue serves one canned reply per call and falls back to

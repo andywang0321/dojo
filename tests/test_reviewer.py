@@ -70,24 +70,45 @@ def test_normalize_clamps_out_of_range_scores():
 
 def test_review_retries_on_non_json():
     """A transient non-JSON response gets one retry instead of silently
-    skipping the whole review (the reported first-submit failure)."""
+    skipping the whole review (the reported first-submit failure). The
+    retry goes through the plain chat path — repeating the exact
+    temperature-0 request would reproduce the same failure — and its text
+    is parsed with the same tolerant extractor."""
 
     class Flaky:
         def __init__(self):
-            self.calls = 0
+            self.json_calls = 0
 
         def chat_json(self, system, user):
-            self.calls += 1
-            if self.calls == 1:
-                return {"error": "model returned non-JSON"}
-            return {"correctness": {"score": 4, "comment": "ok"}}
+            self.json_calls += 1
+            return {"error": "model returned non-JSON"}
+
+        def chat(self, system, user):
+            return '{"correctness": {"score": 4, "comment": "ok"}}'
 
     backend = Flaky()
     out = review(
         backend, "s", "code", "O(n)", "O(n)", "O(n)", "O(n)", "O(n)", "O(n)"
     )
-    assert backend.calls == 2
+    assert backend.json_calls == 1
     assert out["correctness"]["score"] == 4
+
+
+def test_review_parses_fenced_retry_text():
+    """Even the retry's plain-text output may arrive fenced — the tolerant
+    extractor applies there too."""
+
+    class Fenced:
+        def chat_json(self, system, user):
+            return {"error": "model returned non-JSON"}
+
+        def chat(self, system, user):
+            return '```json\n{"correctness": {"score": 3, "comment": "ok"}}\n```'
+
+    out = review(
+        Fenced(), "s", "code", "O(n)", "O(n)", "O(n)", "O(n)", "O(n)", "O(n)"
+    )
+    assert out["correctness"]["score"] == 3
 
 
 def test_review_gives_up_after_retry():
@@ -97,6 +118,9 @@ def test_review_gives_up_after_retry():
     class AlwaysFlaky:
         def chat_json(self, system, user):
             return {"error": "model returned non-JSON"}
+
+        def chat(self, system, user):
+            return "still not json at all"
 
     out = review(
         AlwaysFlaky(), "s", "code", "O(n)", "O(n)", "O(n)", "O(n)", "O(n)", "O(n)"

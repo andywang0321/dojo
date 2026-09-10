@@ -83,6 +83,7 @@ def test_full_day_flow(db, fake_console, monkeypatch, tmp_path):
             "submit",
             "O(n) because one pass over the string",
             "O(n) for the stack",
+            "",
             "The key insight: the stack mirrors the opening order.",
             "done",
         ],
@@ -187,6 +188,7 @@ def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
             "submit",
             "O(n) because one pass over the string",
             "O(n) for the stack",
+            "",
             "The key insight: the stack mirrors the opening order.",
         ],
         actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
@@ -235,7 +237,7 @@ def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path)
     workbench.mkdir(parents=True)
 
     console = fake_console(
-        ["submit", "O(n) one pass", "O(n) stack", "3"],
+        ["submit", "O(n) one pass", "O(n) stack", "", "3"],
         actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
     )
     outcome = run_day(
@@ -291,7 +293,7 @@ def test_repeated_solves_create_distinct_attempts(db, fake_console, monkeypatch,
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
 
-    answers = ["submit", "O(n) one pass", "O(n) stack", "The key insight: the stack."]
+    answers = ["submit", "O(n) one pass", "O(n) stack", "", "The key insight: the stack."]
     write_solution = lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)
     assert run_day(db, fake_console(answers, actions={"submit": write_solution}), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
     assert run_day(db, fake_console(answers, actions={"submit": write_solution}), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
@@ -321,13 +323,13 @@ def test_repeated_warmups_create_distinct_attempts(db, fake_console, monkeypatch
 
     write_solution = lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)
     first = run_day(
-        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "3"], actions={"submit": write_solution}),
+        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "", "3"], actions={"submit": write_solution}),
         MockBackend(), "valid_parentheses", "andy", warmup=True, card=card,
     )
     assert first == "warmup_done"
     card = db.execute("SELECT * FROM pattern_cards WHERE pattern = 'stack'").fetchone()
     second = run_day(
-        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "4"], actions={"submit": write_solution}),
+        db, fake_console(["submit", "O(n) one pass", "O(n) stack", "", "4"], actions={"submit": write_solution}),
         MockBackend(), "valid_parentheses", "andy", warmup=True, card=card,
     )
     assert second == "warmup_done"
@@ -404,6 +406,7 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
             "submit",
             "O(n) one pass",
             "O(n) stack",
+            "",
             "The key insight: the stack.",
             "polish",
             "n",  # no second review
@@ -497,7 +500,7 @@ def test_in_session_learn_parks_and_hands_back(db, fake_console, monkeypatch, tm
     # The caller loops: a fresh session on the same slug (the _cmd_day path).
     monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
     retry = fake_console(
-        ["submit", "O(n) one pass", "O(n) stack", "The key insight: the stack.", "done"],
+        ["submit", "O(n) one pass", "O(n) stack", "", "The key insight: the stack.", "done"],
         actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
     )
     assert run_day(db, retry, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
@@ -586,6 +589,7 @@ def test_discuss_sees_submitted_code(db, fake_console, monkeypatch, tmp_path):
             "submit",
             "O(n) one pass",
             "O(n) stack",
+            "",
             "The key insight.",
             "discuss which is better?",
             "done",
@@ -598,3 +602,57 @@ def test_discuss_sees_submitted_code(db, fake_console, monkeypatch, tmp_path):
     assert discussion_prompts, "no discussion call captured"
     assert "SUBMITTED CODE" in discussion_prompts[0]
     assert "pairs = {" in discussion_prompts[0]  # SOLUTION's distinctive line
+
+
+# ------------------------------------------- double-check gate + table (v0.9.1)
+
+def test_complexity_double_check_can_edit_time(db, fake_console, monkeypatch, tmp_path):
+    """The two complexity questions stay separate, but the double-check
+    gate lets the student redo either before the machine measures —
+    `time` re-asks (prefilled on a TTY), Enter continues."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        [
+            "submit",
+            "O(1) because I misread the problem",
+            "O(n) for the stack",
+            "time",                       # edit the time answer
+            "O(n) because one pass over the string",
+            "",                           # accept on the second gate
+            "The key insight: the stack mirrors the opening order.",
+            "done",
+        ],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+    assert outcome == "solved"
+
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["self_reported_time"] == "O(n) because one pass over the string"
+    assert row["self_reported_space"] == "O(n) for the stack"
+    assert "Double-check" in console.text
+
+
+def test_complexity_table_shows_r2_not_flag(db, fake_console):
+    """The Flag column is gone: the R² column shows at a glance whether a
+    surprising measured class is a measurement artifact."""
+    from dojo.session.flow import _show_complexity_table
+
+    console = fake_console()
+    _show_complexity_table(
+        console,
+        "O(n)", "O(n)",
+        "O(n)", "O(n)",
+        "O(n log n)", "O(n)",
+        time_r2=0.612, space_r2=0.99,
+    )
+    assert "Flag" not in console.text
+    assert "R²" in console.text or "0.612" in console.text
+    assert "Mismatches are evidence" in console.text  # the note survives

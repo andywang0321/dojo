@@ -152,15 +152,15 @@ def _show_complexity_table(
     claimed_space: str | None,
     measured_time: str | None,
     measured_space: str | None,
+    time_r2: float | None = None,
+    space_r2: float | None = None,
 ) -> None:
     table = ui_table("Complexity: expected vs. claimed vs. measured")
     table.add_column("")
     table.add_column("Expected")
     table.add_column("You claimed")
     table.add_column("Measured")
-    table.add_column("Flag")
-    time_flag = "ok"
-    space_flag = "ok"
+    table.add_column("R²")
     notes = []
     if complexity.mismatch(claimed_time, expected_time):
         notes.append("time: claim vs expected")
@@ -174,19 +174,30 @@ def _show_complexity_table(
         notes.append("space: claim vs measurement")
     if complexity.mismatch(expected_space, measured_space):
         notes.append("space: expected vs measurement")
-    time_flag = "⚠ " + ", ".join(n for n in notes if n.startswith("time")) if any(
-        n.startswith("time") for n in notes
-    ) else "ok"
-    space_flag = "⚠ " + ", ".join(n for n in notes if n.startswith("space")) if any(
-        n.startswith("space") for n in notes
-    ) else "ok"
-    table.add_row("Time", expected_time or "-", claimed_time or "-", measured_time or "-", time_flag)
-    table.add_row("Space", expected_space or "-", claimed_space or "-", measured_space or "-", space_flag)
+
+    def r2_cell(measured: str | None, r2: float | None) -> str:
+        return "—" if measured is None or r2 is None else str(r2)
+
+    table.add_row(
+        "Time",
+        expected_time or "-",
+        claimed_time or "-",
+        measured_time or "-",
+        r2_cell(measured_time, time_r2),
+    )
+    table.add_row(
+        "Space",
+        expected_space or "-",
+        claimed_space or "-",
+        measured_space or "-",
+        r2_cell(measured_space, space_r2),
+    )
     console.print(table)
     if notes:
         console.print(
             "[yellow]Mismatches are evidence, not verdicts — investigate whether "
-            "it's the algorithm, the claim, or measurement noise.[/yellow]"
+            "it's the algorithm, the claim, or measurement noise (low R² leans "
+            "noise).[/yellow]"
         )
 
 
@@ -277,8 +288,40 @@ def _submit(
         _show_static(console, analysis)
 
     prompt = make_prompt(console)
-    claimed_time_raw = prompt("State your time complexity and why: ")
-    claimed_space_raw = prompt("State your space complexity and why: ")
+
+    def ask_question(label: str, default: str | None = None) -> str:
+        """A styled question with breathing room: the question line (bold
+        cyan), then the answer typed on its own line. ``default`` prefills
+        the previous answer when editing (TTY only)."""
+        console.print()
+        console.print(f"[bold cyan]{label}[/bold cyan]")
+        return prompt("[dim]  ❯[/dim] ", default=default).strip()
+
+    claimed_time_raw = ask_question("State your time complexity and why:")
+    claimed_space_raw = ask_question("State your space complexity and why:")
+    while True:
+        # The double-check gate: two separate questions, one chance to fix
+        # either before the machine measures — `time`/`space` re-asks that
+        # one (prefilled), Enter continues.
+        console.print()
+        console.print("[bold cyan]Double-check before measuring:[/bold cyan]")
+        console.print(f"  [cyan]time:[/cyan]  {claimed_time_raw or '—'}")
+        console.print(f"  [cyan]space:[/cyan] {claimed_space_raw or '—'}")
+        edit = prompt(
+            "[dim]Enter to continue · `time` or `space` to edit: [/dim]"
+        ).strip().lower()
+        if edit in ("", "ok", "y", "yes"):
+            break
+        if edit in ("time", "t"):
+            claimed_time_raw = ask_question(
+                "State your time complexity and why:", default=claimed_time_raw
+            )
+        elif edit in ("space", "s"):
+            claimed_space_raw = ask_question(
+                "State your space complexity and why:", default=claimed_space_raw
+            )
+        else:
+            console.print("[dim]`time`, `space`, or Enter.[/dim]")
     claimed_time = complexity.parse(claimed_time_raw)
     claimed_space = complexity.parse(claimed_space_raw)
 
@@ -294,13 +337,16 @@ def _submit(
         claimed_space,
         measured_time,
         measured_space,
+        time_r2,
+        space_r2,
     )
 
     # Reflect first, so the reviewer can comment on the reflection.
     reflection = None
     if not warmup:
-        reflection = prompt(
-            "Reflection — what was the key insight, and when would you reach for this again? "
+        reflection = ask_question(
+            "Reflection — what was the key insight, and when would you reach "
+            "for this again?"
         )
 
     console.print("[bold]AI review[/bold] (post-submission; the reviewer critiques, it never repairs)...")
@@ -443,6 +489,8 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
         row["self_reported_space"],
         measured_time,
         measured_space,
+        time_r2,
+        space_r2,
     )
 
     review_json = loads_json(row["review"], {})

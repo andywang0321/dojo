@@ -16,7 +16,7 @@ review (v0.8.1).
 from __future__ import annotations
 
 from dojo.db import REVIEW_DIMS
-from dojo.tutor.backend import AIBackend
+from dojo.tutor.backend import AIBackend, parse_json_content
 from dojo.tutor.prompts import REVIEWER_SYSTEM, build_review_prompt
 
 
@@ -71,11 +71,17 @@ def review(
     )
     result = backend.chat_json(REVIEWER_SYSTEM, prompt)
     if isinstance(result, dict) and result.get("error"):
-        retry = backend.chat_json(
-            REVIEWER_SYSTEM,
-            prompt
-            + "\n\n(The previous response was not valid JSON. Respond with a "
-            "single JSON object only — no prose outside it.)",
+        # Retry through the plain chat path instead of repeating the exact
+        # request: different sampling (0.3), no json_object mode — a
+        # temperature-0 retry would reproduce the same failure. The retry
+        # text is parsed with the same tolerant extractor.
+        retry = parse_json_content(
+            backend.chat(
+                REVIEWER_SYSTEM,
+                prompt
+                + "\n\n(The previous response was not valid JSON. Respond "
+                "with a single JSON object only — no prose outside it.)",
+            )
         )
         if not (isinstance(retry, dict) and retry.get("error")):
             result = retry

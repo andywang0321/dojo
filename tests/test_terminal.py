@@ -21,3 +21,12 @@ def test_to_ansi_plain_text_stays_plain():
     out = _to_ansi("hello")
     assert "hello" in out
     assert "\x1b[" not in out
+
+
+def test_make_prompt_accepts_default_non_tty(fake_console):
+    """The prefill parameter (editing a previous answer) is TTY-only
+    sugar; the non-TTY path must accept it without error."""
+    from dojo.terminal import make_prompt
+
+    console = fake_console(["answer"])
+    assert make_prompt(console)("Q: ", default="previous") == "answer"
