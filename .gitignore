@@ -23,5 +23,8 @@ workbench/
 # Curator provenance (scratch proposals)
 data/curation/
 
+# Debug log: raw AI traffic (cleared on major version bumps)
+data/logs/
+
 # Active-user config
 data/dojo.conf

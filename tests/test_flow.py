@@ -640,19 +640,44 @@ def test_complexity_double_check_can_edit_time(db, fake_console, monkeypatch, tm
     assert "Double-check" in console.text
 
 
-def test_complexity_table_shows_r2_not_flag(db, fake_console):
-    """The Flag column is gone: the R² column shows at a glance whether a
-    surprising measured class is a measurement artifact."""
+def _render_complexity_table(**cells) -> str:
+    """Render the table through a real Console (ANSI, color forced on —
+    FakeConsole only stores str(table), which is an object repr)."""
+    from rich.console import Console
+
     from dojo.session.flow import _show_complexity_table
 
-    console = fake_console()
-    _show_complexity_table(
-        console,
-        "O(n)", "O(n)",
-        "O(n)", "O(n)",
-        "O(n log n)", "O(n)",
-        time_r2=0.612, space_r2=0.99,
+    defaults = {
+        "expected_time": "O(n)", "expected_space": "O(n)",
+        "claimed_time": "O(n)", "claimed_space": "O(n)",
+        "measured_time": "O(n)", "measured_space": "O(n)",
+        "time_r2": 0.9, "space_r2": 0.9,
+    }
+    defaults.update(cells)
+    console = Console(
+        force_terminal=True, color_system="standard", width=200, no_color=False
     )
-    assert "Flag" not in console.text
-    assert "R²" in console.text or "0.612" in console.text
-    assert "Mismatches are evidence" in console.text  # the note survives
+    with console.capture() as cap:
+        _show_complexity_table(console, **defaults)
+    return cap.get()
+
+
+def test_complexity_table_shows_r2_not_flag(db):
+    """The Flag column is gone: the R² column shows at a glance whether a
+    surprising measured class is a measurement artifact."""
+    out = _render_complexity_table(measured_time="O(n log n)", time_r2=0.612)
+    assert "Flag" not in out
+    assert "R²" in out
+    assert "0.612" in out
+    assert "Red cells disagree" in out  # the evidence note survives
+
+
+def test_complexity_table_color_codes_matches_and_mismatches(db):
+    """All three agreeing → green; any cell in a mismatch → red."""
+    all_match = _render_complexity_table()
+    assert "\x1b[32m" in all_match  # green
+    assert "\x1b[31m" not in all_match  # no red anywhere
+
+    mismatch = _render_complexity_table(claimed_time="O(n^2)")
+    assert "\x1b[31m" in mismatch  # the disagreeing time cells go red
+    assert "\x1b[32m" in mismatch  # the agreeing space row stays green

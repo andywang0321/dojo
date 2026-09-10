@@ -21,6 +21,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from dojo import complexity, scheduler, static
 from dojo.config import WORKBENCH_DIR
@@ -178,26 +179,63 @@ def _show_complexity_table(
     def r2_cell(measured: str | None, r2: float | None) -> str:
         return "—" if measured is None or r2 is None else str(r2)
 
+    def axis_cells(
+        expected: str | None, claimed: str | None, measured: str | None
+    ) -> tuple:
+        """Color-code the three cells of one axis: any cell participating in
+        a mismatch goes red; when all three agree, they go green. Cells
+        untouched by a mismatch stay neutral. Cell values are rendered as
+        literal `Text` — rich Tables strip markup in cells."""
+        claimed_vs_expected = complexity.mismatch(claimed, expected)
+        measured_vs_claimed = complexity.mismatch(measured, claimed)
+        measured_vs_expected = complexity.mismatch(measured, expected)
+        any_mismatch = claimed_vs_expected or measured_vs_claimed or measured_vs_expected
+        all_agree = (
+            not any_mismatch
+            and all(v is not None for v in (expected, claimed, measured))
+            and expected == claimed == measured
+        )
+
+        def cell(value: str | None, red: bool) -> Text | str:
+            text = value or "-"
+            if red:
+                return Text(text, style="red")
+            if all_agree:
+                return Text(text, style="green")
+            return text
+
+        return (
+            cell(expected, claimed_vs_expected or measured_vs_expected),
+            cell(claimed, claimed_vs_expected or measured_vs_claimed),
+            cell(measured, measured_vs_claimed or measured_vs_expected),
+        )
+
+    expected_cell, claimed_cell, measured_cell = axis_cells(
+        expected_time, claimed_time, measured_time
+    )
     table.add_row(
         "Time",
-        expected_time or "-",
-        claimed_time or "-",
-        measured_time or "-",
+        expected_cell,
+        claimed_cell,
+        measured_cell,
         r2_cell(measured_time, time_r2),
+    )
+    expected_cell, claimed_cell, measured_cell = axis_cells(
+        expected_space, claimed_space, measured_space
     )
     table.add_row(
         "Space",
-        expected_space or "-",
-        claimed_space or "-",
-        measured_space or "-",
+        expected_cell,
+        claimed_cell,
+        measured_cell,
         r2_cell(measured_space, space_r2),
     )
     console.print(table)
     if notes:
         console.print(
-            "[yellow]Mismatches are evidence, not verdicts — investigate whether "
-            "it's the algorithm, the claim, or measurement noise (low R² leans "
-            "noise).[/yellow]"
+            "[yellow]Red cells disagree (evidence, not verdicts) — investigate "
+            "whether it's the algorithm, the claim, or measurement noise "
+            "(low R² leans noise).[/yellow]"
         )
 
 

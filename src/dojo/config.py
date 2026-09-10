@@ -20,6 +20,9 @@ PROBLEM_OVERRIDES = REPO_ROOT / "data" / "problem_overrides.json"
 #: organized by pattern directory (imported by dojo.bank).
 PROBLEMS_DIR = REPO_ROOT / "problems"
 DB_PATH = DATA_DIR / "dojo.db"
+#: Debug log (gitignored): raw AI traffic for post-hoc debugging; cleared on
+#: major version bumps (dojo/debuglog.py).
+LOGS_DIR = DATA_DIR / "logs"
 #: Active-user config (gitignored): {"user": "name"} — one computer, one user.
 DOJO_CONF = DATA_DIR / "dojo.conf"
 

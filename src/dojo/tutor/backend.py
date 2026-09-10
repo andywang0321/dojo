@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Protocol
 
+from dojo import debuglog
 from dojo.config import ai_backend, deepseek_api_key
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -68,29 +70,79 @@ class DeepSeekBackend:
         self._client = OpenAI(api_key=self._api_key, base_url=DEEPSEEK_BASE_URL)
 
     def chat(self, system: str, user: str) -> str:
-        response = self._client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.3,
-            max_tokens=2048,
+        started = time.monotonic()
+        try:
+            response = self._client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=0.3,
+                max_tokens=2048,
+            )
+            content = response.choices[0].message.content or ""
+        except Exception as exc:  # noqa: BLE001 - logged, then re-raised
+            debuglog.log_event(
+                {
+                    "event": "backend_error",
+                    "kind": "chat",
+                    "system": system,
+                    "user": user,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            raise
+        debuglog.log_event(
+            {
+                "event": "ai",
+                "kind": "chat",
+                "system": system,
+                "user": user,
+                "raw": content,
+                "latency_ms": round((time.monotonic() - started) * 1000, 1),
+            }
         )
-        return response.choices[0].message.content or ""
+        return content
 
     def chat_json(self, system: str, user: str) -> dict:
-        response = self._client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.0,
-            max_tokens=JSON_MAX_TOKENS,
-            response_format={"type": "json_object"},
+        started = time.monotonic()
+        try:
+            response = self._client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=0.0,
+                max_tokens=JSON_MAX_TOKENS,
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content or ""
+        except Exception as exc:  # noqa: BLE001 - logged, then re-raised
+            debuglog.log_event(
+                {
+                    "event": "backend_error",
+                    "kind": "chat_json",
+                    "system": system,
+                    "user": user,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            raise
+        parsed = parse_json_content(content)
+        debuglog.log_event(
+            {
+                "event": "ai",
+                "kind": "chat_json",
+                "system": system,
+                "user": user,
+                "raw": content,  # the response before parsing — the debugging gold
+                "parsed": parsed,
+                "latency_ms": round((time.monotonic() - started) * 1000, 1),
+            }
         )
-        return parse_json_content(response.choices[0].message.content or "")
+        return parsed
 
 
 class MockBackend:

@@ -91,4 +91,4 @@ make sync      # install dojo into the project venv (uv sync)
 make test      # run the offline test suite (uv run pytest)
 ```
 
-The bank seeds from `problems/**/*.py` on every run (additive — your data is never reset). Technical docs live in `docs/` (architecture, grading, retention, curation, development); delivered and planned stages live in `roadmap/`.
+The bank seeds from `problems/**/*.py` on every run (additive — your data is never reset). Every live AI exchange (prompts + raw responses) is appended to the gitignored debug log at `data/logs/dojo.log` for post-hoc debugging; it clears automatically on major version bumps. Technical docs live in `docs/` (architecture, grading, retention, curation, development); delivered and planned stages live in `roadmap/`.
