@@ -351,3 +351,33 @@ def test_day_practice_outcome_loops_on_same_slug(db, monkeypatch, tmp_path):
 
     assert _cmd_day(_day_args()) == 0
     assert day_calls == ["kth_largest", "kth_largest"]
+
+
+# ------------------------------------------------------------ help surface (v0.9)
+
+def test_help_variants_show_minimal_guide(capsys):
+    """`dojo help`, `dojo -h`, and `dojo --help` all print the same minimal
+    guide: the everyday commands, none of the power tools."""
+    from dojo.cli import main
+
+    for argv in (["--help"], ["-h"], ["help"], ["--help", "extra"]):
+        assert main(argv) == 0
+        out = capsys.readouterr().out
+        assert "learn [TOPIC]" in out
+        assert "history" in out
+        assert "uv run dojo" in out  # the first-run pointer
+        for hidden in ("dojo day", "dojo warmup", "dojo check", "dojo report", "dojo curate"):
+            assert hidden not in out
+
+
+def test_hidden_commands_still_dispatch():
+    """Hidden from the guide ≠ deleted: `profile` is history's alias, and
+    `show`/`day`/`report` keep working for muscle memory and in-session
+    pointers (they document themselves via `dojo <cmd> --help`)."""
+    from dojo.cli import PARSER, _cmd_history
+
+    assert PARSER.parse_args(["profile"]).func is _cmd_history
+    args = PARSER.parse_args(["show", "3"])
+    assert args.command == "show" and args.attempt_id == 3
+    assert PARSER.parse_args(["day", "two_sum"]).command == "day"
+    assert PARSER.parse_args(["report", "--fix", "two_sum"]).command == "report"

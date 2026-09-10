@@ -12,4 +12,5 @@ Delivered and planned development stages. Each stage file records what shipped a
 | [v0.6](v0.6.md) — practice-run polish | ✅ delivered | Check-time lint, post-solve loop (polish/discuss), reviewer reasoning, tutor modes, leak-audit hardening. |
 | [v0.7](v0.7.md) — the trust fix and terminal ergonomics | ✅ delivered | k_closest validity checker, prompt_toolkit, bare-question hints, `dojo report`. |
 | [v0.8](v0.8.md) — learning mode | ✅ delivered | Topic teacher + in-session learn + proactive offer; the documented never-solve narrowing. |
+| [v0.9](v0.9.md) — onboarding | ✅ delivered | Minimal help (`dojo help`), new-user README, setup key detection, `profile` → history alias. |
 | [next](next.md) — backlog | 🔜 | Audit proposals (judge ground-truth anchor, warm-up rotation, streak + reminder, …), TUI polish, sync, warm-up variants. |

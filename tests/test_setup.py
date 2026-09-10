@@ -64,6 +64,7 @@ def test_run_wizard_happy_path(tmp_path, fake_console):
         default_name="andy",
         key_getter=lambda: "sk-live",
         path_install=lambda: True,
+        detect_env_key=False,  # pin the prompt path regardless of ambient env
     )
     assert summary["user"] == "andy"
     assert "DEEPSEEK_API_KEY=sk-live" in (tmp_path / ".env").read_text()
@@ -83,6 +84,7 @@ def test_run_wizard_skips_key_when_blank(tmp_path, fake_console):
         default_name="andy",
         key_getter=lambda: "",
         path_install=lambda: False,
+        detect_env_key=False,
     )
     assert summary["user"] == "bea"
     assert not (tmp_path / ".env").exists()
@@ -99,6 +101,68 @@ def test_run_wizard_user_override_skips_prompt(tmp_path, fake_console):
         problems_dir=tmp_path / "problems",
         user_override="andy",
         key_getter=lambda: "",
+        detect_env_key=False,
     )
     assert summary["user"] == "andy"
     assert load_conf(tmp_path / "dojo.conf") == {"user": "andy"}
+
+
+# ---------------------------------------------------- key detection (v0.9)
+
+def test_run_wizard_detects_env_key(tmp_path, fake_console, monkeypatch):
+    """A DEEPSEEK_API_KEY in the environment is used without prompting and
+    persisted to the dotenv so every shell sees it."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-from-env")
+    monkeypatch.delenv("DOJO_DEEPSEEK_API_KEY", raising=False)
+    console = fake_console([""])  # name prompt → default
+    calls = []
+    summary = run_wizard(
+        console,
+        dotenv_path=tmp_path / ".env",
+        conf_path=tmp_path / "dojo.conf",
+        db_path=tmp_path / "dojo.db",
+        problems_dir=tmp_path / "problems",
+        default_name="andy",
+        key_getter=lambda: calls.append(1) or "should-not-run",
+    )
+    assert calls == []  # no prompt when the key is detected
+    assert summary["key_detected"] is True
+    assert "DEEPSEEK_API_KEY=sk-from-env" in (tmp_path / ".env").read_text()
+    assert "detected" in console.text
+
+
+def test_run_wizard_detects_existing_dotenv_key(tmp_path, fake_console):
+    """A key already in the dotenv skips the prompt and is left untouched."""
+    (tmp_path / ".env").write_text("DEEPSEEK_API_KEY=sk-existing\n")
+    console = fake_console([""])
+    summary = run_wizard(
+        console,
+        dotenv_path=tmp_path / ".env",
+        conf_path=tmp_path / "dojo.conf",
+        db_path=tmp_path / "dojo.db",
+        problems_dir=tmp_path / "problems",
+        default_name="andy",
+        key_getter=lambda: (_ for _ in ()).throw(AssertionError("prompted")),
+    )
+    assert summary["key_detected"] is True
+    assert (tmp_path / ".env").read_text().strip() == "DEEPSEEK_API_KEY=sk-existing"
+
+
+def test_run_wizard_skip_detection_respects_flag(tmp_path, fake_console, monkeypatch):
+    """`dojo setup --skip-key` means no key handling at all — env detection
+    included, so scripted installs (make seed) never write a key."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-from-env")
+    monkeypatch.delenv("DOJO_DEEPSEEK_API_KEY", raising=False)
+    console = fake_console([""])
+    summary = run_wizard(
+        console,
+        dotenv_path=tmp_path / ".env",
+        conf_path=tmp_path / "dojo.conf",
+        db_path=tmp_path / "dojo.db",
+        problems_dir=tmp_path / "problems",
+        default_name="andy",
+        key_getter=lambda: "",
+        detect_env_key=False,
+    )
+    assert summary["key_detected"] is False
+    assert not (tmp_path / ".env").exists()

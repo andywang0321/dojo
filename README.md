@@ -1,29 +1,32 @@
 # dojo
 
-An AI-guided interview-prep trainer for two PhDs (data science, bioengineering) who write production Python and know ML deeply, but never had a formal CS algorithms course. dojo is built on one conviction: **the tutor never solves the problem for you — it teaches you to recognize the pattern behind it.**
+An AI-guided interview-prep trainer for people who write production Python and know ML deeply, but never took a formal CS algorithms course. Every day, one command runs the whole loop: warm-up retrievals → a problem picked for your weakest pattern → solve in your own editor with a tutor that never solves for you → an honest grader (isolated judge + empirical profiler + AI review) → reflection, all persisted. dojo is built on one conviction: **the tutor never solves the problem for you — it teaches you to recognize the pattern behind it.**
 
-Every day, `dojo day` runs the whole loop:
+## Getting started
 
-- **Warm up** — the scheduler re-opens a previously solved problem, from scratch, to keep the pattern alive (spaced repetition).
-- **Solve** — a fresh problem picked for you (weakest pattern first), in your own editor.
-- **Grade** — an isolated judge runs visible + generated + oracle-checked tests; an empirical profiler *measures* your time/space growth; an AI reviewer scores a rubric — including whether your complexity *reasoning* was sound, with feedback on your reflection; static analysis (cyclomatic complexity + lint) rides along as advisory findings.
-- **Retain** — you state your complexity before the machine measures it, reflect, and everything lands in your attempt history — the durable asset.
-
-Three pillars: a **never-solve tutor** (gated hint ladder, leak-audited), a **grading engine** (judge + profiler + reviewer + static analysis), and a **retention engine** (FSRS-lite spaced repetition over pattern cards).
-
-## Quick start
-
-Prerequisites: Python ≥ 3.13 and [uv](https://docs.astral.sh/uv/).
+You need Python ≥ 3.13, [uv](https://docs.astral.sh/uv/), and git. You run dojo from a checkout of this repo:
 
 ```bash
-make sync                  # install dojo into the project venv
-uv run dojo                # first run: a one-time setup wizard, then the daily routine
-dojo                       # afterwards (the wizard can put `dojo` on your PATH)
+git clone <this-repo-url> dojo
+cd dojo
+uv run dojo
 ```
 
-The setup wizard asks for your DeepSeek API key (masked, saved to a gitignored `.env` — press Enter to skip and use `DOJO_AI_BACKEND=mock` later), your name, and offers to install a `dojo` wrapper on your PATH so every day is just `dojo`. No API key? `DOJO_AI_BACKEND=mock uv run dojo` runs the entire pipeline with canned responses — everything except real AI text works.
+That one command does everything on first run:
 
-One computer, one user: dojo remembers you in a gitignored config. `dojo user` switches the rare exception, `git switch`-style.
+1. **A one-time setup wizard** starts automatically. It checks for a DeepSeek API key — if `DEEPSEEK_API_KEY` is already in your environment, it's detected and used, no prompt (otherwise you're asked, and Enter skips — more below). Then it asks your name, and finally offers to install a `dojo` command on your PATH.
+2. **The daily routine** begins right after: warm-ups (if any are due), then a problem.
+
+After the wizard, every day is just:
+
+```bash
+dojo                # the daily routine
+dojo learn          # prefer to study a topic first? (optional)
+```
+
+The first `uv run dojo` builds the project environment (a minute or two); later runs are instant. If you decline the PATH install, start sessions with `uv run dojo` from the repo — or re-run `dojo setup` to install the command.
+
+**No API key?** The whole pipeline still works with canned AI: `DOJO_AI_BACKEND=mock uv run dojo`. The tutor/reviewer text is fake, everything else (judge, profiler, scheduler, persistence) is real.
 
 ## The daily loop
 
@@ -33,7 +36,7 @@ dojo <slug>                 # the same, on a specific problem
 dojo warmup                 # due retrievals only
 ```
 
-Inside a session the prompt always lists the commands: `open` (re-open your editor), `check` (run the visible tests + advisory lint/complexity findings), `hint <what you're stuck on>` (one rung up the ladder), `learn` (park this attempt and study its pattern — or another topic — with the teacher), `report` (audit this problem's curation), `submit` (judge → self-report → measure → reflect → review), `quit` (saves your progress; the next session starts fresh from a blank template). A bare question — with or without the `hint` prefix, even starting with another command word — reaches the tutor directly. Every session becomes one attempt row in your history.
+Inside a session the prompt always lists the commands: `open` (re-open your editor), `check` (run the visible tests + advisory lint/complexity findings), `hint <what you're stuck on>` (one rung up the ladder), `learn` (park this attempt and study its pattern — or another topic — with the teacher), `submit` (judge → self-report → measure → reflect → review), `quit` (saves your progress; the next session starts fresh from a blank template). A bare question — with or without the `hint` prefix, even starting with another command word — reaches the tutor directly. Every session becomes one attempt row in your history.
 
 After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), **`discuss <question>`** opens a post-solve conversation (solutions allowed now), **`done`** closes the session.
 
@@ -56,7 +59,7 @@ Inside a solve, `learn` **parks** your attempt (progress saved, stays 'unsolved'
 
 The never-solve boundary narrows here, deliberately: the teacher's context is the topic and the conversation only — never a problem statement — so it may show topic-canonical code (implementing a heap is legitimate teaching). Grading oracles still never enter any agent's context.
 
-## Other commands
+## Everyday commands
 
 ```bash
 dojo list                   # the problem bank (✓ = curated, ready for the daily loop)
@@ -64,13 +67,14 @@ dojo learn [TOPIC]          # learning mode: a topic primer with a practice hand
 dojo progress               # per-pattern proficiency, card schedule, score trends
 dojo history                # your attempts, newest first
 dojo show <id>              # one attempt in full (hints, code, review; --code for code only)
-dojo check [<slug>]         # visible tests against the active workbench
-dojo report [<slug>]        # AI-audit a problem's curation (--fix re-curates it)
+dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
 dojo user [<name>]          # switch the active user (numbered picker without a name)
 dojo setup                  # re-run the setup wizard (change key, reinstall PATH)
-dojo curate --text "…"      # AI-curate a new problem from a pasted statement
-dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
 ```
+
+`dojo help` (or `-h`/`--help`) shows the same short guide in the terminal.
+
+**Power tools** — reachable, just not in the guide: `dojo day <slug>` (the alias for `dojo <slug>`), `dojo check [<slug>]` (visible tests against the active workbench), `dojo report [<slug>] --fix` (AI-audit a problem's curation and re-curate it — normally reached from inside a session), `dojo curate --text "…"` (AI-curate a new problem from a pasted statement). Each documents itself via `dojo <command> --help`.
 
 ## Honest caveats
 
@@ -78,9 +82,13 @@ dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
 - Warm-ups re-solve the least recently solved problem in a pattern; a pattern needs at least one solved problem to warm up.
 - `dojo fetch` / `dojo curate` need the API key (the curated oracle is AI-generated and gated by an automated verification suite).
 - The teacher has no grader behind it — it's instructed to be humble about uncertainty, but pedagogy is unverified by construction. If a definition feels off, double-check it elsewhere.
+- One computer, one user: dojo remembers you in a gitignored config; `dojo user` switches the rare exception.
 
-## Where the rest lives
+## Development
 
-- `docs/` — technical documentation: architecture, grading, retention, curation, development.
-- `roadmap/` — delivered stages and what's planned next.
-- `AGENTS.md` — working conventions for humans and AI agents in this repo.
+```bash
+make sync      # install dojo into the project venv (uv sync)
+make test      # run the offline test suite (uv run pytest)
+```
+
+The bank seeds from `problems/**/*.py` on every run (additive — your data is never reset). Technical docs live in `docs/` (architecture, grading, retention, curation, development); delivered and planned stages live in `roadmap/`.

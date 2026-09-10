@@ -196,6 +196,7 @@ def _cmd_setup(args) -> int:
         key_getter=(lambda: "")
         if args.skip_key
         else (lambda: getpass.getpass("DeepSeek API key (Enter to skip): ")),
+        detect_env_key=not args.skip_key,
         path_install=None if args.no_path else _make_path_installer(console),
     )
     return 0
@@ -411,47 +412,6 @@ def _cmd_check(args) -> int:
     with connect(DB_PATH) as conn:
         outcome = run_check(conn, console, slug)
     return 0 if outcome == "ok" else 1
-
-
-def _cmd_profile(args) -> int:
-    console = Console()
-    user = getattr(args, "_user", None)
-    if not user:
-        console.print("[red]No active user — run `dojo setup`.[/red]")
-        return 1
-    with connect(DB_PATH) as conn:
-        rows = conn.execute(
-            """
-            SELECT p.slug, p.title, p.difficulty, a.status, a.hint_count,
-                   a.self_reported_time, a.measured_time_class, a.measured_time_r2,
-                   a.self_reported_space, a.measured_space_class, a.submitted_at
-            FROM attempts a JOIN problems p ON p.id = a.problem_id
-            WHERE a.user_id = (SELECT id FROM users WHERE name = ?)
-            ORDER BY a.id
-            """,
-            (user,),
-        ).fetchall()
-    table = ui_table(f"Attempts — {user}")
-    for col in (
-        "Problem", "Difficulty", "Status", "Hints", "Claimed time", "Measured time",
-        "r²", "Claimed space", "Measured space", "Submitted",
-    ):
-        table.add_column(col)
-    for r in rows:
-        table.add_row(
-            f"{r['title']} [dim]({r['slug']})[/dim]",
-            r["difficulty"],
-            r["status"],
-            str(r["hint_count"]),
-            r["self_reported_time"] or "—",
-            r["measured_time_class"] or "—",
-            str(r["measured_time_r2"]) if r["measured_time_r2"] is not None else "—",
-            r["self_reported_space"] or "—",
-            r["measured_space_class"] or "—",
-            r["submitted_at"] or "—",
-        )
-    console.print(table)
-    return 0
 
 
 def _cmd_history(args) -> int:
@@ -904,7 +864,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
-    p_list = sub.add_parser("list", help="list the problem bank")
+    # The visible surface is deliberately small (v0.9): bare `dojo` is the
+    # daily routine, and the custom HELP_TEXT lists the commands a user
+    # should actually type. Power tools stay dispatchable (`day`, `warmup`,
+    # `check`, `profile`, `show`, `curate`, `report`) but never appear in
+    # the top-level help — their own `dojo <cmd> --help` still documents
+    # them. (argparse's help=SUPPRESS prints ==SUPPRESS== literals on 3.13,
+    # so the hiding lives in the interception, not the parser.)
+
+    p_list = sub.add_parser("list", help="the problem bank (✓ = curated, ready to solve)")
     p_list.add_argument("--pattern", help="filter by pattern directory")
     p_list.set_defaults(func=_cmd_list)
 
@@ -917,7 +885,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_warmup = sub.add_parser("warmup", help="run due warm-up retrievals only")
     p_warmup.set_defaults(func=_cmd_warmup)
 
-    p_learn = sub.add_parser("learn", help="learning mode: a topic primer with a practice handoff")
+    p_learn = sub.add_parser("learn", help="study a topic with the teacher, then practice a problem")
     p_learn.add_argument("topic", nargs="?", help="pattern to learn (picker if omitted)")
     p_learn.set_defaults(func=_cmd_learn)
 
@@ -925,10 +893,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_check.add_argument("slug", nargs="?", help="problem slug (default: active session)")
     p_check.set_defaults(func=_cmd_check)
 
-    p_profile = sub.add_parser("profile", help="show attempt history")
-    p_profile.set_defaults(func=_cmd_profile)
+    p_profile = sub.add_parser("profile", help="alias of `dojo history`")
+    p_profile.set_defaults(func=_cmd_history)
 
-    p_history = sub.add_parser("history", help="list your attempts, newest first")
+    p_history = sub.add_parser("history", help="your attempts, newest first (`show <id>` for detail)")
     p_history.add_argument("--slug", help="filter to one problem")
     p_history.add_argument("--limit", type=int, help="show only the last N attempts")
     p_history.set_defaults(func=_cmd_history)
@@ -940,14 +908,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_show.set_defaults(func=_cmd_show)
 
-    p_progress = sub.add_parser("progress", help="per-pattern proficiency + card schedule")
+    p_progress = sub.add_parser("progress", help="per-pattern proficiency + retention schedule")
     p_progress.set_defaults(func=_cmd_progress)
 
     p_user = sub.add_parser("user", help="switch the active user (numbered picker without a name)")
     p_user.add_argument("name", nargs="?", help="the user to switch to")
     p_user.set_defaults(func=_cmd_user)
 
-    p_setup = sub.add_parser("setup", help="re-run the setup wizard (key, user, PATH)")
+    p_setup = sub.add_parser("setup", help="re-run the setup wizard (key, name, PATH)")
     p_setup.add_argument("--user", help="register this user without prompting")
     p_setup.add_argument("--skip-key", action="store_true", help="don't prompt for an API key")
     p_setup.add_argument("--no-path", action="store_true", help="don't offer the PATH install")
@@ -1037,13 +1005,49 @@ def _git_user_name() -> str | None:
         return None
 
 
+HELP_TEXT = """\
+dojo — AI-guided interview prep
+
+One command a day: `dojo` runs the whole routine — warm-ups, then a
+problem picked for your weakest pattern, solved in your own editor with a
+never-solve tutor, graded honestly (isolated judge + empirical profiler +
+AI review), and scheduled for spaced recall.
+
+Usage:
+  dojo                  the daily routine
+  dojo <problem-slug>   the routine on one specific problem
+
+Commands:
+  learn [TOPIC]   study a topic with the teacher, then practice a problem
+  list            the problem bank (✓ = curated, ready to solve)
+  progress        per-pattern proficiency + retention schedule
+  history         your attempts, newest first (`show <id>` for detail)
+  fetch SLUG      fetch a LeetCode problem and auto-curate it
+  user [NAME]     switch the active user
+  setup           re-run the setup wizard
+
+First run: `uv run dojo` from the repo — a one-time wizard handles the
+API key (detected automatically if it's in your environment), your name,
+and installing the `dojo` command on your PATH.
+"""
+
+
+def _print_help() -> int:
+    print(HELP_TEXT)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
+    # `dojo help` = `dojo -h` = `dojo --help` (and any trailing words): the
+    # minimal guide, no argparse noise (v0.9). Subcommand help
+    # (`dojo learn -h`) stays argparse-native.
+    if raw and raw[0] in ("-h", "--help", "help"):
+        return _print_help()
     argv = _normalize_argv(raw, COMMANDS)
     args = PARSER.parse_args(argv)
     if args.command is None:
-        PARSER.print_help()
-        return 0
+        return _print_help()
     console = Console()
     if args.command != "setup":
         ensure_seeded(DB_PATH)

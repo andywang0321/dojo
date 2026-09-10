@@ -26,6 +26,21 @@ def write_key(dotenv_path: Path, key: str) -> None:
     dotenv_path.write_text("\n".join(lines) + "\n")
 
 
+def read_dotenv_key(dotenv_path: Path) -> str | None:
+    """The DEEPSEEK_API_KEY already saved in a dotenv file, if any
+    (same parsing as config._read_dotenv, against an injected path)."""
+    if not dotenv_path.exists():
+        return None
+    for line in dotenv_path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        if k.strip() == "DEEPSEEK_API_KEY":
+            return v.strip().strip("'\"")
+    return None
+
+
 def default_user_name(user_env: str | None, git_user: str | None) -> str:
     """A sensible default for the wizard's name prompt: $USER, else the
     first word of the git identity, lowercased."""
@@ -73,13 +88,36 @@ def run_wizard(
     user_override: str | None = None,
     key_getter: Callable[[], str] | None = None,
     path_install: Callable[[], bool] | None = None,
+    detect_env_key: bool = True,
 ) -> dict:
     """The full first-run flow. Returns a summary dict; never raises on
-    user-facing steps (a bad key prompt just skips the key)."""
+    user-facing steps (a bad key prompt just skips the key).
+
+    Key resolution (v0.9): when detection is on, an existing
+    ``DEEPSEEK_API_KEY`` (environment or the dotenv file) is used without
+    prompting — an env-sourced key is also persisted to the dotenv so it
+    survives other shells. Only when nothing is detected does the injected
+    ``key_getter`` run."""
     console.print("[bold]Welcome to dojo — one-time setup.[/bold]")
 
+    detected = None
     key_written = False
-    if key_getter is not None:
+    if detect_env_key:
+        detected = (
+            os.environ.get("DEEPSEEK_API_KEY")
+            or os.environ.get("DOJO_DEEPSEEK_API_KEY")
+            or read_dotenv_key(dotenv_path)
+        )
+    if detected:
+        if read_dotenv_key(dotenv_path) != detected:
+            write_key(dotenv_path, detected)
+            key_written = True
+        console.print(
+            "[green]DEEPSEEK_API_KEY detected in your environment — using it, "
+            "no prompt needed.[/green]"
+            + (" Saved to .env (gitignored) so every shell sees it." if key_written else "")
+        )
+    elif key_getter is not None:
         key = key_getter().strip()
         if key:
             write_key(dotenv_path, key)
@@ -118,17 +156,19 @@ def run_wizard(
     installed = False
     if path_install is not None:
         installed = bool(path_install())
+    next_step = "`dojo`" if installed else "`uv run dojo` from this repo (or `dojo setup` to install `dojo` on your PATH)"
     console.print(
         f"[green]You're set.[/green] Imported {seeded} problems, registered "
         f"'{name}'"
         + (f", backfilled {backfilled} card(s)" if backfilled else "")
         + (", installed `dojo` on PATH" if installed else "")
-        + ". Next: `dojo`."
+        + f". Next: {next_step}."
     )
     return {
         "user": name,
         "seeded": seeded,
         "backfilled": backfilled,
         "key_written": key_written,
+        "key_detected": bool(detected),
         "path_installed": installed,
     }
