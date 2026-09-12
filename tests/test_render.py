@@ -34,7 +34,8 @@ def test_render_ai_emits_ansi_on_color_console():
     with console.capture() as cap:
         render_ai(console, "tutor — stack", SAMPLE)
     out = cap.get()
-    assert "tutor — stack" in out
+    assert "tutor — stack" in out  # the Panel title
+    assert "╭" in out  # the border is back (v0.10.4)
     assert "\x1b[" in out  # headings/emphasis styled
     assert "Two ideas" in out
 
@@ -53,4 +54,5 @@ def test_render_ai_plain_path_keeps_content():
     fake = Fake()
     render_ai(fake, "teacher — heap", SAMPLE)
     assert "teacher — heap" in fake.file.getvalue()
+    assert "╭" in fake.file.getvalue()  # border renders on the plain path too
     assert "Two ideas" in fake.file.getvalue()

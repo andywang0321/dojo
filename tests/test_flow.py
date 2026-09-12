@@ -727,16 +727,15 @@ def test_polish_reasks_complexity_and_updates_claims(db, fake_console, monkeypat
     assert row["self_reported_space"] == "O(n) stack"
 
 
-def test_hint_renders_markdown_with_dim_title(db, fake_console, monkeypatch, tmp_path):
-    """v0.10.3 display contract: AI prose shows as a dim title line plus
-    the markdown body (no Panel frame); stored hints keep the raw text."""
+def test_hint_renders_markdown_in_bordered_panel(db, fake_console, monkeypatch, tmp_path):
+    """v0.10.4 display contract: AI prose renders as markdown inside a
+    bordered Panel; stored hints keep the raw text (never flattened)."""
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
 
     console = fake_console(["what is the invariant here?", "quit"])
     assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
-    assert "tutor · tier" in console.text  # the dim title line
 
     row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     stored = json.loads(row["hints"])[0]["hint"]

@@ -655,14 +655,14 @@ def _cmd_show(args) -> int:
             )
     review = loads_json(row["review"], {})
     if review:
-        render_ai(console, "AI review", _format_review(review))
+        render_ai(console, "AI review", _format_review(review), border_style="green")
     if row["reflection"]:
         console.print(Panel(row["reflection"], title="Reflection", border_style="cyan"))
     discussion = loads_json(row["discussion"], [])
     if discussion:
         for entry in discussion:
             console.print(f"[bold]you:[/bold] {entry.get('user', '')}")
-            render_ai(console, "tutor", str(entry.get("tutor", "")))
+            render_ai(console, "tutor", str(entry.get("tutor", "")), border_style="green")
     return 0
 
 

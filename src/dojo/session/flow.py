@@ -498,7 +498,12 @@ def _show_review(console: Console, review_json: dict) -> None:
             )
     console.print(table)
     if review_json.get("reflection_feedback"):
-        render_ai(console, "On your reflection", str(review_json["reflection_feedback"]))
+        render_ai(
+            console,
+            "On your reflection",
+            str(review_json["reflection_feedback"]),
+            border_style="cyan",
+        )
     if review_json.get("broader_picture"):
         render_ai(console, "Broader picture", str(review_json["broader_picture"]))
     if review_json.get("overall_comment"):
@@ -615,7 +620,7 @@ def _discuss(conn: sqlite3.Connection, console: Console, backend, problem: sqlit
         problem["statement"], state.code_path.read_text(), history, question
     )
     answer = backend.chat(DISCUSSION_SYSTEM, prompt)  # raw markdown (v0.10.3)
-    render_ai(console, "tutor — post-solve discussion", answer)
+    render_ai(console, "tutor — post-solve discussion", answer, border_style="green")
     conn.execute(
         "UPDATE attempts SET discussion = ? WHERE id = ?",
         (dumps_json(history + [{"user": question, "tutor": answer}]), state.attempt_id),
@@ -804,12 +809,13 @@ def run_day(
                 console,
                 f"tutor · tier {result.tier} — {TIER_NAMES[result.tier]}",
                 result.text,
+                border_style="blue",
             )
             console.print(
                 f"[dim]Next hint will be tier {state.tier} ({TIER_NAMES[state.tier]}).[/dim]"
             )
         else:
-            render_ai(console, "tutor", result.text)
+            render_ai(console, "tutor", result.text, border_style="blue")
 
     prompt = make_prompt(console)
     while True:

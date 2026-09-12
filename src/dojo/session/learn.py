@@ -83,7 +83,7 @@ def run_learn(
         return answer
 
     primer = teacher_says()
-    render_ai(console, f"teacher — {pattern}", primer)
+    render_ai(console, f"teacher — {pattern}", primer, border_style="blue")
 
     while True:
         raw = prompt(
@@ -113,7 +113,7 @@ def run_learn(
                 return {"practice": slug}
             console.print("[dim]Staying in learn mode.[/dim]")
             continue
-        render_ai(console, f"teacher — {pattern}", teacher_says(raw))
+        render_ai(console, f"teacher — {pattern}", teacher_says(raw), border_style="blue")
 
 
 def _pick_practice_slug(
