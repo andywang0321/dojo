@@ -44,11 +44,9 @@ from dojo.ui import table as ui_table
 
 GENERATED_CASES = 30
 
-COMMANDS_HINT = (
-    "Type a question, or a command: open · check · learn · submit · quit"
-)
+COMMANDS_HINT = "open · check · learn · submit · quit — or ask"
 
-POST_COMMANDS_HINT = "Post-solve: polish (re-grade edits) · done — or just ask a question"
+POST_COMMANDS_HINT = "polish · done — or ask"
 
 TEMPLATE_STUB_COMMENT = (
     "# Solve it. Use `dojo check` / `dojo hint` from a second terminal."

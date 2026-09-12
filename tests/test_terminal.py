@@ -40,7 +40,7 @@ def test_patch_console_never_loses_output(monkeypatch, capsys):
 
     from rich.console import Console
 
-    import dojo.terminal as terminal
+    from dojo import terminal
 
     monkeypatch.setattr(terminal, "_is_tty", lambda: True)
     console = Console(file=io.StringIO(), force_terminal=False, width=100)
@@ -48,3 +48,43 @@ def test_patch_console_never_loses_output(monkeypatch, capsys):
     patched.print("hello patch")
     where = console.file.getvalue() + capsys.readouterr().out
     assert "hello patch" in where
+
+
+def test_prompt_fallback_logs_and_prints_hint(monkeypatch, tmp_path):
+    """The TTY path's failure mode must never be silent again: a broken
+    prompt_toolkit session logs a prompt_fallback event to the debug log,
+    prints the hint, and degrades to plain input."""
+    import json
+
+    from dojo import terminal
+    from dojo import debuglog
+
+    class BrokenSession:
+        def prompt(self, *args, **kwargs):
+            raise RuntimeError("terminal exploded")
+
+    class FakeConsole:
+        def __init__(self):
+            self.out = []
+
+        def print(self, *args):
+            self.out.append(" ".join(str(a) for a in args))
+
+        def input(self, text):
+            self.out.append(str(text))
+            return "answer"
+
+    monkeypatch.setattr(terminal, "_is_tty", lambda: True)
+    monkeypatch.setattr(terminal, "_session", BrokenSession())
+    monkeypatch.setattr(debuglog, "LOG_PATH", tmp_path / "logs" / "dojo.log")
+
+    fake = FakeConsole()
+    assert terminal.make_prompt(fake)("Q: ", hint="[dim]the hint[/dim]") == "answer"
+    assert "the hint" in " ".join(fake.out)  # hint printed, not lost
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "dojo.log").read_text().splitlines()
+    ]
+    assert events[0]["event"] == "prompt_fallback"
+    assert "terminal exploded" in events[0]["error"]

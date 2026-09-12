@@ -54,13 +54,26 @@ def make_prompt(console):
             if _session is None:
                 _session = PromptSession()
             # ``default`` prefills the answer (editing a previous response);
-            # ``hint`` is virtual text in the bottom toolbar — visible, but
-            # it never scrolls or takes a line of output.
+            # ``hint`` is virtual text: rendered right-aligned ON the input
+            # line itself (rprompt) — the bottom toolbar proved unreliable
+            # in some terminals (it never rendered, silently), while the
+            # input line is the region every terminal renders for sure.
             kwargs = {}
             if hint is not None:
-                kwargs["bottom_toolbar"] = lambda: ANSI(_to_ansi(hint))
+                kwargs["rprompt"] = ANSI(_to_ansi(hint))
             return _session.prompt(ANSI(_to_ansi(text)), default=default, **kwargs)
-        except Exception:  # noqa: BLE001 - fall back to the plain prompt
+        except Exception as exc:  # noqa: BLE001 - degrade, but never silently
+            from dojo import debuglog
+
+            debuglog.log_event(
+                {
+                    "event": "prompt_fallback",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "prompt": text,
+                }
+            )
+            if hint:
+                console.print(hint)
             return console.input(text)
 
     return prompt
