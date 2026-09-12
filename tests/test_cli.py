@@ -444,4 +444,66 @@ def test_roadmap_command_dispatches(db, monkeypatch, tmp_path):
     from dojo.cli import _cmd_roadmap
 
     monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
-    assert _cmd_roadmap(SimpleNamespace(_user="andy")) == 0
+    args = SimpleNamespace(_user="andy", table=False, expand=None, all=False)
+    assert _cmd_roadmap(args) == 0
+
+
+def test_roadmap_tree_data_states(db):
+    """Per-problem ladder states: solved / next / ready / missing, and the
+    group rows carry the gate fields."""
+    from dojo.cli import _roadmap_tree
+
+    uid = get_or_create_user(db, "andy")
+    _seed_ladder(db, "two_sum", "arrays_and_hashing", 1)
+    _seed_ladder(db, "group_anagrams", "arrays_and_hashing", 49)
+    _seed_ladder(db, "valid_palindrome", "two_pointers", 125)
+    _solve_slug(db, uid, "two_sum")
+
+    entries, next_pick = _roadmap_tree(db, uid)
+    arrays = entries[0]
+    states = {p["lc"]: p["state"] for p in arrays["problems"]}
+    assert states[1] == "solved"
+    assert states[49] == "next"  # the ladder's earliest unsolved in the group
+    assert states[217] == "missing"  # on the ladder, not fetched
+    assert arrays["next_up"] is True
+    two_ptrs = entries[1]
+    assert two_ptrs["locked_by"] == "arrays_and_hashing"
+    assert next_pick["slug"] == "group_anagrams"
+
+
+def _render_roadmap(**kwargs):
+    from rich.console import Console
+
+    from dojo.cli import _cmd_roadmap
+
+    console = Console(
+        force_terminal=True, color_system="standard", width=160, no_color=False
+    )
+    with console.capture() as cap:
+        # _cmd_roadmap builds its own Console; capture the tree via the
+        # renderer directly instead.
+        from dojo.cli import _render_roadmap_tree
+
+        _render_roadmap_tree(console, kwargs.pop("entries"), kwargs.pop("next_pick"), **kwargs)
+    return cap.get()
+
+
+def test_roadmap_tree_renders_branches_and_expansion(db):
+    from dojo.cli import _roadmap_tree
+
+    uid = get_or_create_user(db, "andy")
+    _seed_ladder(db, "two_sum", "arrays_and_hashing", 1)
+    _seed_ladder(db, "group_anagrams", "arrays_and_hashing", 49)
+    _seed_ladder(db, "valid_palindrome", "two_pointers", 125)
+    _solve_slug(db, uid, "two_sum")
+
+    entries, next_pick = _roadmap_tree(db, uid)
+    out = _render_roadmap(entries=entries, next_pick=next_pick)
+    assert "NeetCode 150" in out
+    assert "├──" in out  # tree branches
+    assert "← next up" in out
+    assert "group_anagrams" in out  # the expanded next-up group's ladder
+    assert "valid_palindrome" not in out  # collapsed groups stay one line
+
+    out = _render_roadmap(entries=entries, next_pick=next_pick, expand_all=True)
+    assert "valid_palindrome" in out  # --all expands everything

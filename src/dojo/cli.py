@@ -290,6 +290,102 @@ def _roadmap_rows(conn, user_id):
     return rows, next_pick
 
 
+def _roadmap_problem_map(conn):
+    """lc -> (title, curated) for every ladder problem in the bank."""
+    rows = conn.execute(
+        """
+        SELECT lc_number, title, function_name, visible_tests FROM problems
+        WHERE lc_number IS NOT NULL
+        """
+    ).fetchall()
+    return {
+        r["lc_number"]: (r["title"], bool(r["function_name"] and r["visible_tests"]))
+        for r in rows
+    }
+
+
+def _roadmap_tree(conn, user_id):
+    """The tree view's data (v0.10.9): the per-group rows from
+    _roadmap_rows plus each group's ladder as per-problem entries with a
+    state — solved / next (the ladder's earliest unsolved in this group)
+    / ready (curated in bank) / missing (not fetched). Pure queries;
+    the renderer draws it."""
+    from dojo import scheduler
+    from dojo.roadmap import load_roadmap, next_ladder_problem
+
+    groups = load_roadmap()
+    solved, bank = scheduler.ladder_state(conn, user_id)
+    problem_map = _roadmap_problem_map(conn)
+    next_pick = scheduler.pick_new_problem(conn, user_id)
+    rows, _ = _roadmap_rows(conn, user_id)
+
+    entries = []
+    for group, row in zip(groups, rows):
+        next_lc = next_ladder_problem(groups, group["slug"], solved, bank)
+        problems = []
+        for lc in group["problems"]:
+            title, curated = problem_map.get(lc, (None, False))
+            if lc in solved:
+                state = "solved"
+            elif lc == next_lc and curated:
+                state = "next"
+            elif curated:
+                state = "ready"
+            else:
+                state = "missing"
+            problems.append(
+                {"lc": lc, "state": state, "title": title or f"problem {lc}"}
+            )
+        entries.append({**row, "slug": group["slug"], "problems": problems})
+    return entries, next_pick
+
+
+def _render_roadmap_tree(console, entries, next_pick, expand=None, expand_all=False):
+    """The tree view (v0.10.9): groups as branches (the prereq chain is
+    the skeleton), each group's ladder as leaves with ✓/→/○/· markers.
+    The next-up group expands by default; --expand/--all open more."""
+    from rich.tree import Tree
+
+    tree = Tree("NeetCode 150 — your progress")
+    expand_set = set(expand or [])
+    for entry in entries:
+        slug = entry["slug"]
+        if entry["complete"]:
+            status = f"[green]✓ {entry['solved']}/{entry['available']}[/green]"
+        elif entry["next_up"]:
+            status = f"[cyan]→ {entry['solved']}/{entry['available']}[/cyan]  ← next up"
+        elif entry["locked_by"]:
+            status = (
+                f"[dim]🔒 {entry['solved']}/{entry['available']}[/dim] "
+                f"(finish {entry['locked_by']})"
+            )
+        else:
+            status = f"{entry['solved']}/{entry['available']}"
+        node = tree.add(f"{slug}  {status}")
+        if not (expand_all or entry["next_up"] or slug in expand_set):
+            continue
+        for problem in entry["problems"]:
+            if problem["state"] == "solved":
+                node.add(f"[green]✓[/green] {problem['lc']} {problem['title']}")
+            elif problem["state"] == "next":
+                node.add(f"[cyan]→ {problem['lc']} {problem['title']}[/cyan]")
+            elif problem["state"] == "ready":
+                node.add(f"○ {problem['lc']} {problem['title']}")
+            else:
+                node.add(f"[dim]· {problem['lc']} {problem['title']}[/dim]")
+    console.print(tree)
+    if next_pick is not None:
+        console.print(
+            f"[bold]Next up:[/bold] {next_pick['title']} "
+            f"[dim]({next_pick['pattern']})[/dim] — run `dojo` to start it."
+        )
+    else:
+        console.print(
+            "[green]Every ladder problem in the bank is solved — `dojo` "
+            "now serves dojo's own problems.[/green]"
+        )
+
+
 def _cmd_roadmap(args) -> int:
     console = Console()
     user = getattr(args, "_user", None)
@@ -298,6 +394,12 @@ def _cmd_roadmap(args) -> int:
         return 1
     with connect(DB_PATH) as conn:
         user_id = get_or_create_user(conn, user)
+        if not args.table:
+            entries, next_pick = _roadmap_tree(conn, user_id)
+            _render_roadmap_tree(
+                console, entries, next_pick, expand=args.expand, expand_all=args.all
+            )
+            return 0
         rows, next_pick = _roadmap_rows(conn, user_id)
 
         table = ui_table("The roadmap — NeetCode 150 progression")
@@ -998,6 +1100,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_progress.set_defaults(func=_cmd_progress)
 
     p_roadmap = sub.add_parser("roadmap", help="the progression tree: solved, next up, locked")
+    p_roadmap.add_argument(
+        "--table", action="store_true", help="the stats table instead of the tree"
+    )
+    p_roadmap.add_argument(
+        "--expand", action="append", metavar="PATTERN",
+        help="also expand this pattern's ladder (repeatable)",
+    )
+    p_roadmap.add_argument(
+        "--all", action="store_true", help="expand every pattern's ladder"
+    )
     p_roadmap.set_defaults(func=_cmd_roadmap)
 
     p_user = sub.add_parser("user", help="switch the active user (numbered picker without a name)")

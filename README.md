@@ -75,7 +75,7 @@ dojo setup                  # re-run the setup wizard (change key, reinstall PAT
 
 ## The progression
 
-The daily pick follows the **NeetCode 150 roadmap** (`data/roadmap.toml`, vendored with provenance): 18 technique groups in prerequisite order, each an ordered problem ladder. The scheduler walks the groups top-down and serves the earliest unsolved ladder problem of the first group whose prerequisites are all complete — `dojo roadmap` shows exactly where you stand (✓ complete · → next up · locked — finish X). Problems fetched but not yet on the ladder, and dojo's own hand-written problems, are served after the ladder in the bank is done. Explicit `dojo <slug>` always bypasses the gate — deliberate choices are exempt.
+The daily pick follows the **NeetCode 150 roadmap** (`data/roadmap.toml`, vendored with provenance): 18 technique groups in prerequisite order, each an ordered problem ladder. The scheduler walks the groups top-down and serves the earliest unsolved ladder problem of the first group whose prerequisites are all complete — `dojo roadmap` draws the tree itself — groups as branches, each group's ladder as leaves (✓ solved · → next up · ○ ready · · not fetched), the next-up group expanded by default (`--expand <pattern>` / `--all` open more, `--table` restores the stats view). Problems fetched but not yet on the ladder, and dojo's own hand-written problems, are served after the ladder in the bank is done. Explicit `dojo <slug>` always bypasses the gate — deliberate choices are exempt.
 
 `dojo help` (or `-h`/`--help`) shows the same short guide in the terminal.
 
