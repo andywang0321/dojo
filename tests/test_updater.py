@@ -42,6 +42,7 @@ def test_already_up_to_date_does_nothing():
 
 def test_pulls_and_refreshes_deps():
     calls = []
+    state = {"merged": False}
 
     def run(cmd, timeout=30):
         calls.append(cmd)
@@ -51,9 +52,13 @@ def test_pulls_and_refreshes_deps():
             if cmd[1] == "fetch":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if cmd[1] == "rev-parse":
-                head = "aaa111" if cmd[2] == "HEAD" else "bbb222"
+                if cmd[2] == "HEAD":
+                    head = "bbb222" if state["merged"] else "aaa111"
+                else:
+                    head = "bbb222"
                 return SimpleNamespace(returncode=0, stdout=head, stderr="")
             if cmd[1] == "merge":
+                state["merged"] = True
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
         if cmd[0] == "uv":
             return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -63,6 +68,30 @@ def test_pulls_and_refreshes_deps():
     assert out == "updated to bbb222"
     assert ["git", "merge", "--ff-only", "bbb222"] in calls
     assert calls[-1][0] == "uv" and calls[-1][1] == "sync"
+
+
+def test_local_ahead_of_upstream_is_noop_not_update():
+    """The reported 'updated to <stale hash>' bug: local contains the
+    upstream commit, the ff-only merge is a no-op — report it as
+    up-to-date and never refresh deps."""
+    calls = []
+
+    def run(cmd, timeout=30):
+        calls.append(cmd)
+        if cmd[0] == "git":
+            if cmd[1] in ("status", "fetch", "merge"):
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if cmd[1] == "rev-parse":
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="ccc333" if cmd[2] == "HEAD" else "aaa111",
+                    stderr="",
+                )
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+    out = update_dojo(run=run)
+    assert out == "already up to date"
+    assert not any(c[0] == "uv" for c in calls)
 
 
 def test_dirty_tree_skips_and_suggests_force():
@@ -81,6 +110,7 @@ def test_dirty_tree_skips_and_suggests_force():
 def test_force_discards_local_changes():
     routes = _base_routes()
     calls = routes["_calls"]
+    state = {"reset": False}
 
     def run(cmd, timeout=30):
         calls.append((cmd, timeout))
@@ -90,8 +120,13 @@ def test_force_discards_local_changes():
             if cmd[1] == "fetch":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if cmd[1] == "rev-parse":
-                return SimpleNamespace(returncode=0, stdout="aaa111" if "HEAD" in cmd else "bbb222", stderr="")
+                if cmd[2] == "HEAD":
+                    head = "bbb222" if state["reset"] else "aaa111"
+                else:
+                    head = "bbb222"
+                return SimpleNamespace(returncode=0, stdout=head, stderr="")
             if cmd[1] == "reset":
+                state["reset"] = True
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")

@@ -55,9 +55,14 @@ def update_dojo(console=None, run: Runner | None = None, force: bool = False) ->
             pulled = run(["git", "merge", "--ff-only", upstream])
         if pulled.returncode != 0:
             return "update failed — `git pull` manually in the repo"
+        head_after = run(["git", "rev-parse", "HEAD"]).stdout.strip()
+        if head_after == head:
+            # Local contains upstream (or nothing new arrived): a no-op
+            # merge must not be misreported as an update.
+            return "already up to date"
     except (subprocess.SubprocessError, OSError):
         return "could not fetch (offline?) — skipped update"
-    note = f"updated to {upstream[:8]}"
+    note = f"updated to {head_after[:8]}"
     try:
         sync = run(["uv", "sync", "--project", str(REPO_ROOT)], timeout=180)
         if sync.returncode != 0:

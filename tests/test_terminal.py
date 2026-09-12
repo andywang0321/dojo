@@ -30,3 +30,21 @@ def test_make_prompt_accepts_default_non_tty(fake_console):
 
     console = fake_console(["answer"])
     assert make_prompt(console)("Q: ", default="previous") == "answer"
+
+
+def test_patch_console_never_loses_output(monkeypatch, capsys):
+    """Regression: the patch_stdout import must bind the context manager,
+    not the module (the reported TypeError crash) — and any patch failure
+    degrades to a plain print, never lost output."""
+    import io
+
+    from rich.console import Console
+
+    import dojo.terminal as terminal
+
+    monkeypatch.setattr(terminal, "_is_tty", lambda: True)
+    console = Console(file=io.StringIO(), force_terminal=False, width=100)
+    patched = terminal.patch_console(console)
+    patched.print("hello patch")
+    where = console.file.getvalue() + capsys.readouterr().out
+    assert "hello patch" in where

@@ -68,20 +68,27 @@ def make_prompt(console):
 
 def patch_console(console):
     """Wrap a rich Console for printing *between* interactive prompts:
-    prints route through prompt_toolkit.patch_stdout so the fullscreen
+    prints route through prompt_toolkit's patch_stdout so the fullscreen
     prompt's repaint can't visually truncate them (v0.10.1). No-op for
-    non-TTYs — tests and pipes keep the plain path."""
+    non-TTYs — tests and pipes keep the plain path. Any patch_stdout
+    failure degrades to a plain print — output is never lost."""
     if not _is_tty():
         return console
 
-    from prompt_toolkit import patch_stdout
+    # The context manager lives INSIDE the module prompt_toolkit.patch_stdout
+    # (`from prompt_toolkit import patch_stdout` binds the module — calling
+    # it was the reported TypeError crash).
+    from prompt_toolkit.patch_stdout import patch_stdout as _patch_stdout
 
     class _Patched:
         def __getattr__(self, name):
             return getattr(console, name)
 
         def print(self, *args, **kwargs):
-            with patch_stdout(raw=True):
+            try:
+                with _patch_stdout(raw=True):
+                    console.print(*args, **kwargs)
+            except Exception:  # noqa: BLE001 - degrade, never drop output
                 console.print(*args, **kwargs)
 
     return _Patched()
