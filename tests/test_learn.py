@@ -135,3 +135,12 @@ def test_run_learn_exhausted_pattern_stays_in_conversation(db, fake_console):
     result = run_learn(db, console, backend, "andy", "heap")
     assert result == {"practice": None}
     assert "No unsolved curated problem" in console.text
+
+
+def test_learn_typo_guard_confirms_done(db, fake_console):
+    console = fake_console(["don", "y"])
+    backend = MockBackend(teacher="Heap primer.")
+    result = run_learn(db, console, backend, "andy", "heap")
+    assert result == {"practice": None}
+    assert "Did you mean `done`" in console.text
+    assert db.execute("SELECT completed FROM learn_sessions").fetchone()["completed"] == 1

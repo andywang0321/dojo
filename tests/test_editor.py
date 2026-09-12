@@ -23,17 +23,17 @@ def test_unknown_editors_are_neither():
     assert not is_terminal_editor("mysteryeditor")
 
 
-def test_open_path_folder_editors_open_folder():
+def test_open_path_folder_editors_open_folder_and_file():
     from pathlib import Path
 
     from dojo.editor import open_path
 
     for cmd in ("code", "zed", "cursor"):
-        folder, message = open_path(cmd, Path("/wb/two_sum.py"))
-        assert folder == Path("/wb")  # the workbench folder, not the file
+        targets, message = open_path(cmd, Path("/wb/two_sum.py"))
+        assert targets == [Path("/wb"), Path("/wb/two_sum.py")]  # folder + focused file
         assert "workbench folder" in message
-    file_, _ = open_path("subl", Path("/wb/two_sum.py"))
-    assert file_ == Path("/wb/two_sum.py")  # other editors keep the file
+    targets, _ = open_path("subl", Path("/wb/two_sum.py"))
+    assert targets == [Path("/wb/two_sum.py")]  # other editors keep just the file
 
 
 def test_ensure_ide_config_generates_self_contained_workspace(tmp_path):

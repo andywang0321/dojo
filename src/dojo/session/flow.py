@@ -37,7 +37,7 @@ from dojo.session.state import (
     retire_state,
     save_state,
 )
-from dojo.terminal import make_prompt, patch_console
+from dojo.terminal import confirm_typo, make_prompt, patch_console
 from dojo.tutor import TIER_NAMES, ask_tutor, review
 from dojo.tutor.prompts import DISCUSSION_SYSTEM, build_discussion_prompt
 from dojo.ui import table as ui_table
@@ -657,6 +657,9 @@ def _post_solve_loop(conn: sqlite3.Connection, console: Console, backend, proble
         ).strip()
         if not raw:
             continue
+        fixed = confirm_typo(console, raw, ["polish", "p", "done", "quit", "q"])
+        if fixed is not None:
+            raw = fixed
         if raw in ("done", "quit", "q"):
             return
         if raw in ("polish", "p"):
@@ -847,6 +850,12 @@ def run_day(
         if not raw:
             continue
         cmd, _, rest = raw.partition(" ")
+        fixed = confirm_typo(
+            console, cmd, ["open", "check", "learn", "submit", "quit", "q", "report"]
+        )
+        if fixed is not None:
+            raw = fixed
+            cmd, _, rest = fixed.partition(" ")
         if cmd in ("q", "quit") and not rest:
             _persist_abandoned(
                 conn,

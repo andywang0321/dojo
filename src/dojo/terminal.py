@@ -79,6 +79,29 @@ def make_prompt(console):
     return prompt
 
 
+def confirm_typo(console, word: str, commands: list[str]) -> str | None:
+    """A guard against command typos (v0.10.8): a single non-question word
+    that close-matches a session command is confirmed before acting —
+    "qit" becomes `quit` only after the user says so; consequences are
+    too big (quit parks, learn parks, submit grades) to auto-correct.
+    Returns the fixed word, or None to treat the input as a question."""
+    import difflib
+
+    word = word.strip().lower()
+    if not word or " " in word or word.endswith("?"):
+        return None
+    if word in commands:
+        return None
+    matches = difflib.get_close_matches(word, commands, n=1, cutoff=0.8)
+    if not matches:
+        return None
+    fixed = matches[0]
+    answer = make_prompt(console)(
+        f"[yellow]Did you mean `{fixed}`? [y/N] [/yellow]"
+    ).strip().lower()
+    return fixed if answer in ("y", "yes") else None
+
+
 def patch_console(console):
     """Wrap a rich Console for printing *between* interactive prompts:
     prints route through prompt_toolkit's patch_stdout so the fullscreen

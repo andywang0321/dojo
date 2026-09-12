@@ -88,3 +88,28 @@ def test_prompt_fallback_logs_and_prints_hint(monkeypatch, tmp_path):
     ]
     assert events[0]["event"] == "prompt_fallback"
     assert "terminal exploded" in events[0]["error"]
+
+
+def test_confirm_typo_requires_confirmation(fake_console):
+    from dojo.terminal import confirm_typo
+
+    console = fake_console(["y"])
+    assert confirm_typo(console, "qit", ["open", "quit"]) == "quit"
+    assert "Did you mean `quit`" in console.text
+
+
+def test_confirm_typo_declined_is_a_question(fake_console):
+    from dojo.terminal import confirm_typo
+
+    console = fake_console(["n"])
+    assert confirm_typo(console, "qit", ["open", "quit"]) is None
+
+
+def test_confirm_typo_ignores_questions_and_exact_commands(fake_console):
+    from dojo.terminal import confirm_typo
+
+    console = fake_console([])
+    assert confirm_typo(console, "submit?", ["submit", "quit"]) is None  # a question
+    assert confirm_typo(console, "check my thing", ["check", "quit"]) is None  # multi-word
+    assert confirm_typo(console, "quit", ["quit"]) is None  # exact command
+    assert confirm_typo(console, "zzzz", ["quit"]) is None  # no close match

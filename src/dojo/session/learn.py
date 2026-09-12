@@ -28,7 +28,7 @@ from dojo.db import (
 )
 from dojo.patterns import PATTERNS
 from dojo.render import render_ai
-from dojo.terminal import make_prompt, patch_console
+from dojo.terminal import confirm_typo, make_prompt, patch_console
 from dojo.tutor.prompts import TEACHER_SYSTEM, build_teacher_prompt
 
 LEARN_COMMANDS_HINT = "practice (hand off to a problem) · done — or ask"
@@ -92,6 +92,9 @@ def run_learn(
         ).strip()
         if not raw:
             continue
+        fixed = confirm_typo(console, raw, ["practice", "done", "quit", "q"])
+        if fixed is not None:
+            raw = fixed
         if raw in EXIT_WORDS:
             update_learn_transcript(conn, session_id, transcript, completed=True)
             return {"practice": None}

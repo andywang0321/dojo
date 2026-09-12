@@ -113,18 +113,20 @@ def _tmux_command(cmd: str, path: str) -> list[str] | None:
     return ["tmux", "new-window", f"{cmd} {shlex.quote(path)}"]
 
 
-def open_path(cmd: str, path: Path) -> tuple[Path, str]:
+def open_path(cmd: str, path: Path) -> tuple[list[Path], str]:
     """What to open, and what to tell the user: VSCode-family editors and
-    Zed get the workbench *folder* (its generated .vscode/ or .zed/
-    config makes the debugger work without knowing the repo exists);
-    everyone else gets the file."""
+    Zed get the workbench *folder plus the file* — the folder carries the
+    generated .vscode/ or .zed/ config (debugger wired without knowing
+    the repo exists) and the file is the focused pane (v0.10.8: folder
+    alone left the editor staring at an empty workspace); everyone else
+    gets just the file."""
     if _first_word(cmd) in FOLDER_EDITORS:
-        return path.parent, (
+        return [path.parent, path], (
             f"Opened the workbench folder with {_first_word(cmd)} — the "
             "generated debugger config points at dojo's Python. The dojo "
             "prompt stays live."
         )
-    return path, (
+    return [path], (
         f"Opened {path.name} with {_first_word(cmd)} — the dojo prompt stays live."
     )
 
@@ -191,8 +193,8 @@ def launch(path: Path) -> str:
     """Open ``path`` in the configured editor without blocking the dojo
     prompt, when the environment allows it. Returns a human message."""
     cmd = editor_command()
-    target, message = open_path(cmd, path)
-    args = shlex.split(cmd) + [str(target)]
+    targets, message = open_path(cmd, path)
+    args = shlex.split(cmd) + [str(target) for target in targets]
 
     if is_gui_editor(cmd):
         subprocess.Popen(

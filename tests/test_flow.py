@@ -762,3 +762,25 @@ def test_check_shows_user_prints(db, fake_console, monkeypatch, tmp_path):
     assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
     assert "Your code printed:" in console.text
     assert "debug: checking" in console.text
+
+
+def test_typo_guard_confirms_quit(db, fake_console, monkeypatch, tmp_path):
+    """'qit' is confirmed, not sent to the tutor and not silently acted on."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    console = fake_console(["qit", "y"])
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    assert "Did you mean `quit`" in console.text
+
+
+def test_typo_guard_decline_sends_question_to_tutor(db, fake_console, monkeypatch, tmp_path):
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    console = fake_console(["qit", "n", "quit"])
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert json.loads(row["hints"])[0]["user"] == "qit"  # treated as a question
