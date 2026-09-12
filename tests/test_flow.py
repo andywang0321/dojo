@@ -743,3 +743,22 @@ def test_hint_renders_markdown_in_bordered_panel(db, fake_console, monkeypatch, 
     row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     stored = json.loads(row["hints"])[0]["hint"]
     assert stored == MockBackend.TIER_RESPONSES[0]  # raw text stored, never flattened
+
+
+def test_check_shows_user_prints(db, fake_console, monkeypatch, tmp_path):
+    """v0.10.7: prints are debugging statements — `check` shows them."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    printing = "def is_valid(s: str) -> bool:\n    print('debug: checking', s)\n    return True\n"
+
+    console = fake_console(
+        ["check", "quit"],
+        actions={"check": lambda: (workbench / "valid_parentheses.py").write_text(printing)},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    assert "Your code printed:" in console.text
+    assert "debug: checking" in console.text

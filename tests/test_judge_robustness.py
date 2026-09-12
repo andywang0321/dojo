@@ -32,6 +32,8 @@ def test_print_in_solution_does_not_corrupt_judge():
     )
     assert report.status == "correct", report.results
     assert report.passed == 2
+    printed = "\n".join(r.printed for r in report.results)
+    assert "debug: doubling 3" in printed  # prints are captured, not discarded
 
 
 def test_import_time_print_does_not_corrupt_judge():

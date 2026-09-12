@@ -27,6 +27,7 @@ from typing import Any
 
 HARNESS = r'''
 import importlib.util
+import io
 import json
 import sys
 import time
@@ -36,15 +37,19 @@ try:
 except ImportError:  # pragma: no cover - dojo is always importable here
     CHECKERS = {}
 
+PRINT_CAP = 4000
+
 
 def isolated(call):
-    """Run user code with its stdout redirected to stderr: the protocol
-    channel (stdout JSON) must never be polluted by prints (a real crash:
-    a `print` in the solution corrupted the result JSON)."""
+    """Run user code with its stdout captured: the protocol channel
+    (stdout JSON) must never be polluted by prints (a real crash: a
+    `print` in the solution corrupted the result JSON). The captured
+    output rides along in the result so `dojo check` can show it."""
     real = sys.stdout
-    sys.stdout = sys.stderr
+    buffer = io.StringIO()
+    sys.stdout = buffer
     try:
-        return call()
+        return call(), buffer.getvalue()[:PRINT_CAP]
     finally:
         sys.stdout = real
 
@@ -106,18 +111,23 @@ def main():
         expected = case["expected"]
         t0 = time.perf_counter()
         try:
+            printed = ""
             if "ops" in case:
-                obj = isolated(
+                obj, ctor_out = isolated(
                     lambda: getattr(solution, function_name)(*case.get("ctor_args", []))
                 )
-                got = isolated(lambda: [getattr(obj, method)(*args) for method, *args in case["ops"]])
+                got, ops_out = isolated(
+                    lambda: [getattr(obj, method)(*args) for method, *args in case["ops"]]
+                )
+                printed = (ctor_out + ops_out)[:PRINT_CAP]
             else:
                 fn = getattr(solution, function_name)
-                got = isolated(lambda: fn(*case["args"]))
+                got, printed = isolated(lambda: fn(*case["args"]))
             if case.get("predicate"):
-                passed = isolated(
+                passed, pred_out = isolated(
                     lambda: CHECKERS[case["predicate"]](solution, got, case["args"])
                 )
+                printed = (printed + pred_out)[:PRINT_CAP]
             else:
                 passed = check_equal(got, expected, mode)
             results.append(
@@ -127,6 +137,7 @@ def main():
                     "expected": expected,
                     "got": got,
                     "error": None,
+                    "printed": printed,
                     "elapsed_ms": (time.perf_counter() - t0) * 1000,
                 }
             )
@@ -138,6 +149,7 @@ def main():
                     "expected": expected,
                     "got": None,
                     "error": f"{type(exc).__name__}: {exc}",
+                    "printed": "",
                     "elapsed_ms": (time.perf_counter() - t0) * 1000,
                 }
             )
@@ -157,6 +169,7 @@ class CaseResult:
     got: Any
     error: str | None
     elapsed_ms: float
+    printed: str = ""
 
 
 @dataclass
@@ -220,6 +233,7 @@ def run_cases(
                 got=r["got"],
                 error=r["error"],
                 elapsed_ms=r["elapsed_ms"],
+                printed=r.get("printed", ""),
             )
             for r in raw
         ]

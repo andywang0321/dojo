@@ -5,6 +5,8 @@ description = "AI-guided interview prep: a never-solve tutor, an empirical compl
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "debugpy>=1.8.21",
+    "ipykernel>=7.3.0",
     "openai>=3.8.0",
     "prompt-toolkit>=3.0.53",
     "radon>=6.0.1",

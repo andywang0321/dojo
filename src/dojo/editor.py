@@ -43,8 +43,9 @@ GUI_EDITORS = {
 }
 
 #: Editors that are happiest opening the workbench *folder* (their project
-#: config lives in .vscode/) rather than a bare file (v0.10.6).
-FOLDER_EDITORS = {"code", "codium", "cursor", "windsurf"}
+#: config lives in .vscode/ or .zed/ rather than a bare file (v0.10.6,
+#: zed added v0.10.7).
+FOLDER_EDITORS = {"code", "codium", "cursor", "windsurf", "zed"}
 
 TERMINAL_EDITORS = {
     "nvim",
@@ -113,15 +114,15 @@ def _tmux_command(cmd: str, path: str) -> list[str] | None:
 
 
 def open_path(cmd: str, path: Path) -> tuple[Path, str]:
-    """What to open, and what to tell the user: VSCode-family editors get
-    the workbench *folder* (its generated .vscode/ config makes the
-    debugger work without knowing the repo exists); everyone else gets
-    the file."""
+    """What to open, and what to tell the user: VSCode-family editors and
+    Zed get the workbench *folder* (its generated .vscode/ or .zed/
+    config makes the debugger work without knowing the repo exists);
+    everyone else gets the file."""
     if _first_word(cmd) in FOLDER_EDITORS:
         return path.parent, (
             f"Opened the workbench folder with {_first_word(cmd)} — the "
-            "generated .vscode config points the debugger at dojo's Python. "
-            "The dojo prompt stays live."
+            "generated debugger config points at dojo's Python. The dojo "
+            "prompt stays live."
         )
     return path, (
         f"Opened {path.name} with {_first_word(cmd)} — the dojo prompt stays live."
@@ -129,18 +130,21 @@ def open_path(cmd: str, path: Path) -> tuple[Path, str]:
 
 
 def ensure_ide_config(workbench_dir: Path, venv_python: Path | None = None) -> None:
-    """Generate the self-contained VSCode workspace inside the workbench
-    (v0.10.6): opening this folder — or double-clicking the generated
-    workbench.code-workspace — wires the Python extension + debugger to
-    dojo's venv with zero repo knowledge. Idempotent; rewritten each
-    session so path moves self-heal. Uses the runtime config when paths
-    are not injected (tests inject tmp paths)."""
+    """Generate the self-contained IDE workspaces inside the workbench
+    (v0.10.6, zed v0.10.7): opening this folder — or the generated
+    workbench.code-workspace — wires the debugger to dojo's venv with
+    zero repo knowledge. Idempotent; rewritten each session so path
+    moves self-heal. Uses the runtime config when paths are not injected
+    (tests inject tmp paths)."""
+    import json
+
     from dojo.config import VENV_PYTHON as runtime_venv
 
     venv_python = venv_python or runtime_venv
+    interpreter = str(venv_python)
+
     vscode = workbench_dir / ".vscode"
     vscode.mkdir(parents=True, exist_ok=True)
-    interpreter = str(venv_python)
     (vscode / "settings.json").write_text(
         '{\n  // dojo-generated: user code in this folder runs on dojo\'s venv.\n'
         f'  "python.defaultInterpreterPath": "{interpreter}"\n'
@@ -158,6 +162,28 @@ def ensure_ide_config(workbench_dir: Path, venv_python: Path | None = None) -> N
         '{\n  // dojo-generated: open this file in VSCode to debug workbench code.\n'
         '  "folders": [{"path": "."}],\n'
         '  "settings": {"python.defaultInterpreterPath": "%s"}\n}\n' % interpreter
+    )
+
+    # Zed (v0.10.7): its integrated debugger uses the debugpy adapter; the
+    # explicit "python" key pins dojo's venv so the toolchain detection
+    # (which can't see a venv outside the worktree) is never needed.
+    zed = workbench_dir / ".zed"
+    zed.mkdir(parents=True, exist_ok=True)
+    (zed / "debug.json").write_text(
+        json.dumps(
+            [
+                {
+                    "label": "dojo: debug the active workbench file",
+                    "adapter": "Debugpy",
+                    "program": "$ZED_FILE",
+                    "request": "launch",
+                    "python": interpreter,
+                    "justMyCode": True,
+                }
+            ],
+            indent=2,
+        )
+        + "\n"
     )
 
 

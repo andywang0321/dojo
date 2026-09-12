@@ -245,6 +245,18 @@ def _write_template(problem: sqlite3.Row, force: bool = False) -> None:
     path.write_text(_render_template(problem))
 
 
+def _show_printed(console: Console, report) -> None:
+    """The captured stdout of the user's code (v0.10.7): prints are
+    debugging statements, and `check` is the debugging loop."""
+    printed_cases = [(r.label, r.printed) for r in report.results if r.printed]
+    if not printed_cases:
+        return
+    console.print("[bold]Your code printed:[/bold]")
+    for label, text in printed_cases:
+        console.print(f"[dim]{label}:[/dim]")
+        console.print(text.rstrip())
+
+
 def _check(console: Console, problem: sqlite3.Row, code_path: Path) -> bool:
     cases = [
         {**c, "label": f"visible {i + 1}"}
@@ -255,6 +267,7 @@ def _check(console: Console, problem: sqlite3.Row, code_path: Path) -> bool:
         console.print(f"[green]✓ {report.passed}/{report.total} visible cases passed[/green]")
     else:
         _show_case_failures(console, report)
+    _show_printed(console, report)
     # Advisory static analysis: findings here are live coaching, so the
     # student can fix them before the reviewer grades the final code.
     analysis = static.analyze(code_path)
@@ -368,6 +381,7 @@ def _submit(
             + (f" — status: {report.status}" if report.status != "wrong_answer" else "")
         )
         _show_case_failures(console, report)
+        _show_printed(console, report)
         return "keep_going", None
 
     console.print(f"[green]✓ All {report.total} cases passed[/green]")

@@ -23,15 +23,16 @@ def test_unknown_editors_are_neither():
     assert not is_terminal_editor("mysteryeditor")
 
 
-def test_open_path_vscode_family_opens_folder():
+def test_open_path_folder_editors_open_folder():
     from pathlib import Path
 
     from dojo.editor import open_path
 
-    folder, message = open_path("code", Path("/wb/two_sum.py"))
-    assert folder == Path("/wb")  # the workbench folder, not the file
-    assert "workbench folder" in message
-    file_, _ = open_path("zed", Path("/wb/two_sum.py"))
+    for cmd in ("code", "zed", "cursor"):
+        folder, message = open_path(cmd, Path("/wb/two_sum.py"))
+        assert folder == Path("/wb")  # the workbench folder, not the file
+        assert "workbench folder" in message
+    file_, _ = open_path("subl", Path("/wb/two_sum.py"))
     assert file_ == Path("/wb/two_sum.py")  # other editors keep the file
 
 
@@ -46,4 +47,7 @@ def test_ensure_ide_config_generates_self_contained_workspace(tmp_path):
     assert str(venv) in settings
     assert "debugpy" in launch and "${file}" in launch
     assert "folders" in workspace and str(venv) in workspace
+    zed_debug = (tmp_path / ".zed" / "debug.json").read_text()
+    assert "Debugpy" in zed_debug and "$ZED_FILE" in zed_debug
+    assert str(venv) in zed_debug  # the debugpy "python" key pins the venv
     ensure_ide_config(tmp_path, venv_python=venv)  # idempotent
