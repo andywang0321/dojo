@@ -29,6 +29,7 @@ from dojo.db import dumps_json, get_or_create_user, loads_json, now
 from dojo.editor import launch as launch_editor
 from dojo.judge import JUDGE_CASES, ORACLES, PROFILER_INPUTS, run_cases
 from dojo.profiler import classify, measure, staircase_safe_points
+from dojo.render import md_plain, render_ai
 from dojo.session.learn import resolve_pattern, run_learn
 from dojo.session.state import (
     WorkbenchState,
@@ -37,7 +38,7 @@ from dojo.session.state import (
     save_state,
 )
 from dojo.terminal import make_prompt, patch_console
-from dojo.tutor import TIER_NAMES, ask_tutor, de_markdown, review
+from dojo.tutor import TIER_NAMES, ask_tutor, review
 from dojo.tutor.prompts import DISCUSSION_SYSTEM, build_discussion_prompt
 from dojo.ui import table as ui_table
 
@@ -495,21 +496,15 @@ def _show_review(console: Console, review_json: dict) -> None:
             table.add_row(
                 dim.replace("_", " "),
                 str(entry.get("score", "?")),
-                de_markdown(str(entry.get("comment", ""))),
+                md_plain(str(entry.get("comment", ""))),
             )
     console.print(table)
     if review_json.get("reflection_feedback"):
-        console.print(
-            Panel(
-                de_markdown(str(review_json["reflection_feedback"])),
-                title="On your reflection",
-                border_style="cyan",
-            )
-        )
+        render_ai(console, "On your reflection", str(review_json["reflection_feedback"]))
     if review_json.get("broader_picture"):
-        console.print(Panel(de_markdown(str(review_json["broader_picture"])), title="Broader picture"))
+        render_ai(console, "Broader picture", str(review_json["broader_picture"]))
     if review_json.get("overall_comment"):
-        console.print(f"[italic]{de_markdown(str(review_json['overall_comment']))}[/italic]")
+        render_ai(console, "Overall", str(review_json["overall_comment"]))
 
 
 def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
@@ -621,8 +616,8 @@ def _discuss(conn: sqlite3.Connection, console: Console, backend, problem: sqlit
     prompt = build_discussion_prompt(
         problem["statement"], state.code_path.read_text(), history, question
     )
-    answer = de_markdown(backend.chat(DISCUSSION_SYSTEM, prompt))
-    console.print(Panel(answer, title="tutor — post-solve discussion", border_style="green"))
+    answer = backend.chat(DISCUSSION_SYSTEM, prompt)  # raw markdown (v0.10.3)
+    render_ai(console, "tutor — post-solve discussion", answer)
     conn.execute(
         "UPDATE attempts SET discussion = ? WHERE id = ?",
         (dumps_json(history + [{"user": question, "tutor": answer}]), state.attempt_id),
@@ -795,31 +790,28 @@ def run_day(
                 "— try rephrasing.[/yellow]"
             )
             return
-        cleaned = de_markdown(result.text)
         state.hints.append(
             {
                 "kind": result.kind,
                 "tier": result.tier,
                 "user": question,
-                "hint": cleaned,
+                "hint": result.text,  # raw markdown (v0.10.3); rendered at display
             }
         )
         if result.kind == "ladder":
             state.tier = min(result.tier + 1, 5)
         save_state(state)
         if result.kind == "ladder":
-            console.print(
-                Panel(
-                    cleaned,
-                    title=f"hint · tier {result.tier} ({TIER_NAMES[result.tier]})",
-                    border_style="blue",
-                )
+            render_ai(
+                console,
+                f"tutor · tier {result.tier} — {TIER_NAMES[result.tier]}",
+                result.text,
             )
             console.print(
                 f"[dim]Next hint will be tier {state.tier} ({TIER_NAMES[state.tier]}).[/dim]"
             )
         else:
-            console.print(Panel(cleaned, title="tutor", border_style="blue"))
+            render_ai(console, "tutor", result.text)
 
     prompt = make_prompt(console)
     while True:

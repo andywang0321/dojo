@@ -40,7 +40,7 @@ Inside a session, the prompt shows the commands as **virtual text** right above 
 
 After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), and any question you type opens a post-solve conversation (solutions allowed now). **`done`** closes the session.
 
-**The hint ladder** — each `hint` advances one rung; a vague "stuck" forces rung 0 (articulating the blockage is metacognition). The tutor classifies your query: if you're *exploring* rather than blocked — asking conceptual questions, trade-offs, "is this interview-appropriate?" — it answers directly without advancing tiers, and the panel is simply titled "tutor":
+**The hint ladder** — each question advances one rung when you're stuck; a vague "stuck" forces rung 0 (articulating the blockage is metacognition). The tutor classifies your query: if you're *exploring* rather than blocked — asking conceptual questions, trade-offs, "is this interview-appropriate?" — it answers directly without advancing tiers. Every AI answer renders as **Markdown** in the terminal — headings, lists, and syntax-highlighted code blocks — under a dim title line (`tutor · tier 2 — pattern recognition`):
 
 | Tier | Name | What it may do |
 |------|------|----------------|

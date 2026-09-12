@@ -27,8 +27,8 @@ from dojo.db import (
     update_learn_transcript,
 )
 from dojo.patterns import PATTERNS
+from dojo.render import render_ai
 from dojo.terminal import make_prompt, patch_console
-from dojo.tutor import de_markdown
 from dojo.tutor.prompts import TEACHER_SYSTEM, build_teacher_prompt
 
 LEARN_COMMANDS_HINT = (
@@ -79,15 +79,13 @@ def run_learn(
     def teacher_says(message: str | None = None) -> str:
         if message is not None:
             transcript.append({"role": "student", "text": message})
-        answer = de_markdown(
-            backend.chat(TEACHER_SYSTEM, build_teacher_prompt(pattern, transcript))
-        )
-        transcript.append({"role": "teacher", "text": answer})
+        answer = backend.chat(TEACHER_SYSTEM, build_teacher_prompt(pattern, transcript))
+        transcript.append({"role": "teacher", "text": answer})  # raw markdown
         update_learn_transcript(conn, session_id, transcript)
         return answer
 
     primer = teacher_says()
-    console.print(Panel(primer, title=f"teacher — {pattern}", border_style="blue"))
+    render_ai(console, f"teacher — {pattern}", primer)
 
     while True:
         raw = prompt(
@@ -117,9 +115,7 @@ def run_learn(
                 return {"practice": slug}
             console.print("[dim]Staying in learn mode.[/dim]")
             continue
-        console.print(
-            Panel(teacher_says(raw), title=f"teacher — {pattern}", border_style="blue")
-        )
+        render_ai(console, f"teacher — {pattern}", teacher_says(raw))
 
 
 def _pick_practice_slug(

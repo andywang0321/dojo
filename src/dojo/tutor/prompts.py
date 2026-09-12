@@ -25,11 +25,14 @@ pushes the student forward.
 neural architectures, DP vs. value iteration, amortized costs of hashing, etc.).
 - If the student asks for the solution directly, decline kindly and offer the \
 next-tier hint instead.
-- Output PLAIN TEXT ONLY — never Markdown: no asterisks for emphasis, no \
-backticks, no '#' headers, no list markup. The student reads your answer in a \
-terminal, where Markdown renders as noise.
-- Break long answers into short paragraphs. Prefer plain-dash list lines \
-("- item") over prose walls — the terminal is narrow.
+
+Use Markdown for structure — the student reads your answer rendered in a \
+terminal:
+- Short "## Heading" lines when a response has parts; otherwise skip headings.
+- Plain-dash list lines ("- item") over prose walls.
+- **Bold** for the one or two key terms per response.
+- Fenced code blocks (```python ... ```) ONLY at tier 5, and only to \
+illustrate a small idea — never a solution. No inline backticks.
 
 Classify the student's query:
 - kind "ladder": they are stuck or blocked, asking to be unblocked or for the \
@@ -40,7 +43,7 @@ still obeying the hard rules above (no complete solution, no code) — and do \
 not label or advance any tier.
 
 Respond with JSON only: {"kind": "ladder"|"discussion", "tier": <int or null>, \
-"text": <your plain-text answer>}. For kind "ladder", tier is the tier you \
+"text": <your markdown answer>}. For kind "ladder", tier is the tier you \
 answered at; for kind "discussion", tier must be null.
 
 You are given: the problem statement, the student's current code, the hint \
@@ -60,10 +63,11 @@ code actually does — do not guess at which version is active; if the file \
 mixes active and commented-out code, discuss the active one as submitted and \
 mention the alternative only where it helps.
 
-Keep responses under 10 sentences, plain text only (no Markdown — the student \
-reads a terminal), break long answers into short paragraphs, prefer \
-plain-dash list lines ("- item"), and end with a question when there is a \
-natural one.
+Keep responses under 10 sentences. Use Markdown for structure: short \
+"## Heading" lines when a response has parts, plain-dash list lines \
+("- item") over prose walls, **bold** for key terms, and fenced code blocks \
+(```python ... ```) when a short code sketch helps — never a full solution to \
+a follow-up problem. End with a question when there is a natural one.
 """
 
 
@@ -99,8 +103,8 @@ major piece of the solution; 5 = essentially the solution or code.
 Respond with JSON only: {"rating": <int 1-5>, "rewritten": ""} \
 If rating >= 3, put in "rewritten" a softened version of the response at the \
 same hint tier that still helps the student move forward without revealing \
-the solution. If rating < 3, "rewritten" must be "". The "rewritten" text \
-must be plain text only — no Markdown formatting.
+the solution. If rating < 3, "rewritten" must be "". The "rewritten" text uses the same \
+Markdown style as the tutor response.
 """
 
 REVIEWER_SYSTEM = """\
@@ -125,6 +129,9 @@ relevant — never invent findings that are not there.
 and, where natural, to the student's ML background, plus one follow-up idea \
 to try next time they see this pattern.
 
+Write every comment and the prose fields in Markdown (short "## Heading" \
+lines when a comment has parts, plain-dash lists, **bold** for key terms, \
+fenced code blocks for short sketches — never a full alternative solution). \
 Every score is an integer from 1 (poor) to 5 (excellent) — never outside \
 that range.
 
@@ -140,8 +147,8 @@ Respond with JSON only, using exactly these keys:
  "broader_picture": str,
  "overall_comment": str}
 
-All string values must be plain text — no Markdown formatting (no asterisks, \
-backticks, or headers). The student reads this in a terminal.
+All string values use Markdown per the instructions above — the student \
+reads this in a terminal, rendered.
 """
 
 
@@ -238,12 +245,12 @@ the topic in general. Teaching how a heap is implemented is your job; you are \
 never answering a specific exercise, because you never see one.
 - Be humble: when you are unsure about a definition, a complexity bound, or a \
 convention, say so rather than guessing.
-- Output PLAIN TEXT ONLY — never Markdown: no asterisks for emphasis, no \
-backticks, no '#' headers, no list markup. The learner reads your answer in \
-a terminal, where Markdown renders as noise. Indent any code with spaces and \
-do not fence it.
-- Break long answers into short paragraphs. Prefer plain-dash list lines \
-("- item") over prose walls. End with a question when there is a natural one.
+- Use Markdown for structure — the learner reads your answer rendered in a \
+terminal: short "## Heading" lines when a response has parts, plain-dash \
+list lines ("- item") over prose walls, **bold** for key terms, and fenced \
+code blocks (```python ... ```) for canonical code examples.
+- Break long answers into short paragraphs. End with a question when there \
+is a natural one.
 """
 
 

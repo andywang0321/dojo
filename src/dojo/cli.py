@@ -556,7 +556,7 @@ def _measured_cell(row, axis: str) -> str:
 
 
 def _format_review(review: dict) -> str:
-    from dojo.tutor import de_markdown
+    from dojo.render import md_plain
 
     lines = []
     for dim in (
@@ -572,24 +572,22 @@ def _format_review(review: dict) -> str:
         if isinstance(entry, dict):
             lines.append(
                 f"{dim.replace('_', ' ')}: {entry.get('score', '?')}/5 — "
-                f"{de_markdown(str(entry.get('comment', '')))}"
+                f"{md_plain(str(entry.get('comment', '')))}"
             )
     if review.get("reflection_feedback"):
         lines.append("")
-        lines.append(
-            f"On your reflection: {de_markdown(str(review['reflection_feedback']))}"
-        )
+        lines.append(f"## On your reflection\n\n{review['reflection_feedback']}")
     if review.get("broader_picture"):
         lines.append("")
-        lines.append(f"Broader picture: {de_markdown(str(review['broader_picture']))}")
+        lines.append(f"## Broader picture\n\n{review['broader_picture']}")
     if review.get("overall_comment"):
         lines.append("")
-        lines.append(f"Overall: {de_markdown(str(review['overall_comment']))}")
+        lines.append(f"## Overall\n\n{review['overall_comment']}")
     return "\n".join(lines)
 
 
 def _cmd_show(args) -> int:
-    from dojo.tutor import de_markdown
+    from dojo.render import md_plain, render_ai
 
     console = Console()
     with connect(DB_PATH) as conn:
@@ -633,8 +631,8 @@ def _cmd_show(args) -> int:
         for h in hints:
             hint_table.add_row(
                 str(h.get("tier", "?")),
-                de_markdown(str(h.get("user", ""))),
-                de_markdown(str(h.get("hint", ""))),
+                md_plain(str(h.get("user", ""))),
+                md_plain(str(h.get("hint", ""))),
             )
         console.print(hint_table)
     if row["code"]:
@@ -657,18 +655,14 @@ def _cmd_show(args) -> int:
             )
     review = loads_json(row["review"], {})
     if review:
-        console.print(Panel(_format_review(review), title="AI review", border_style="green"))
+        render_ai(console, "AI review", _format_review(review))
     if row["reflection"]:
         console.print(Panel(row["reflection"], title="Reflection", border_style="cyan"))
     discussion = loads_json(row["discussion"], [])
     if discussion:
-        lines = []
         for entry in discussion:
-            lines.append(f"[bold]you:[/bold] {entry.get('user', '')}")
-            lines.append(f"[bold]tutor:[/bold] {entry.get('tutor', '')}")
-        console.print(
-            Panel("\n\n".join(lines), title="Post-solve discussion", border_style="green")
-        )
+            console.print(f"[bold]you:[/bold] {entry.get('user', '')}")
+            render_ai(console, "tutor", str(entry.get("tutor", "")))
     return 0
 
 
