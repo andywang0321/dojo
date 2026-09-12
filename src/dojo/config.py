@@ -14,6 +14,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src"
 DATA_DIR = REPO_ROOT / "data"
+#: dojo's own Python (the uv-managed venv) — workbench shebangs and the
+#: generated IDE config point at this, so editors/debuggers/linters know
+#: which interpreter user code belongs to (v0.10.6).
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 
 
 def _default_workbench() -> Path:

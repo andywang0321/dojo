@@ -383,9 +383,12 @@ def test_new_session_starts_from_blank_template(db, fake_console, monkeypatch, t
     assert run_day(db, fake_console(["quit"]), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
 
     content = path.read_text()
+    assert content.startswith("#!")  # the venv shebang answers 'which Python'
+    assert ".venv/bin/python" in content.splitlines()[0]
     assert "raise NotImplementedError" in content
     assert "def is_valid(s: str) -> bool:" in content  # template stub signature
     assert "pairs = {" not in content  # the old solution is gone
+    assert (workbench / ".vscode" / "settings.json").exists()  # generated workspace
     row = db.execute("SELECT code FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert "raise NotImplementedError" in row["code"]  # blank start is recorded
 

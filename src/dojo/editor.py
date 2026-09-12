@@ -42,6 +42,10 @@ GUI_EDITORS = {
     "fleet",
 }
 
+#: Editors that are happiest opening the workbench *folder* (their project
+#: config lives in .vscode/) rather than a bare file (v0.10.6).
+FOLDER_EDITORS = {"code", "codium", "cursor", "windsurf"}
+
 TERMINAL_EDITORS = {
     "nvim",
     "vim",
@@ -108,11 +112,61 @@ def _tmux_command(cmd: str, path: str) -> list[str] | None:
     return ["tmux", "new-window", f"{cmd} {shlex.quote(path)}"]
 
 
+def open_path(cmd: str, path: Path) -> tuple[Path, str]:
+    """What to open, and what to tell the user: VSCode-family editors get
+    the workbench *folder* (its generated .vscode/ config makes the
+    debugger work without knowing the repo exists); everyone else gets
+    the file."""
+    if _first_word(cmd) in FOLDER_EDITORS:
+        return path.parent, (
+            f"Opened the workbench folder with {_first_word(cmd)} — the "
+            "generated .vscode config points the debugger at dojo's Python. "
+            "The dojo prompt stays live."
+        )
+    return path, (
+        f"Opened {path.name} with {_first_word(cmd)} — the dojo prompt stays live."
+    )
+
+
+def ensure_ide_config(workbench_dir: Path, venv_python: Path | None = None) -> None:
+    """Generate the self-contained VSCode workspace inside the workbench
+    (v0.10.6): opening this folder — or double-clicking the generated
+    workbench.code-workspace — wires the Python extension + debugger to
+    dojo's venv with zero repo knowledge. Idempotent; rewritten each
+    session so path moves self-heal. Uses the runtime config when paths
+    are not injected (tests inject tmp paths)."""
+    from dojo.config import VENV_PYTHON as runtime_venv
+
+    venv_python = venv_python or runtime_venv
+    vscode = workbench_dir / ".vscode"
+    vscode.mkdir(parents=True, exist_ok=True)
+    interpreter = str(venv_python)
+    (vscode / "settings.json").write_text(
+        '{\n  // dojo-generated: user code in this folder runs on dojo\'s venv.\n'
+        f'  "python.defaultInterpreterPath": "{interpreter}"\n'
+        "}\n"
+    )
+    (vscode / "launch.json").write_text(
+        '{\n  "version": "0.2.0",\n  "configurations": [\n    {\n'
+        '      "name": "dojo: debug the active workbench file",\n'
+        '      "type": "debugpy",\n      "request": "launch",\n'
+        '      "program": "${file}",\n'
+        '      "console": "integratedTerminal",\n      "justMyCode": true\n'
+        "    }\n  ]\n}\n"
+    )
+    (workbench_dir / "workbench.code-workspace").write_text(
+        '{\n  // dojo-generated: open this file in VSCode to debug workbench code.\n'
+        '  "folders": [{"path": "."}],\n'
+        '  "settings": {"python.defaultInterpreterPath": "%s"}\n}\n' % interpreter
+    )
+
+
 def launch(path: Path) -> str:
     """Open ``path`` in the configured editor without blocking the dojo
     prompt, when the environment allows it. Returns a human message."""
     cmd = editor_command()
-    args = shlex.split(cmd) + [str(path)]
+    target, message = open_path(cmd, path)
+    args = shlex.split(cmd) + [str(target)]
 
     if is_gui_editor(cmd):
         subprocess.Popen(
@@ -121,7 +175,7 @@ def launch(path: Path) -> str:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        return f"Opened {path.name} with {_first_word(cmd)} — the dojo prompt stays live."
+        return message
 
     if is_terminal_editor(cmd):
         tmux_cmd = _tmux_command(cmd, str(path))

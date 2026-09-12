@@ -24,9 +24,9 @@ from rich.table import Table
 from rich.text import Text
 
 from dojo import complexity, scheduler, static
-from dojo.config import WORKBENCH_DIR
+from dojo.config import VENV_PYTHON, WORKBENCH_DIR
 from dojo.db import dumps_json, get_or_create_user, loads_json, now
-from dojo.editor import launch as launch_editor
+from dojo.editor import ensure_ide_config, launch as launch_editor
 from dojo.judge import JUDGE_CASES, ORACLES, PROFILER_INPUTS, run_cases
 from dojo.profiler import classify, measure, staircase_safe_points
 from dojo.render import md_plain, render_ai
@@ -56,9 +56,12 @@ TEMPLATE_STUB_COMMENT = (
 def _render_template(problem: sqlite3.Row) -> str:
     """The blank-template stub for a problem, per its stored signature JSON:
     a plain string renders one function; {"functions": {...}} renders several;
-    {"methods": {...}} renders a class."""
+    {"methods": {...}} renders a class. The file opens with a shebang pointing
+    at dojo's venv — editors and debuggers read it to answer 'which Python'
+    (v0.10.6); it self-heals because every new session rewrites the file."""
+    shebang = f"#!{VENV_PYTHON}\n"
     signature = loads_json(problem["signature"], None)
-    header = f'"""{problem["statement"]}"""\n\n\n'
+    header = shebang + "\n" + f'"""{problem["statement"]}"""\n\n\n'
     if isinstance(signature, dict) and "methods" in signature:
         lines = [
             f"class {problem['function_name']}:",
@@ -755,6 +758,10 @@ def run_day(
     # workbench. A session that resumes existing state (crash recovery)
     # keeps whatever is in the file.
     _write_template(problem, force=is_new_session)
+    # The workbench carries its own IDE workspace (v0.10.6): a generated
+    # .vscode/ + code-workspace pointing at dojo's venv, so opening the
+    # folder in VSCode debugs user code without knowing the repo exists.
+    ensure_ide_config(WORKBENCH_DIR)
     if warmup:
         console.print(
             Panel(
