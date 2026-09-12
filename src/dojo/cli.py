@@ -202,6 +202,16 @@ def _cmd_setup(args) -> int:
     return 0
 
 
+def _cmd_update(args) -> int:
+    """Pull the latest dojo and refresh dependencies (v0.10.1). The same
+    fast-forward runs automatically on every other CLI entry."""
+    from dojo.updater import update_dojo
+
+    console = Console()
+    console.print(update_dojo(console, force=args.force))
+    return 0
+
+
 def _cmd_list(args) -> int:
     console = Console()
     with connect(DB_PATH) as conn:
@@ -1000,6 +1010,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_user.add_argument("name", nargs="?", help="the user to switch to")
     p_user.set_defaults(func=_cmd_user)
 
+    p_update = sub.add_parser("update", help="pull the latest dojo and refresh dependencies (auto-runs on start)")
+    p_update.add_argument(
+        "--force", action="store_true", help="discard local changes before pulling"
+    )
+    p_update.set_defaults(func=_cmd_update)
+
     p_setup = sub.add_parser("setup", help="re-run the setup wizard (key, name, PATH)")
     p_setup.add_argument("--user", help="register this user without prompting")
     p_setup.add_argument("--skip-key", action="store_true", help="don't prompt for an API key")
@@ -1134,6 +1150,10 @@ def main(argv: list[str] | None = None) -> int:
     args = PARSER.parse_args(argv)
     if args.command is None:
         return _print_help()
+    if args.command not in ("setup", "update"):
+        from dojo.updater import auto_update
+
+        auto_update()
     console = Console()
     if args.command != "setup":
         ensure_seeded(DB_PATH)

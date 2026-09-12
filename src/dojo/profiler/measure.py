@@ -40,7 +40,12 @@ def main():
     base = tracemalloc.get_traced_memory()[0]
     before = tracemalloc.take_snapshot()
     t0 = time.perf_counter()
-    fn(*args)
+    real_stdout = sys.stdout
+    sys.stdout = sys.stderr  # user prints must not corrupt the JSON channel
+    try:
+        fn(*args)
+    finally:
+        sys.stdout = real_stdout
     elapsed_ms = (time.perf_counter() - t0) * 1e3
     after = tracemalloc.take_snapshot()
     _, peak = tracemalloc.get_traced_memory()

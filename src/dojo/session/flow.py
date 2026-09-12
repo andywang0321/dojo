@@ -36,7 +36,7 @@ from dojo.session.state import (
     retire_state,
     save_state,
 )
-from dojo.terminal import make_prompt
+from dojo.terminal import make_prompt, patch_console
 from dojo.tutor import TIER_NAMES, ask_tutor, de_markdown, review
 from dojo.tutor.prompts import DISCUSSION_SYSTEM, build_discussion_prompt
 from dojo.ui import table as ui_table
@@ -44,14 +44,10 @@ from dojo.ui import table as ui_table
 GENERATED_CASES = 30
 
 COMMANDS_HINT = (
-    "[dim]Commands: [b]open[/b] · [b]check[/b] · [b]hint <text>[/b] · "
-    "[b]learn[/b] · [b]submit[/b] · [b]quit[/b][/dim]"
+    "Type a question, or a command: open · check · learn · submit · quit"
 )
 
-POST_COMMANDS_HINT = (
-    "[dim]Post-solve: [b]polish[/b] (re-grade edits) · "
-    "[b]discuss <question>[/b] · [b]done[/b][/dim]"
-)
+POST_COMMANDS_HINT = "Post-solve: polish (re-grade edits) · done — or just ask a question"
 
 TEMPLATE_STUB_COMMENT = (
     "# Solve it. Use `dojo check` / `dojo hint` from a second terminal."
@@ -635,20 +631,23 @@ def _discuss(conn: sqlite3.Connection, console: Console, backend, problem: sqlit
 
 
 def _post_solve_loop(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
-    """After review + reflection: polish (re-grade edits), discuss (free
-    post-solve chat), done (retire)."""
+    """After review + reflection: polish (re-grade edits), done (retire) —
+    and any other input is a discussion question (v0.10.1: the `discuss`
+    command is gone; bare questions reach the tutor here too)."""
     prompt = make_prompt(console)
     while True:
-        console.print(POST_COMMANDS_HINT)
-        raw = prompt("[bold cyan]dojo ›[/bold cyan] ").strip()
+        raw = prompt(
+            "[bold cyan]dojo ›[/bold cyan] ",
+            hint=f"[dim]{POST_COMMANDS_HINT}[/dim]",
+        ).strip()
+        if not raw:
+            continue
         if raw in ("done", "quit", "q"):
             return
         if raw in ("polish", "p"):
             _polish(conn, console, backend, problem, state)
-        elif raw.startswith("discuss "):
-            _discuss(conn, console, backend, problem, state, raw[len("discuss ") :].strip())
         else:
-            console.print("[dim]Unknown command.[/dim]")
+            _discuss(conn, console, backend, problem, state, raw)
 
 
 def _persist_abandoned(conn: sqlite3.Connection, state: WorkbenchState, console: Console, message: str) -> None:
@@ -719,6 +718,9 @@ def run_day(
     warmup: bool = False,
     card: sqlite3.Row | None = None,
 ) -> str:
+    # Prints between prompts route through patch_stdout on TTYs, so the
+    # fullscreen prompt's repaint can't visually truncate them (v0.10.1).
+    console = patch_console(console)
     problem = _get_problem(conn, slug)
     if problem is None:
         console.print(f"[red]Unknown problem '{slug}'. Try `dojo list`.[/red]")
@@ -821,8 +823,10 @@ def run_day(
 
     prompt = make_prompt(console)
     while True:
-        console.print(COMMANDS_HINT)
-        raw = prompt("[bold cyan]dojo ›[/bold cyan] ").strip()
+        raw = prompt(
+            "[bold cyan]dojo ›[/bold cyan] ",
+            hint=f"[dim]{COMMANDS_HINT}[/dim]",
+        ).strip()
         if not raw:
             continue
         cmd, _, rest = raw.partition(" ")
@@ -843,8 +847,6 @@ def run_day(
             _check(console, problem, state.code_path)
         elif cmd in ("o", "open") and not rest:
             console.print(launch_editor(state.code_path))
-        elif cmd in ("h", "hint"):
-            do_hint(rest or "I'm stuck")
         elif cmd in ("l", "learn"):
             if warmup:
                 console.print(
@@ -927,8 +929,15 @@ def run_day(
                 return "solved"
         else:
             # Bare questions — and command words with extra text ("check my
-            # solution...") — are hints, never "Unknown command".
-            do_hint(raw)
+            # solution...") — are hints, never "Unknown command" (v0.10.1:
+            # the `hint` command itself is gone; a leading "hint " prefix is
+            # still stripped for muscle memory).
+            question = raw
+            if raw.lower() in ("h", "hint"):
+                question = "I'm stuck"
+            elif raw.lower().startswith("hint "):
+                question = raw[5:].strip()
+            do_hint(question)
 
 
 def run_warmups(

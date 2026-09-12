@@ -37,6 +37,18 @@ except ImportError:  # pragma: no cover - dojo is always importable here
     CHECKERS = {}
 
 
+def isolated(call):
+    """Run user code with its stdout redirected to stderr: the protocol
+    channel (stdout JSON) must never be polluted by prints (a real crash:
+    a `print` in the solution corrupted the result JSON)."""
+    real = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        return call()
+    finally:
+        sys.stdout = real
+
+
 def canonical(value):
     """Deep-sort lists (and dicts by key) for order-insensitive compare."""
     if isinstance(value, list):
@@ -86,7 +98,7 @@ def main():
         cases = json.load(f)
     spec = importlib.util.spec_from_file_location("solution", "solution.py")
     solution = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(solution)
+    isolated(lambda: spec.loader.exec_module(solution))
     results = []
     for i, case in enumerate(cases):
         label = case.get("label", f"case {i}")
@@ -95,15 +107,17 @@ def main():
         t0 = time.perf_counter()
         try:
             if "ops" in case:
-                obj = getattr(solution, function_name)(*case.get("ctor_args", []))
-                got = [getattr(obj, method)(*args) for method, *args in case["ops"]]
+                obj = isolated(
+                    lambda: getattr(solution, function_name)(*case.get("ctor_args", []))
+                )
+                got = isolated(lambda: [getattr(obj, method)(*args) for method, *args in case["ops"]])
             else:
                 fn = getattr(solution, function_name)
-                got = fn(*case["args"])
+                got = isolated(lambda: fn(*case["args"]))
             if case.get("predicate"):
-                passed = CHECKERS[case["predicate"]](solution, got, case["args"])
-            elif "ops" in case:
-                passed = check_equal(got, expected, mode)
+                passed = isolated(
+                    lambda: CHECKERS[case["predicate"]](solution, got, case["args"])
+                )
             else:
                 passed = check_equal(got, expected, mode)
             results.append(
@@ -116,7 +130,7 @@ def main():
                     "elapsed_ms": (time.perf_counter() - t0) * 1000,
                 }
             )
-        except Exception as exc:  # noqa: BLE001 - the harness must survive anything
+        except BaseException as exc:  # noqa: BLE001 - SystemExit and friends included
             results.append(
                 {
                     "label": label,

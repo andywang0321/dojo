@@ -5,6 +5,16 @@ otherwise — which is what tests exercise via FakeConsole.
 prompt_toolkit renders no rich markup of its own, so TTY prompts are
 converted to ANSI escapes first (`_to_ansi`) — the `[bold cyan]dojo ›`
 styling survives instead of being stripped to plain text (v0.8.1).
+
+v0.10.1:
+- ``hint`` renders as prompt_toolkit *virtual text* (the bottom toolbar) —
+  the command list no longer scrolls as a printed line; on non-TTYs it is
+  printed above the prompt so tests and pipes still see it.
+- ``patch_console`` wraps a rich Console so prints between prompts route
+  through prompt_toolkit.patch_stdout: output written while the fullscreen
+  prompt repaints can otherwise be visually truncated (the reported
+  "hist" cut-offs — the debug log proved those responses were complete,
+  so the loss was in the terminal repaint, not the data).
 """
 
 from __future__ import annotations
@@ -26,10 +36,16 @@ def _to_ansi(text: str) -> str:
     return capture.get()
 
 
+def _is_tty() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def make_prompt(console):
-    def prompt(text: str, default: str | None = None) -> str:
+    def prompt(text: str, default: str | None = None, hint: str | None = None) -> str:
         global _session
-        if not sys.stdin.isatty():
+        if not _is_tty():
+            if hint:
+                console.print(hint)
             return console.input(text)
         try:
             from prompt_toolkit import PromptSession
@@ -38,10 +54,34 @@ def make_prompt(console):
             if _session is None:
                 _session = PromptSession()
             # ``default`` prefills the answer (editing a previous response);
-            # the non-TTY path ignores it — tests and piped sessions re-ask
-            # plainly, and the confirm screen shows the previous value.
-            return _session.prompt(ANSI(_to_ansi(text)), default=default)
+            # ``hint`` is virtual text in the bottom toolbar — visible, but
+            # it never scrolls or takes a line of output.
+            kwargs = {}
+            if hint is not None:
+                kwargs["bottom_toolbar"] = lambda: ANSI(_to_ansi(hint))
+            return _session.prompt(ANSI(_to_ansi(text)), default=default, **kwargs)
         except Exception:  # noqa: BLE001 - fall back to the plain prompt
             return console.input(text)
 
     return prompt
+
+
+def patch_console(console):
+    """Wrap a rich Console for printing *between* interactive prompts:
+    prints route through prompt_toolkit.patch_stdout so the fullscreen
+    prompt's repaint can't visually truncate them (v0.10.1). No-op for
+    non-TTYs — tests and pipes keep the plain path."""
+    if not _is_tty():
+        return console
+
+    from prompt_toolkit import patch_stdout
+
+    class _Patched:
+        def __getattr__(self, name):
+            return getattr(console, name)
+
+        def print(self, *args, **kwargs):
+            with patch_stdout(raw=True):
+                console.print(*args, **kwargs)
+
+    return _Patched()

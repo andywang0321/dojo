@@ -1,0 +1,7 @@
+{
+  // The VSCode Python extension + debugger use dojo's own venv (created by
+  // `uv run`), never a system Python. Install Python tooling (debugpy,
+  // ipykernel, …) into the venv — it lives in the repo's .venv/, which git
+  // ignores, so updates stay clean.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+}

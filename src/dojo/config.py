@@ -14,7 +14,17 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src"
 DATA_DIR = REPO_ROOT / "data"
-WORKBENCH_DIR = REPO_ROOT / "workbench"
+
+
+def _default_workbench() -> Path:
+    """Per-user scratch OUTSIDE the repo (v0.10.1): the workbench is where
+    VSCode and debugger tooling attach (ipykernel installs, debug state),
+    and it must never collide with git or require `git pull --force`."""
+    base = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
+    return Path(base) / "dojo" / "workbench"
+
+
+WORKBENCH_DIR = Path(os.environ.get("DOJO_WORKBENCH_DIR", str(_default_workbench())))
 PROBLEM_OVERRIDES = REPO_ROOT / "data" / "problem_overrides.json"
 #: The seed corpus: one problem per file, prompt in the module docstring,
 #: organized by pattern directory (imported by dojo.bank).

@@ -27,13 +27,12 @@ from dojo.db import (
     update_learn_transcript,
 )
 from dojo.patterns import PATTERNS
-from dojo.terminal import make_prompt
+from dojo.terminal import make_prompt, patch_console
 from dojo.tutor import de_markdown
 from dojo.tutor.prompts import TEACHER_SYSTEM, build_teacher_prompt
 
 LEARN_COMMANDS_HINT = (
-    "[dim]Learn mode: type a question · [b]practice[/b] (hand off to a problem) · "
-    "[b]done[/b][/dim]"
+    "Type a question · practice (hand off to a problem) · done"
 )
 
 EXIT_WORDS = ("done", "quit", "q")
@@ -63,6 +62,7 @@ def run_learn(
     student accepts a handoff (the caller starts a fresh solve session on
     that slug), else {"practice": None} on graceful exit."""
     user_id = get_or_create_user(conn, user_name)
+    console = patch_console(console)  # prints can't be truncated by prompt repaints
     transcript: list[dict] = []
     session_id = record_learn_session(conn, user_id, pattern, transcript)
     prompt = make_prompt(console)
@@ -90,8 +90,10 @@ def run_learn(
     console.print(Panel(primer, title=f"teacher — {pattern}", border_style="blue"))
 
     while True:
-        console.print(LEARN_COMMANDS_HINT)
-        raw = prompt("[bold cyan]learn ›[/bold cyan] ").strip()
+        raw = prompt(
+            "[bold cyan]learn ›[/bold cyan] ",
+            hint=f"[dim]{LEARN_COMMANDS_HINT}[/dim]",
+        ).strip()
         if not raw:
             continue
         if raw in EXIT_WORDS:

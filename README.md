@@ -36,9 +36,9 @@ dojo <slug>                 # the same, on a specific problem
 dojo warmup                 # due retrievals only
 ```
 
-Inside a session the prompt always lists the commands: `open` (re-open your editor), `check` (run the visible tests + advisory lint/complexity findings), `hint <what you're stuck on>` (one rung up the ladder), `learn` (park this attempt and study its pattern — or another topic — with the teacher), `submit` (judge → state your complexity, with a double-check step that lets you redo either answer → measure → reflect → review), `quit` (saves your progress; the next session starts fresh from a blank template). A bare question — with or without the `hint` prefix, even starting with another command word — reaches the tutor directly. Every session becomes one attempt row in your history.
+Inside a session, the prompt shows the commands as **virtual text** right above your input (they never scroll): `open`, `check`, `learn`, `submit`, `quit`. Anything else you type is a question to the tutor — the `hint` command is gone; you just ask. Every session becomes one attempt row in your history.
 
-After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), **`discuss <question>`** opens a post-solve conversation (solutions allowed now), **`done`** closes the session.
+After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), and any question you type opens a post-solve conversation (solutions allowed now). **`done`** closes the session.
 
 **The hint ladder** — each `hint` advances one rung; a vague "stuck" forces rung 0 (articulating the blockage is metacognition). The tutor classifies your query: if you're *exploring* rather than blocked — asking conceptual questions, trade-offs, "is this interview-appropriate?" — it answers directly without advancing tiers, and the panel is simply titled "tutor":
 
@@ -95,5 +95,9 @@ The daily pick follows the **NeetCode 150 roadmap** (`data/roadmap.toml`, vendor
 make sync      # install dojo into the project venv (uv sync)
 make test      # run the offline test suite (uv run pytest)
 ```
+
+**Updating:** every `dojo` run fast-forwards the repo and refreshes dependencies automatically (nothing is printed unless something changed). `dojo update` does it on demand; `dojo update --force` discards local changes. `DOJO_NO_AUTO_UPDATE=1` opts out.
+
+**Your workbench and VSCode:** sessions edit files in `~/.local/share/dojo/workbench/` — outside the repo, so editor/debugger tooling never collides with git. To use the VSCode debugger: open the dojo repo as a folder in VSCode and the checked-in `.vscode/` config wires the Python debugger to dojo's own venv; open the workbench file and pick "dojo: debug the active workbench file" (install any Python tooling like ipykernel into the venv — git ignores it, and updates stay clean).
 
 The bank seeds from `problems/**/*.py` on every run (additive — your data is never reset). Every live AI exchange (prompts + raw responses) is appended to the gitignored debug log at `data/logs/dojo.log` for post-hoc debugging; it clears automatically on major version bumps. Technical docs live in `docs/` (architecture, grading, retention, curation, development); delivered and planned stages live in `roadmap/`.

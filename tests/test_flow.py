@@ -168,9 +168,9 @@ def test_open_command_and_commands_hint(db, fake_console, monkeypatch, tmp_path)
     # No auto-open: the only launch comes from the explicit `open` command.
     assert len(calls) == 1 and calls[0].endswith("valid_parentheses.py")
     assert "opened in a window" in console.text
-    # The command list appears after output, before each prompt.
-    assert "Commands:" in console.text
-    assert console.text.count("Commands:") >= 1
+    # The command list appears after output, before each prompt (virtual
+    # text on TTYs; printed on non-TTYs — the path tests exercise).
+    assert "Type a question, or a command" in console.text
 
 
 def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
@@ -413,7 +413,7 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
             "O(n) stack",
             "",
             "n",  # no second review
-            "discuss how else could I solve this?",
+            "how else could I solve this?",
             "done",
         ],
         actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
@@ -594,7 +594,7 @@ def test_discuss_sees_submitted_code(db, fake_console, monkeypatch, tmp_path):
             "O(n) stack",
             "",
             "The key insight.",
-            "discuss which is better?",
+            "which is better?",
             "done",
         ],
         actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
