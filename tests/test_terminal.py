@@ -56,8 +56,7 @@ def test_prompt_fallback_logs_and_prints_hint(monkeypatch, tmp_path):
     prints the hint, and degrades to plain input."""
     import json
 
-    from dojo import terminal
-    from dojo import debuglog
+    from dojo import debuglog, terminal
 
     class BrokenSession:
         def prompt(self, *args, **kwargs):
@@ -124,7 +123,7 @@ def test_prompt_omits_default_when_none(monkeypatch, capsys):
 
     from rich.console import Console
 
-    import dojo.terminal as terminal
+    from dojo import terminal
 
     captured = {}
 
@@ -140,9 +139,43 @@ def test_prompt_omits_default_when_none(monkeypatch, capsys):
 
     assert prompt("Q: ") == "answer"  # no default, no hint
     assert "default" not in captured["kwargs"]
-    assert "bottom_toolbar" not in captured["kwargs"]
+    assert "placeholder" not in captured["kwargs"]
 
     assert prompt("Q: ", default="previous") == "answer"
     assert captured["kwargs"]["default"] == "previous"
     assert prompt("Q: ", hint="[dim]hint[/dim]") == "answer"
-    assert "bottom_toolbar" in captured["kwargs"]
+    assert "placeholder" in captured["kwargs"]
+
+
+def test_hint_is_inline_placeholder(monkeypatch, capsys):
+    """The command hint renders as prompt_toolkit *placeholder* text —
+    in-line right after the cursor while the input is empty, vanishing on
+    the first keystroke (prompt_toolkit's own placeholder behavior). It
+    must never be the bottom toolbar (its own line below the input) or
+    rprompt (right-aligned)."""
+    import io
+
+    from prompt_toolkit.formatted_text import to_formatted_text
+    from prompt_toolkit.formatted_text.utils import fragment_list_to_text
+    from rich.console import Console
+
+    from dojo import terminal
+
+    captured = {}
+
+    class RecordingSession:
+        def prompt(self, message, **kwargs):
+            captured["kwargs"] = kwargs
+            return "answer"
+
+    monkeypatch.setattr(terminal, "_is_tty", lambda: True)
+    monkeypatch.setattr(terminal, "_session", RecordingSession())
+    console = Console(file=io.StringIO(), force_terminal=False, width=100)
+
+    terminal.make_prompt(console)("Q: ", hint="[dim]open · check[/dim]")
+
+    assert "placeholder" in captured["kwargs"]
+    assert "bottom_toolbar" not in captured["kwargs"]
+    assert "rprompt" not in captured["kwargs"]
+    plain = fragment_list_to_text(to_formatted_text(captured["kwargs"]["placeholder"]))
+    assert "open · check" in plain  # the hint survives the ANSI conversion

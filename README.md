@@ -36,7 +36,7 @@ dojo <slug>                 # the same, on a specific problem
 dojo warmup                 # due retrievals only
 ```
 
-Inside a session, the prompt shows the commands as **virtual text** right above your input (they never scroll): `open`, `check`, `learn`, `submit`, `quit`. Anything else you type is a question to the tutor — the `hint` command is gone; you just ask. Every session becomes one attempt row in your history.
+Inside a session, the prompt shows the commands as **virtual text** right after your cursor — they vanish the moment you type: `open`, `check`, `learn`, `submit`, `quit`. Anything else you type is a question to the tutor — the `hint` command is gone; you just ask. Every session becomes one attempt row in your history.
 
 After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), and any question you type opens a post-solve conversation (solutions allowed now). **`done`** closes the session.
 

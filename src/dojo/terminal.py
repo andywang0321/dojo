@@ -7,14 +7,21 @@ converted to ANSI escapes first (`_to_ansi`) — the `[bold cyan]dojo ›`
 styling survives instead of being stripped to plain text (v0.8.1).
 
 v0.10.1:
-- ``hint`` renders as prompt_toolkit *virtual text* (the bottom toolbar) —
-  the command list no longer scrolls as a printed line; on non-TTYs it is
-  printed above the prompt so tests and pipes still see it.
+- ``hint`` renders as prompt_toolkit *virtual text* — the command list no
+  longer scrolls as a printed line; on non-TTYs it is printed above the
+  prompt so tests and pipes still see it.
 - ``patch_console`` wraps a rich Console so prints between prompts route
   through prompt_toolkit.patch_stdout: output written while the fullscreen
   prompt repaints can otherwise be visually truncated (the reported
   "hist" cut-offs — the debug log proved those responses were complete,
   so the loss was in the terminal repaint, not the data).
+
+v0.10.12:
+- ``hint`` renders as the prompt's *placeholder*: in-line text right after
+  the cursor, shown only while the input is empty and vanishing on the
+  first keystroke. Placement history: bottom toolbar (its own line below
+  the input) → rprompt (right-aligned on the line) → placeholder (in-line
+  at the cursor — the wanted spot).
 """
 
 from __future__ import annotations
@@ -54,10 +61,12 @@ def make_prompt(console):
             if _session is None:
                 _session = PromptSession()
             # ``default`` prefills the answer (editing a previous response);
-            # ``hint`` is virtual text: rendered right-aligned ON the input
-            # line itself (rprompt) — the bottom toolbar proved unreliable
-            # in some terminals (it never rendered, silently), while the
-            # input line is the region every terminal renders for sure.
+            # ``hint`` is the prompt's placeholder (v0.10.12): prompt_toolkit
+            # renders it in-line right after the cursor and only while the
+            # buffer is empty, so the first keystroke hides it — the bottom
+            # toolbar parked it on its own line below the input and the
+            # rprompt detour right-aligned it; in-line at the cursor is the
+            # wanted spot.
             # NOTE (v0.10.10): prompt_toolkit's prompt(default=None) raises
             # TypeError — default must be OMITTED, never passed as None. The
             # silent fallback hid this behind every session prompt (arrow
@@ -67,11 +76,7 @@ def make_prompt(console):
             if default is not None:
                 kwargs["default"] = default
             if hint is not None:
-                # The bottom toolbar is the natural virtual-text spot: it
-                # renders LEFT-ALIGNED on its own line under the input,
-                # never scrolls, and vanishes on narrow geometry — the
-                # earlier toolbar "failure" was actually the fallback bug.
-                kwargs["bottom_toolbar"] = lambda: ANSI(_to_ansi(hint))
+                kwargs["placeholder"] = ANSI(_to_ansi(hint))
             return _session.prompt(ANSI(_to_ansi(text)), **kwargs)
         except Exception as exc:  # noqa: BLE001 - degrade, but never silently
             from dojo import debuglog
