@@ -21,6 +21,40 @@ from rich.panel import Panel
 
 CODE_THEME = "monokai"
 
+REVIEW_DIMS = (
+    "correctness",
+    "approach_quality",
+    "style_idiom",
+    "naming",
+    "edge_cases",
+    "complexity_claim_check",
+    "complexity_reasoning",
+)
+
+
+def review_markdown(review: dict) -> str:
+    """The rubric as prose markdown (v0.10.11): one "## Dimension — score"
+    heading per rubric entry with the comment rendered as-is (markdown
+    preserved — the old table flattened comments into one narrow column
+    and produced wall-of-newline artifacts). Prose fields follow."""
+    lines = []
+    for dim in REVIEW_DIMS:
+        entry = review.get(dim, {})
+        if not isinstance(entry, dict):
+            continue
+        score = entry.get("score", "?")
+        comment = str(entry.get("comment", "")).strip()
+        lines.append(f"## {dim.replace('_', ' ').title()} — {score}/5")
+        if comment:
+            lines.append(comment)
+    if review.get("reflection_feedback"):
+        lines.append(f"## On your reflection\n\n{review['reflection_feedback']}")
+    if review.get("broader_picture"):
+        lines.append(f"## Broader picture\n\n{review['broader_picture']}")
+    if review.get("overall_comment"):
+        lines.append(f"## Overall\n\n{review['overall_comment']}")
+    return "\n\n".join(lines)
+
 
 def md_plain(text: str, width: int = 100) -> str:
     """Render markdown to plain text (no ANSI) — deterministic, for table

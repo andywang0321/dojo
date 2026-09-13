@@ -31,7 +31,7 @@ from dojo.render import render_ai
 from dojo.terminal import confirm_typo, make_prompt, patch_console
 from dojo.tutor.prompts import TEACHER_SYSTEM, build_teacher_prompt
 
-LEARN_COMMANDS_HINT = "practice (hand off to a problem) · done — or ask"
+LEARN_COMMANDS_HINT = "Ask a question, or: practice (hand off to a problem) · done"
 
 EXIT_WORDS = ("done", "quit", "q")
 

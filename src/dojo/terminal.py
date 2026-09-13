@@ -67,7 +67,11 @@ def make_prompt(console):
             if default is not None:
                 kwargs["default"] = default
             if hint is not None:
-                kwargs["rprompt"] = ANSI(_to_ansi(hint))
+                # The bottom toolbar is the natural virtual-text spot: it
+                # renders LEFT-ALIGNED on its own line under the input,
+                # never scrolls, and vanishes on narrow geometry — the
+                # earlier toolbar "failure" was actually the fallback bug.
+                kwargs["bottom_toolbar"] = lambda: ANSI(_to_ansi(hint))
             return _session.prompt(ANSI(_to_ansi(text)), **kwargs)
         except Exception as exc:  # noqa: BLE001 - degrade, but never silently
             from dojo import debuglog

@@ -657,37 +657,6 @@ def _measured_cell(row, axis: str) -> str:
     return f"{cls} (r²={round(r2, 3)})" if r2 is not None else cls
 
 
-def _format_review(review: dict) -> str:
-    from dojo.render import md_plain
-
-    lines = []
-    for dim in (
-        "correctness",
-        "approach_quality",
-        "style_idiom",
-        "naming",
-        "edge_cases",
-        "complexity_claim_check",
-        "complexity_reasoning",
-    ):
-        entry = review.get(dim, {})
-        if isinstance(entry, dict):
-            lines.append(
-                f"{dim.replace('_', ' ')}: {entry.get('score', '?')}/5 — "
-                f"{md_plain(str(entry.get('comment', '')))}"
-            )
-    if review.get("reflection_feedback"):
-        lines.append("")
-        lines.append(f"## On your reflection\n\n{review['reflection_feedback']}")
-    if review.get("broader_picture"):
-        lines.append("")
-        lines.append(f"## Broader picture\n\n{review['broader_picture']}")
-    if review.get("overall_comment"):
-        lines.append("")
-        lines.append(f"## Overall\n\n{review['overall_comment']}")
-    return "\n".join(lines)
-
-
 def _cmd_show(args) -> int:
     from dojo.render import md_plain, render_ai
 
@@ -757,7 +726,9 @@ def _cmd_show(args) -> int:
             )
     review = loads_json(row["review"], {})
     if review:
-        render_ai(console, "AI review", _format_review(review), border_style="green")
+        from dojo.render import review_markdown
+
+        render_ai(console, "AI review", review_markdown(review), border_style="green")
     if row["reflection"]:
         console.print(Panel(row["reflection"], title="Reflection", border_style="cyan"))
     discussion = loads_json(row["discussion"], [])

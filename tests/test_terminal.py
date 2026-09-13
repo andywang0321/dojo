@@ -140,9 +140,9 @@ def test_prompt_omits_default_when_none(monkeypatch, capsys):
 
     assert prompt("Q: ") == "answer"  # no default, no hint
     assert "default" not in captured["kwargs"]
-    assert "rprompt" not in captured["kwargs"]
+    assert "bottom_toolbar" not in captured["kwargs"]
 
     assert prompt("Q: ", default="previous") == "answer"
     assert captured["kwargs"]["default"] == "previous"
     assert prompt("Q: ", hint="[dim]hint[/dim]") == "answer"
-    assert "rprompt" in captured["kwargs"]
+    assert "bottom_toolbar" in captured["kwargs"]

@@ -170,7 +170,7 @@ def test_open_command_and_commands_hint(db, fake_console, monkeypatch, tmp_path)
     assert "opened in a window" in console.text
     # The command list appears after output, before each prompt (virtual
     # text on TTYs; printed on non-TTYs — the path tests exercise).
-    assert "or ask" in console.text
+    assert "Ask a question" in console.text
 
 
 def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
@@ -431,7 +431,7 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
     assert discussion[0]["user"] == "how else could I solve this?"
     assert "you could" in discussion[0]["tutor"].lower() or len(discussion[0]["tutor"]) > 0
     assert not (workbench / "valid_parentheses.state.json").exists()
-    assert "polish · done" in console.text  # the post-solve hint (virtual text)
+    assert "Ask a question, or: polish" in console.text  # the post-solve hint (virtual text)
 
 
 def test_bare_questions_and_command_words_with_text_are_hints(db, fake_console, monkeypatch, tmp_path):

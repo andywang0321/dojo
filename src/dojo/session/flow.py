@@ -29,7 +29,7 @@ from dojo.db import dumps_json, get_or_create_user, loads_json, now
 from dojo.editor import ensure_ide_config, launch as launch_editor
 from dojo.judge import JUDGE_CASES, ORACLES, PROFILER_INPUTS, run_cases
 from dojo.profiler import classify, measure, staircase_safe_points
-from dojo.render import md_plain, render_ai
+from dojo.render import render_ai, review_markdown
 from dojo.session.learn import resolve_pattern, run_learn
 from dojo.session.state import (
     WorkbenchState,
@@ -44,9 +44,9 @@ from dojo.ui import table as ui_table
 
 GENERATED_CASES = 30
 
-COMMANDS_HINT = "open · check · learn · submit · quit — or ask"
+COMMANDS_HINT = "Ask a question, or: open · check · learn · submit · quit"
 
-POST_COMMANDS_HINT = "polish · done — or ask"
+POST_COMMANDS_HINT = "Ask a question, or: polish · done"
 
 TEMPLATE_STUB_COMMENT = (
     "# Solve it. Use `dojo check` / `dojo hint` from a second terminal."
@@ -492,39 +492,12 @@ def _show_static(console: Console, analysis) -> None:
 
 
 def _show_review(console: Console, review_json: dict) -> None:
-    table = ui_table("AI review")
-    table.add_column("Dimension")
-    table.add_column("Score")
-    table.add_column("Comment")
-    dims = [
-        "correctness",
-        "approach_quality",
-        "style_idiom",
-        "naming",
-        "edge_cases",
-        "complexity_claim_check",
-        "complexity_reasoning",
-    ]
-    for dim in dims:
-        entry = review_json.get(dim, {})
-        if isinstance(entry, dict):
-            table.add_row(
-                dim.replace("_", " "),
-                str(entry.get("score", "?")),
-                md_plain(str(entry.get("comment", ""))),
-            )
-    console.print(table)
-    if review_json.get("reflection_feedback"):
-        render_ai(
-            console,
-            "On your reflection",
-            str(review_json["reflection_feedback"]),
-            border_style="cyan",
-        )
-    if review_json.get("broader_picture"):
-        render_ai(console, "Broader picture", str(review_json["broader_picture"]))
-    if review_json.get("overall_comment"):
-        render_ai(console, "Overall", str(review_json["overall_comment"]))
+    """The rubric as one markdown panel (v0.10.11): headings carry the
+    scores, comments keep their markdown — no table column to flatten
+    them into."""
+    render_ai(
+        console, "AI review", review_markdown(review_json), border_style="green"
+    )
 
 
 def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
