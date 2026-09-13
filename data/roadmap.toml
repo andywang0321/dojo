@@ -7,6 +7,11 @@
 #   <LeetCode-number>_<title-slug>. Private use only (AGENTS rule 2);
 #   never publish this file or its data.
 #
+# dojo corrections: the mirror truncates five real LeetCode slugs
+# (three_sum -> 3sum, two_sum_ii -> two-sum-ii-input-array-is-sorted,
+# lowest_common_ancestor_of_a_bst -> ...binary-search-tree,
+# implement_trie -> implement-trie-prefix-tree, pow_x_n -> powx-n) —
+# fixed inline so the bulk fetch hits the real endpoints.
 # dojo addendum: the mirror lists 149 of 150 — the site's NeetCode 150
 # includes 0271_encode_and_decode_strings in Arrays & Hashing, which dojo
 # already owns. It is appended to that group's ladder below.
@@ -34,8 +39,8 @@ name = "Two Pointers"
 order = 2
 problems = [
   "0125_valid_palindrome",
-  "0167_two_sum_ii",
-  "0015_three_sum",
+  "0167_two_sum_ii_input_array_is_sorted",
+  "0015_3sum",
   "0011_container_with_most_water",
   "0042_trapping_rain_water",
 ]
@@ -105,7 +110,7 @@ problems = [
   "0110_balanced_binary_tree",
   "0100_same_tree",
   "0572_subtree_of_another_tree",
-  "0235_lowest_common_ancestor_of_a_bst",
+  "0235_lowest_common_ancestor_of_a_binary_search_tree",
   "0102_binary_tree_level_order_traversal",
   "0199_binary_tree_right_side_view",
   "1448_count_good_nodes_in_binary_tree",
@@ -120,7 +125,7 @@ problems = [
 name = "Tries"
 order = 8
 problems = [
-  "0208_implement_trie",
+  "0208_implement_trie_prefix_tree",
   "0211_design_add_and_search_words_data_structure",
   "0212_word_search_ii",
 ]
@@ -254,7 +259,7 @@ problems = [
   "0073_set_matrix_zeroes",
   "0202_happy_number",
   "0066_plus_one",
-  "0050_pow_x_n",
+  "0050_powx_n",
   "0043_multiply_strings",
   "2013_detect_squares",
 ]

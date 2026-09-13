@@ -200,9 +200,16 @@ def test_pattern_for_tags_maps_known_slugs():
     assert pattern_for_tags(["dynamic-programming"]) == "dp_1d"
 
 
-def test_pattern_for_tags_first_match_wins():
+def test_pattern_for_tags_most_specific_wins():
+    # LeetCode lists tags alphabetically — specificity, not position, decides
+    # (v0.10.10): best-time-to-buy carries array + dynamic-programming +
+    # sliding-window and must bucket into sliding_window.
+    assert pattern_for_tags(
+        ["array", "dynamic-programming", "sliding-window"]
+    ) == "sliding_window"
     assert pattern_for_tags(["graph", "depth-first-search"]) == "graphs"
-    assert pattern_for_tags(["depth-first-search", "graph"]) == "trees"
+    assert pattern_for_tags(["depth-first-search", "graph"]) == "graphs"
+    assert pattern_for_tags(["array", "string"]) == "arrays_and_hashing"
 
 
 def test_pattern_for_tags_fails_on_unmapped():
@@ -313,3 +320,122 @@ def test_land_refuses_existing_slug(tmp_path):
     land(problem, problems_dir=problems_dir, db_path=db_path)
     with pytest.raises(LeetCodeError, match="already in the bank"):
         land(problem, problems_dir=problems_dir, db_path=db_path)
+
+
+# -------------------------------------------------- bulk fetch (v0.10.10)
+
+def test_roadmap_entries_slugs():
+    from dojo.cli import _roadmap_entries
+
+    entries = dict(_roadmap_entries())
+    assert entries[1] == "two-sum"
+    assert entries[121] == "best-time-to-buy-and-sell-stock"
+
+
+def test_roadmap_lc_for_slug():
+    from dojo.cli import _roadmap_lc_for_slug
+
+    assert _roadmap_lc_for_slug("two-sum") == 1
+    assert _roadmap_lc_for_slug("best-time-to-buy-and-sell-stock") == 121
+    assert _roadmap_lc_for_slug("not-a-real-problem") is None
+
+
+def test_cmd_fetch_all_skips_existing_and_tags_lc(db, monkeypatch, tmp_path):
+    """The bulk runner lands only the missing roadmap problems, tags each
+    with its LeetCode number (the fetcher model doesn't carry it), and
+    survives per-problem failures."""
+    from dojo.cli import _cmd_fetch_all
+    from dojo.db import now
+    from dojo.fetcher import LeetCodeError, ParsedProblem
+
+    # The bulk runner binds DB_PATH/PROBLEMS_DIR from dojo.config at call
+    # time (lazy import) — patch the config module, not cli.
+    monkeypatch.setattr("dojo.config.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.config.PROBLEMS_DIR", tmp_path / "problems")
+    (tmp_path / "problems").mkdir()
+    # The seeded problem's seed FILE must exist too — file-aware skipping
+    # treats a row without its file as a lost import and re-fetches it.
+    (tmp_path / "problems" / "arrays_and_hashing").mkdir(parents=True)
+    (tmp_path / "problems" / "arrays_and_hashing" / "contains-duplicate.py").write_text(
+        '"""t [Easy]\n\nStatement."""\n'
+    )
+
+    # One problem already in the bank (skipped), the rest land.
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, lc_number, created_at) "
+        "VALUES ('contains-duplicate', 't', 'Easy', 'arrays_and_hashing', 's', 217, ?)",
+        (now(),),
+    )
+    db.commit()
+
+    calls = []
+
+    def fake_fetch(slug):
+        calls.append(slug)
+        if slug == "trapping-rain-water":
+            raise LeetCodeError("rate limited")
+        return ParsedProblem(
+            title_slug=slug,
+            title=slug,
+            difficulty="Easy",
+            pattern="arrays_and_hashing",
+            statement=f"{slug} [Easy]\n\nStatement.",
+            function_name="solve_it",
+            signature="(x: int) -> int",
+            url="https://example.com",
+        )
+
+    def fake_land(problem, problems_dir, db_path):
+        from dojo.db import connect, now as _now
+
+        with connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO problems (slug, title, difficulty, pattern, statement, created_at) "
+                "VALUES (?, ?, 'Easy', ?, ?, ?)",
+                (problem.title_slug, problem.title, problem.pattern, problem.statement, _now()),
+            )
+            conn.commit()
+        return problems_dir / problem.pattern / f"{problem.title_slug}.py"
+
+    monkeypatch.setattr("dojo.fetcher.fetch_problem", fake_fetch)
+    monkeypatch.setattr("dojo.fetcher.land", fake_land)
+
+    console = type("C", (), {"print": lambda self, *a, **k: None})()
+    exit_code = _cmd_fetch_all(console, delay=0)
+
+    # 217 skipped (in bank); 1 two-sum landed; 42 trapping failed.
+    assert "contains-duplicate" not in calls
+    assert "two-sum" in calls
+    assert exit_code == 1  # the trapping failure is reported, not fatal
+
+    with __import__("dojo.db", fromlist=["connect"]).connect(tmp_path / "dojo.db") as conn:
+        row = conn.execute(
+            "SELECT lc_number FROM problems WHERE slug = 'two-sum'"
+        ).fetchone()
+    assert row["lc_number"] == 1
+
+
+def test_reseed_does_not_wipe_tagged_lc(tmp_path):
+    """Regression (v0.10.10): the bank importer's upsert once overwrote a
+    tagged lc_number with NULL on every reseed — COALESCE preserves it."""
+    from dojo.bank import ensure_seeded
+
+    problems_dir = tmp_path / "problems"
+    db_path = tmp_path / "dojo.db"
+    (problems_dir / "arrays_and_hashing").mkdir(parents=True)
+    (problems_dir / "arrays_and_hashing" / "two-sum.py").write_text(
+        '"""Two Sum [Easy]\n\nStatement."""\n'
+    )
+    ensure_seeded(db_path, problems_dir)
+    from dojo.db import connect
+
+    with connect(db_path) as conn:
+        conn.execute(
+            "UPDATE problems SET lc_number = 1 WHERE slug = 'two-sum'"
+        )
+        conn.commit()
+    ensure_seeded(db_path, problems_dir)  # reseed must not wipe the tag
+    with connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT lc_number FROM problems WHERE slug = 'two-sum'"
+        ).fetchone()["lc_number"] == 1

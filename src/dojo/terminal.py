@@ -58,10 +58,17 @@ def make_prompt(console):
             # line itself (rprompt) — the bottom toolbar proved unreliable
             # in some terminals (it never rendered, silently), while the
             # input line is the region every terminal renders for sure.
+            # NOTE (v0.10.10): prompt_toolkit's prompt(default=None) raises
+            # TypeError — default must be OMITTED, never passed as None. The
+            # silent fallback hid this behind every session prompt (arrow
+            # keys, multibyte deletion, missing virtual text — all symptoms
+            # of this one line; the fallback log caught it).
             kwargs = {}
+            if default is not None:
+                kwargs["default"] = default
             if hint is not None:
                 kwargs["rprompt"] = ANSI(_to_ansi(hint))
-            return _session.prompt(ANSI(_to_ansi(text)), default=default, **kwargs)
+            return _session.prompt(ANSI(_to_ansi(text)), **kwargs)
         except Exception as exc:  # noqa: BLE001 - degrade, but never silently
             from dojo import debuglog
 

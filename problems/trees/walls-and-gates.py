@@ -1,0 +1,1 @@
+"""Walls and Gates [Medium]"""

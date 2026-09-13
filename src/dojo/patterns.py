@@ -110,15 +110,59 @@ TAG_TO_PATTERN = {
 }
 
 
+#: Specificity order for tag→pattern (v0.10.10): LeetCode lists tags
+#: alphabetically, so a naive first-match lets "array" beat
+#: "sliding-window" on problems like best-time-to-buy. The most specific
+#: mapped tag wins instead; generic tags (array/string) are the fallback.
+TAG_PRIORITY = [
+    "monotonic-stack",
+    "sliding-window",
+    "two-pointers",
+    "trie",
+    "union-find",
+    "topological-sort",
+    "shortest-path",
+    "binary-search",
+    "heap-priority-queue",
+    "backtracking",
+    "linked-list",
+    "stack",
+    "greedy",
+    "bit-manipulation",
+    "dynamic-programming",
+    "graph",
+    "binary-search-tree",
+    "binary-tree",
+    "depth-first-search",
+    "breadth-first-search",
+    "tree",
+    "interval",
+    "intervals",
+    "geometry",
+    "probability-and-statistics",
+    "math",
+    "matrix",
+    "prefix-sum",
+    "counting",
+    "sorting",
+    "hash-table",
+    "string",
+    "array",
+]
+
+
 def pattern_for_tags(tag_slugs: list[str]) -> str:
-    """First mapped tag wins (LeetCode orders tags by relevance); fail loudly
+    """The most specific mapped tag wins (see TAG_PRIORITY); fail loudly
     when nothing maps, so a wrong bucket is never a silent accident."""
     if not tag_slugs:
         raise ValueError("problem has no topic tags; cannot choose a pattern")
-    for slug in tag_slugs:
-        if slug in TAG_TO_PATTERN:
-            return TAG_TO_PATTERN[slug]
-    raise ValueError(
-        f"no topic tag maps to a dojo pattern (tags: {', '.join(tag_slugs)}); "
-        "curate by hand or extend dojo/patterns.py"
-    )
+    known = [slug for slug in tag_slugs if slug in TAG_TO_PATTERN]
+    if not known:
+        raise ValueError(
+            f"no topic tag maps to a dojo pattern (tags: {', '.join(tag_slugs)}); "
+            "curate by hand or extend dojo/patterns.py"
+        )
+    def rank(slug: str) -> int:
+        return TAG_PRIORITY.index(slug) if slug in TAG_PRIORITY else len(TAG_PRIORITY)
+
+    return TAG_TO_PATTERN[min(known, key=rank)]

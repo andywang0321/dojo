@@ -69,6 +69,7 @@ dojo progress               # per-pattern proficiency, card schedule, score tren
 dojo history                # your attempts, newest first
 dojo show <id>              # one attempt in full (hints, code, review; --code for code only)
 dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
+                             #   `dojo fetch --all` lands the whole roadmap without curating
 dojo user [<name>]          # switch the active user (numbered picker without a name)
 dojo setup                  # re-run the setup wizard (change key, reinstall PATH)
 ```

@@ -113,3 +113,36 @@ def test_confirm_typo_ignores_questions_and_exact_commands(fake_console):
     assert confirm_typo(console, "check my thing", ["check", "quit"]) is None  # multi-word
     assert confirm_typo(console, "quit", ["quit"]) is None  # exact command
     assert confirm_typo(console, "zzzz", ["quit"]) is None  # no close match
+
+
+def test_prompt_omits_default_when_none(monkeypatch, capsys):
+    """Regression (v0.10.10): prompt_toolkit raises on default=None — the
+    kwarg must be omitted entirely. Every session prompt degraded to plain
+    input behind this one line (arrow keys, multibyte deletion, missing
+    virtual text)."""
+    import io
+
+    from rich.console import Console
+
+    import dojo.terminal as terminal
+
+    captured = {}
+
+    class RecordingSession:
+        def prompt(self, message, **kwargs):
+            captured["kwargs"] = kwargs
+            return "answer"
+
+    monkeypatch.setattr(terminal, "_is_tty", lambda: True)
+    monkeypatch.setattr(terminal, "_session", RecordingSession())
+    console = Console(file=io.StringIO(), force_terminal=False, width=100)
+    prompt = terminal.make_prompt(console)
+
+    assert prompt("Q: ") == "answer"  # no default, no hint
+    assert "default" not in captured["kwargs"]
+    assert "rprompt" not in captured["kwargs"]
+
+    assert prompt("Q: ", default="previous") == "answer"
+    assert captured["kwargs"]["default"] == "previous"
+    assert prompt("Q: ", hint="[dim]hint[/dim]") == "answer"
+    assert "rprompt" in captured["kwargs"]

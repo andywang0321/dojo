@@ -147,7 +147,9 @@ def seed_problems(conn: sqlite3.Connection, root: Path = PROBLEMS_DIR) -> int:
                 expected_space = excluded.expected_space,
                 visible_tests = excluded.visible_tests,
                 signature = excluded.signature,
-                lc_number = excluded.lc_number
+                -- A tagged lc (the TOML's authority, set by the bulk
+                -- fetch) must survive reseeds: overrides start at NULL.
+                lc_number = COALESCE(excluded.lc_number, problems.lc_number)
             """,
             (
                 problem.slug,

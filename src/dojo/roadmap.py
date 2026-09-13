@@ -44,7 +44,15 @@ def load_roadmap(path: Path | None = None) -> list[dict]:
                 raise RoadmapError(
                     f"roadmap problem '{entry}' has no LeetCode number prefix"
                 ) from exc
-        groups.append({"slug": slug, "name": name, "order": group["order"], "problems": problems})
+        groups.append(
+            {
+                "slug": slug,
+                "name": name,
+                "order": group["order"],
+                "problems": problems,
+                "entries": list(group["problems"]),  # raw "0121_..." strings
+            }
+        )
     return groups
 
 

@@ -816,6 +816,111 @@ def _cmd_curate(args) -> int:
     return 0
 
 
+def _roadmap_entries() -> list[tuple[int, str]]:
+    """(lc number, LeetCode title-slug) for every ladder problem, in
+    roadmap order — built from the raw TOML entries ('0121_...')."""
+    from dojo.roadmap import load_roadmap
+
+    out = []
+    for group in load_roadmap():
+        for entry in group["entries"]:
+            number, _, slug = entry.partition("_")
+            out.append((int(number), slug.replace("_", "-")))
+    return out
+
+
+def _roadmap_lc_for_slug(title_slug: str) -> int | None:
+    """The LeetCode number for a title-slug, per the roadmap data."""
+    for lc, slug in _roadmap_entries():
+        if slug == title_slug:
+            return lc
+    return None
+
+
+def _tag_lc_number(conn, title_slug: str, lc: int | None) -> None:
+    """Record the LeetCode number on a landed problem row so the roadmap
+    ladder can see it (the fetcher's model doesn't carry it; the TOML is
+    authoritative)."""
+    if lc is None:
+        return
+    conn.execute(
+        "UPDATE problems SET lc_number = ? WHERE slug = ? AND lc_number IS NULL",
+        (lc, title_slug),
+    )
+    conn.commit()
+
+
+def _cmd_fetch_all(console, delay: float = 0.8) -> int:
+    """v0.10.10: land every roadmap problem without curating, so the whole
+    NeetCode 150 is available in the bank. Idempotent: problems already in
+    the bank (by LeetCode number) are skipped; failures are counted and
+    retried on the next run."""
+    import time
+
+    from dojo.config import DB_PATH, PROBLEMS_DIR
+    from dojo.fetcher import LeetCodeError, fetch_problem, land
+    from dojo.roadmap import load_roadmap
+
+    with connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT lc_number, function_name FROM problems WHERE lc_number IS NOT NULL"
+        ).fetchall()
+        existing_rows = {r["lc_number"] for r in rows}
+        curated_lc = {r["lc_number"] for r in rows if r["function_name"]}
+    # A problem is "already in the bank" when its row exists AND either
+    # its seed file exists or the row is curated (dojo's own slugs like
+    # two_sum_2 differ from the LeetCode slug but own the lc number) — a
+    # row whose file is missing is a lost import and gets re-fetched.
+    seed_files = {p.stem for p in PROBLEMS_DIR.rglob("*.py")}
+    fetched = skipped = failed = 0
+    failures = []
+    for lc, slug in _roadmap_entries():
+        if lc in existing_rows and (slug in seed_files or lc in curated_lc):
+            skipped += 1
+            continue
+        if slug in seed_files:
+            # The seed file is present but the row/tag was lost (the reseed
+            # once wiped tags): restore the tag locally — no fetch needed.
+            with connect(DB_PATH) as conn:
+                _tag_lc_number(conn, slug, lc)
+            skipped += 1
+            continue
+        try:
+            problem = fetch_problem(slug)
+            land(problem, problems_dir=PROBLEMS_DIR, db_path=DB_PATH)
+            with connect(DB_PATH) as conn:
+                _tag_lc_number(conn, problem.title_slug, lc)
+            fetched += 1
+            console.print(f"[green]✓[/green] {lc} {problem.title} ({problem.pattern})")
+            time.sleep(delay)  # be polite to the endpoint
+        except LeetCodeError as exc:
+            if "already in the bank" in str(exc):
+                # The seed file exists but its row was lost (a partial
+                # import): re-seed so the row comes back, tag the lc, and
+                # count it as a skip rather than a failure.
+                from dojo.bank import ensure_seeded
+
+                ensure_seeded(DB_PATH)
+                with connect(DB_PATH) as conn:
+                    _tag_lc_number(conn, slug, lc)
+                skipped += 1
+                console.print(f"[dim]• {lc} {slug}: file present — row restored[/dim]")
+                continue
+            failed += 1
+            failures.append(f"{lc} {slug}: {exc}")
+            console.print(f"[red]✗[/red] {lc} {slug}: {exc}")
+    console.print(
+        f"[bold]Fetched {fetched}[/bold], skipped {skipped} (already in bank), "
+        f"failed {failed}. Curate later: `dojo report --fix <slug>` per problem."
+    )
+    if failures:
+        console.print("[yellow]Failures:[/yellow]")
+        for failure in failures:
+            console.print(f"  • {failure}")
+        console.print("[dim]Re-run `dojo fetch --all` — existing problems are skipped.[/dim]")
+    return 0 if not failures else 1
+
+
 def _cmd_fetch(args) -> int:
     """v0.3: fetch a LeetCode problem, land its statement in the bank, then
     auto-curate it (statement stays if curation fails or no backend)."""
@@ -827,6 +932,8 @@ def _cmd_fetch(args) -> int:
     from dojo.tutor import get_backend
 
     console = Console()
+    if args.all:
+        return _cmd_fetch_all(console)
     try:
         problem = fetch_problem(args.title_slug)
     except LeetCodeError as exc:
@@ -837,10 +944,18 @@ def _cmd_fetch(args) -> int:
     except LeetCodeError as exc:
         console.print(f"[red]{exc}[/red]")
         return 1
+    with connect(DB_PATH) as conn:
+        _tag_lc_number(conn, problem.title_slug, _roadmap_lc_for_slug(problem.title_slug))
     console.print(
         f"[green]Landed {problem.title} ({problem.title_slug}) — "
         f"{problem.pattern}, {problem.difficulty}.[/green]\n{path}"
     )
+    if args.no_curate:
+        console.print(
+            "[dim]Not curated — `dojo report --fix` audits + re-curates when "
+            "you're ready.[/dim]"
+        )
+        return 0
     try:
         backend = get_backend()
     except RuntimeError as exc:
@@ -1137,7 +1252,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_fetch = sub.add_parser("fetch", help="fetch a LeetCode problem and auto-curate it")
     p_fetch.add_argument(
-        "title_slug", help="LeetCode problem slug (URL path), e.g. two-sum"
+        "title_slug", nargs="?", help="LeetCode problem slug (URL path), e.g. two-sum"
+    )
+    p_fetch.add_argument(
+        "--all", action="store_true",
+        help="land every roadmap problem (no curation — the content batch runner)",
+    )
+    p_fetch.add_argument(
+        "--no-curate", action="store_true",
+        help="land without running the curator",
     )
     p_fetch.set_defaults(func=_cmd_fetch)
 

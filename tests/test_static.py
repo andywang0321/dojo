@@ -84,3 +84,16 @@ def test_reviewer_prompt_includes_static_findings(tmp_path):
     )
     assert "STATIC ANALYSIS" in prompt
     assert "f" in prompt.split("STATIC ANALYSIS")[1]
+
+
+def test_analyze_ignores_shebang_executable_rules(tmp_path):
+    """The template shebang is dojo's chrome: EXE001/EXE002/EXE004 must not
+    be reported as user-code findings (v0.10.10)."""
+    from dojo.static import analyze
+
+    path = tmp_path / "shebanged.py"
+    path.write_text("#!/Users/x/.venv/bin/python\n\n\ndef two_sum(nums: list[int]) -> list[int]:\n    return [0, 1]\n")
+    report = analyze(path)
+    codes = {f["code"] for f in report.ruff}
+    assert not codes & {"EXE001", "EXE002", "EXE004"}, codes
+    assert not report.ruff  # otherwise-clean code stays clean

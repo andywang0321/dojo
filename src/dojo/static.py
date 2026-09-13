@@ -69,8 +69,20 @@ def analyze(code_path: Path) -> StaticReport:
         report.notes.append(f"radon skipped: {exc}")
 
     try:
+        # The shebang rules are silenced (v0.10.10): dojo writes the venv
+        # shebang into every template — it is dojo's chrome, not user code,
+        # and "file not executable" is pure noise for a workbench file.
         proc = subprocess.run(
-            [sys.executable, "-m", "ruff", "check", "--output-format=json", str(code_path)],
+            [
+                sys.executable,
+                "-m",
+                "ruff",
+                "check",
+                "--output-format=json",
+                "--ignore",
+                "EXE001,EXE002,EXE004",
+                str(code_path),
+            ],
             capture_output=True,
             text=True,
             timeout=60,
