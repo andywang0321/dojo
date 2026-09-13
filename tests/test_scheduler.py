@@ -1,4 +1,12 @@
-"""FSRS-lite scheduler: forgetting curve, card lifecycle, picks, backfill."""
+"""FSRS-4.5 scheduler: forgetting curve, card lifecycle, picks, backfill.
+
+The update rules are pinned against hand-computed values from the published
+FSRS-4.5 equations (w = [0.4, 0.6, 2.4, 5.8, 4.93, 0.94, 0.86, 0.01, 1.49,
+0.14, 0.94, 2.18, 0.05, 0.34, 1.26, 0.29, 2.61]) — writing the numbers out
+is the point: recomputing the formula here would assert nothing.
+"""
+
+import pytest
 
 from dojo import scheduler
 from dojo.db import dumps_json, get_or_create_user, now
@@ -47,11 +55,17 @@ def _insert_ladder_problem(conn, slug, pattern, lc, difficulty="Easy"):
 
 
 def _solve(conn, user_id, slug):
+    _solve_at(conn, user_id, slug, None)
+
+
+def _solve_at(conn, user_id, slug, when):
+    """A correct solve, optionally with an explicit submitted_at (the warm-up
+    rotation is decided by the per-problem *latest* correct attempt)."""
     pid = conn.execute("SELECT id FROM problems WHERE slug = ?", (slug,)).fetchone()["id"]
     conn.execute(
         "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
-        "VALUES (?, ?, 'solve', 'correct', datetime('now'), datetime('now'))",
-        (user_id, pid),
+        "VALUES (?, ?, 'solve', 'correct', COALESCE(?, datetime('now')), COALESCE(?, datetime('now')))",
+        (user_id, pid, when, when),
     )
     conn.commit()
 
@@ -68,24 +82,63 @@ def test_interval_equals_stability_at_default_target():
     assert scheduler.interval_days(10.0) > scheduler.interval_days(5.0)
 
 
-def test_review_updates():
-    # Lapse: stability drops, difficulty rises.
-    s2, d2 = scheduler.review(1.0, 5.0, 0.9, 1)
-    assert s2 < 1.0 and d2 > 5.0
-    # Good: stability grows, difficulty unchanged.
-    s3, d3 = scheduler.review(1.0, 5.0, 0.9, 3)
-    assert s3 > 1.0 and d3 == 5.0
-    # Easy grows more and eases difficulty; hard grows less and raises it.
-    s4, d4 = scheduler.review(1.0, 5.0, 0.9, 4)
-    s2h, d2h = scheduler.review(1.0, 5.0, 0.9, 2)
-    assert s4 > s3 > s2h > 1.0
-    assert d4 < 5.0 < d2h
+def test_initial_stability_and_difficulty_by_grade():
+    """FSRS-4.5: S0 = w[G-1]; D0 = clamp(w4 - (G-3)·w5, 1, 10)."""
+    assert [scheduler.initial_stability(g) for g in (1, 2, 3, 4)] == [0.4, 0.6, 2.4, 5.8]
+    assert [
+        round(scheduler.initial_difficulty(g), 2) for g in (1, 2, 3, 4)
+    ] == [6.81, 5.87, 4.93, 3.99]
+
+
+def test_successful_review_matches_fsrs45():
+    """Hand-computed at S=1, D=5, R=0.9: good ≈ 3.6239, with the hard penalty
+    (×0.29) and easy bonus (×2.61) applied to the whole grown stability."""
+    assert scheduler.review(1.0, 5.0, 0.9, 3)[0] == pytest.approx(3.6239, abs=1e-3)
+    assert scheduler.review(1.0, 5.0, 0.9, 2)[0] == pytest.approx(1.0509, abs=1e-3)
+    assert scheduler.review(1.0, 5.0, 0.9, 4)[0] == pytest.approx(9.4584, abs=1e-3)
+    assert scheduler.review(1.0, 5.0, 0.9, 3)[1] == pytest.approx(4.9993, abs=1e-3)
+
+
+def test_lapse_matches_fsrs45_and_never_raises_stability():
+    s, d = scheduler.review(5.0, 5.0, 0.9, 1)
+    assert s == pytest.approx(1.9141, abs=1e-3)
+    # D' = w7·w4 + (1-w7)·(D - w6·(G-3)) = 0.0493 + 0.99·(5 + 1.72)
+    assert d == pytest.approx(6.7021, abs=1e-3)
+    # min(S, ·) — a lapse can never leave a card stronger than it was.
+    assert scheduler.review(0.4, 5.0, 0.9, 1)[0] <= 0.4
+
+
+def test_difficulty_mean_reverts_toward_the_good_baseline():
+    d = 4.93
+    for _ in range(50):
+        d = scheduler.review(10.0, d, 0.9, 4)[1]
+    assert d == pytest.approx(1.0, abs=0.1)  # clamped, never below the floor
+
+
+def test_intervals_are_whole_days_and_never_sub_day():
+    """The defect this fixes: S0 = 0.3 with float intervals scheduled the
+    first warm-up ~7 hours out, so cards never left the same-day regime."""
+    assert scheduler.interval_days(0.4) == 1  # FSRS's floor: at least a day
+    assert scheduler.interval_days(2.4) == 2
+    assert scheduler.interval_days(8.03) == 8
+    assert isinstance(scheduler.interval_days(2.4), int)
+
+
+def test_schedule_grows_to_weeks_where_the_old_constants_stalled():
+    """Three good recalls at their due dates reach ~24 days. The previous
+    constants reached 1.5 days after twelve."""
+    s, d = scheduler.initial_stability(3), scheduler.initial_difficulty(3)
+    assert scheduler.interval_days(s) == 2
+    for _ in range(2):
+        s, d = scheduler.review(s, d, 0.9, 3)
+    assert scheduler.interval_days(s) >= 7
 
 
 def test_card_lifecycle(db):
     uid = get_or_create_user(db, "andy")
     card = scheduler.ensure_card(db, uid, "stack")
-    assert card["stability"] == scheduler.S0
+    # Default seeding is the "good" grade (w[2] = 2.4 days).
+    assert card["stability"] == scheduler.initial_stability(3)
     assert card["due_at"] > now()
     # Age the card a day so the review sees real forgetting (R < 1).
     db.execute(
@@ -101,11 +154,27 @@ def test_card_lifecycle(db):
     assert row["reps"] == 1
     assert row["stability"] > 1.0
     assert summary["due_at"] > card["due_at"]
+    assert summary["interval_days"] >= 1  # whole days, never a few hours
 
     lapsed = scheduler.record_grade(db, row, 1)
     row = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
     assert row["lapses"] == 1
     assert lapsed["lapsed"]
+
+
+def test_card_is_seeded_from_the_grade_that_created_it(db):
+    """A first solve's hint count is evidence about the pattern: it seeds
+    S0/D0 instead of the flat 0.3/5.0 the old code always wrote."""
+    uid = get_or_create_user(db, "andy")
+    good = scheduler.ensure_card(db, uid, "arrays_and_hashing", grade=3)
+    assert good["stability"] == 2.4
+    assert good["difficulty"] == pytest.approx(4.93, abs=0.01)
+    rough = scheduler.ensure_card(db, uid, "stack", grade=1)
+    assert rough["stability"] == 0.4
+    assert rough["difficulty"] == pytest.approx(6.81, abs=0.01)
+    # The seeded stability drives the first due date: a rough first solve comes
+    # back sooner than a clean one (1 day vs 2), not seven hours later.
+    assert rough["due_at"] < good["due_at"]
 
 
 def test_due_cards_only_overdue(db):
@@ -136,6 +205,31 @@ def test_warmup_problem_least_recent(db):
     db.commit()
     picked = scheduler.warmup_problem(db, uid, "arrays_and_hashing")
     assert picked["slug"] == "two_sum"  # least recently solved first
+
+
+def test_warmup_problem_rotates_across_problems(db):
+    """v0.11 rotation. The old rule ordered *every* correct attempt by
+    submitted_at and took the first — the problem solved earliest ever, a
+    value that never ages. `valid_parentheses` was therefore served as the
+    stack warm-up five times while other solved problems in the pattern got
+    none. The pick is now per-problem (its latest attempt), so consecutive
+    warm-ups rotate."""
+    uid = get_or_create_user(db, "andy")
+    for slug in ("two_sum", "valid_anagram"):
+        _insert_problem(db, slug, "arrays_and_hashing")
+    _solve_at(db, uid, "two_sum", "2024-01-01T00:00:00+00:00")
+    _solve_at(db, uid, "valid_anagram", "2024-06-01T00:00:00+00:00")
+    assert scheduler.warmup_problem(db, uid, "arrays_and_hashing")["slug"] == "two_sum"
+
+    # Practising two_sum again (a warm-up, or a re-solve) makes it the most
+    # recent, so the next warm-up moves on to the other problem.
+    _solve_at(db, uid, "two_sum", "2026-01-01T00:00:00+00:00")
+    assert (
+        scheduler.warmup_problem(db, uid, "arrays_and_hashing")["slug"] == "valid_anagram"
+    )
+    # ...and it comes back once that one has been practised.
+    _solve_at(db, uid, "valid_anagram", "2026-02-01T00:00:00+00:00")
+    assert scheduler.warmup_problem(db, uid, "arrays_and_hashing")["slug"] == "two_sum"
 
 
 def test_pick_new_problem_weakest_pattern(db):

@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS attempts (
     reflection           TEXT,
     static_analysis      TEXT,   -- JSON: radon complexity + ruff findings
     polished             INTEGER NOT NULL DEFAULT 0,  -- post-solve re-submissions
-    discussion           TEXT    -- JSON: post-solve chat transcript
+    discussion           TEXT,   -- JSON: post-solve chat transcript
+    recall_grade         INTEGER -- v0.11: 1..4 on warm-ups, NULL on solves
 );
 
 CREATE TABLE IF NOT EXISTS pattern_cards (
@@ -126,6 +127,10 @@ def migrate(conn: sqlite3.Connection) -> None:
         )
     if "discussion" not in attempts_cols:
         conn.execute("ALTER TABLE attempts ADD COLUMN discussion TEXT")
+    if "recall_grade" not in attempts_cols:
+        # v0.11: the recall grade is the event the retention model exists to
+        # capture; it used to be folded into card aggregates and thrown away.
+        conn.execute("ALTER TABLE attempts ADD COLUMN recall_grade INTEGER")
     problems_cols = {r["name"] for r in conn.execute("PRAGMA table_info(problems)")}
     if "signature" not in problems_cols:
         conn.execute("ALTER TABLE problems ADD COLUMN signature TEXT")
@@ -157,6 +162,15 @@ def get_or_create_user(conn: sqlite3.Connection, name: str) -> int:
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def iso_from_epoch(epoch: float) -> str:
+    """A stored timestamp for something that began at ``epoch``. v0.11: the
+    attempt row is created at submit, so ``started_at`` has to come from the
+    session's own start time rather than from ``now()``."""
+    if not epoch:
+        return now()
+    return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="seconds")
 
 
 def list_attempts(

@@ -23,11 +23,12 @@ Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by ha
 ## Conventions
 
 - **Judge protocol:** case dicts `{"args", "expected", "label"}` plus optional verdict tags (`sorted` / `approx` / `rounded` / `predicate` / `ops`) — see docs/grading.md. Don't "fix" strict equality to approximate float equality without updating the docs and tests.
-- **Measurement protocol:** one timed call per subprocess; GC disabled around the call; tracemalloc started after module import; median across repeats.
+- **Measurement protocol (v0.11):** one measurement per subprocess, median across repeats. Inside it: an untimed/untraced warm-up call, **the timed call with no tracer running** (GC disabled), then the space call with tracemalloc active and untimed — each on a fresh deepcopy of the args. Never put tracemalloc inside the timed region: its bookkeeping is superlinear and made allocation-heavy O(n) code measure as O(n log n).
+- **Never assert a complexity class from wall-clock timing** (v0.11). The decision rule is pinned on synthetic series (`tests/test_fit.py`); `tests/test_profiler.py` asserts the coarse honest property plus mechanism guards. A timing-based class assertion flakes, and one in `tests/test_flow.py` used to tolerate the very misclassification this stage fixed.
 - **SQLite:** `db.py` owns schema and connection; keep `sqlite3.Row` access by name; JSON columns go through `dumps_json`/`loads_json`.
 - **Editor launching:** all `$EDITOR` behavior lives in `editor.py`; don't call subprocess directly from `flow.py`; tests cover the pure classification helpers only, never process spawning.
 - **CLI:** each subcommand returns an exit code; interactive flows read from `console.input` — tests use the `FakeConsole` fixture (its `actions` hook simulates editing the workbench mid-session).
-- **Terminal-safe AI output:** prompts instruct plain text; `de_markdown` is the belt-and-braces cleanup; underscores are never stripped.
+- **Terminal-safe AI output:** prompts require Markdown and `render_ai` renders it; `de_markdown` remains the legacy plain-text fallback; underscores are never stripped.
 - **Fetcher:** the HTTP transport is an injected callable; tests pin the contract against canned GraphQL fixtures and never hit the network.
 - **Static analysis:** radon + ruff run at submit as evidence; complexity > 10 is a flag, never a failure.
 

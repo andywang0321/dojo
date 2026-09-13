@@ -14,7 +14,7 @@ seed: ## scripted first-run setup (no key prompt, no PATH step)
 	$(UV) run dojo setup --user andy --skip-key --no-path
 
 demo: ## offline end-to-end demo on valid_parentheses
-	DOJO_AI_BACKEND=mock $(UV) run dojo day valid_parentheses --user andy
+	DOJO_AI_BACKEND=mock $(UV) run dojo day valid_parentheses
 
-day: ## start a real session, e.g. `make day SLUG=valid_parentheses USER=andy`
-	$(UV) run dojo day $(SLUG) --user $(USER)
+day: ## start a real session, e.g. `make day SLUG=valid_parentheses`
+	$(UV) run dojo day $(SLUG)

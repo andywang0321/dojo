@@ -6,7 +6,7 @@ Every problem has a **slug** (stable machine identifier: the filename stem), a *
 
 Patterns live in `dojo/patterns.py` — the single source of truth shared by the bank and the curator:
 
-`arrays_and_hashing, stack, two_pointers, trees, heap, binary_search, greedy, dynamic_programming, math, linked_list, graph, backtracking, sliding_window, bit_manipulation`
+`arrays_and_hashing, two_pointers, sliding_window, stack, binary_search, linked_list, trees, tries, heap, backtracking, graphs, advanced_graphs, dp_1d, dp_2d, greedy, intervals, math_and_geometry, bit_manipulation` (the 18 NeetCode groups in roadmap order — v0.10)
 
 **Curated** is a stricter bar — the ✓ column in `dojo list`. A problem is curated when it has everything `dojo day` needs:
 

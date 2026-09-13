@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import textwrap
 
+from dojo import complexity
 from dojo.session.flow import run_day
 from dojo.tutor.backend import MockBackend
 
@@ -57,6 +58,20 @@ def _seed_problem(conn):
         ),
     )
     conn.commit()
+
+
+class SessionState:
+    """Snapshot of ``workbench/<slug>.state.json`` as it stood when a canned
+    answer was typed (the FakeConsole action hook fires before the answer is
+    handled). Hints and tier are *session* state since v0.11 — an attempt row
+    only exists once the student submits, so a quit leaves nothing to read."""
+
+    def __init__(self, workbench, slug="valid_parentheses"):
+        self.path = workbench / f"{slug}.state.json"
+        self.data = None
+
+    def capture(self):
+        self.data = json.loads(self.path.read_text())
 
 
 def test_full_day_flow(db, fake_console, monkeypatch, tmp_path):
@@ -108,12 +123,14 @@ def test_full_day_flow(db, fake_console, monkeypatch, tmp_path):
     ).fetchone()
     assert row["status"] == "correct"
     assert row["self_reported_time"].startswith("O(n)")
-    # A loaded machine occasionally tips the linear fit into the documented
-    # O(n log n) ambiguity (the tool flags it to the user; rule 5: coarse
-    # outcomes). O(n^2) or worse would still fail here.
-    assert row["measured_time_class"] in ("O(n)", "O(n log n)"), row["measured_time_class"]
+    # Wiring, not classification: the pipeline measured, stored a class (or the
+    # range it could support) plus an R², and rendered a review. Class accuracy
+    # belongs to tests/test_fit.py (the rule) and tests/test_profiler.py (real
+    # code) — and this test truncates the size ladder for speed, so any class
+    # assertion here would be an assertion about the machine's load.
+    assert complexity.parse(row["measured_time_class"]) is not None
     assert row["measured_time_r2"] is not None and row["measured_time_r2"] > 0.8
-    assert row["measured_space_class"] == "O(n)"
+    assert complexity.parse(row["measured_space_class"]) is not None
     review = json.loads(row["review"])
     assert "broader_picture" in review
     assert "stack" in review["broader_picture"].lower() or "LIFO" in review["broader_picture"]
@@ -143,8 +160,10 @@ def test_wrong_solution_keeps_session_open(db, fake_console, monkeypatch, tmp_pa
     outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
     assert outcome == "quit"
 
+    # A submit happened (and failed), so the attempt is recorded with the
+    # judge's own verdict — not a placeholder 'unsolved'.
     row = db.execute("SELECT status FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
-    assert row["status"] == "unsolved"
+    assert row["status"] == "wrong_answer"
     assert any("generated" in line for line in console.text.splitlines())
 
 
@@ -249,6 +268,9 @@ def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path)
     attempt = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert attempt["kind"] == "warmup"
     assert attempt["reflection"] is None  # the recall grade replaces reflection
+    # v0.11: the grade — the one event the retention model exists to capture —
+    # is persisted on the attempt, not just folded into the card aggregates.
+    assert attempt["recall_grade"] == 3
 
     updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
     assert updated["reps"] == 1
@@ -257,7 +279,38 @@ def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path)
     assert "recall" in console.text.lower() or "Recall grade" in console.text
 
 
-def test_warmup_quit_records_lapse(db, fake_console, monkeypatch, tmp_path):
+def test_suggested_grade_from_ladder_hints():
+    """The prior for a recall grade (v0.11). Only `ladder` hints count: a
+    `discussion` question is exploring, not struggling. The suggestion tops
+    out at 3 — a hint-free re-solve is evidence *against* struggle, not
+    evidence of ease, and FSRS's easy bonus (×2.61 on the whole grown
+    stability) is far too large to claim by default."""
+    from dojo.session.flow import suggested_grade
+
+    def hint(kind):
+        return {"kind": kind, "tier": 0, "user": "q", "hint": "a"}
+
+    assert suggested_grade([]) == 3
+    assert suggested_grade([hint("discussion"), hint("discussion")]) == 3
+    assert suggested_grade([hint("ladder")]) == 2
+    assert suggested_grade([hint("ladder"), hint("ladder")]) == 2
+    assert suggested_grade([hint("ladder")] * 3) == 1  # a repeated struggle is a lapse
+    # Legacy entries predate the `kind` field and were ladder responses.
+    assert suggested_grade([{"tier": 0, "user": "q", "hint": "a"}]) == 2
+
+
+def test_ladder_hints_not_counted_as_struggle_when_discussing():
+    """The old mapping counted every hint, so a couple of conceptual
+    questions during a warm-up suggested a lapse."""
+    from dojo.session.flow import suggested_grade
+
+    discussion = [{"kind": "discussion", "tier": None, "user": "why?", "hint": "a"}] * 5
+    assert suggested_grade(discussion) == 3
+
+
+def test_warmup_quit_records_nothing(db, fake_console, monkeypatch, tmp_path):
+    """Abandoning a warm-up is 'not now', not evidence of forgetting (v0.11):
+    no attempt row and no card change. A lapse is an explicit grade 1."""
     from dojo import scheduler
     from dojo.db import get_or_create_user
 
@@ -277,9 +330,12 @@ def test_warmup_quit_records_lapse(db, fake_console, monkeypatch, tmp_path):
     )
     assert outcome == "quit"
 
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
     updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
-    assert updated["lapses"] == 1
-    assert updated["stability"] < 1.0
+    assert updated["lapses"] == 0
+    assert updated["reps"] == 0
+    assert updated["stability"] == 1.0
+    assert updated["due_at"] == card["due_at"]
 
 
 def test_repeated_solves_create_distinct_attempts(db, fake_console, monkeypatch, tmp_path):
@@ -341,9 +397,12 @@ def test_repeated_warmups_create_distinct_attempts(db, fake_console, monkeypatch
     assert not (workbench / "valid_parentheses.state.json").exists()
 
 
-def test_quit_persists_hints_and_retires_state(db, fake_console, monkeypatch, tmp_path):
-    """Quitting ends the session: code and hints land on the abandoned
-    attempt row, the state file is retired, and the next run starts fresh."""
+def test_quit_before_submit_records_no_attempt(db, fake_console, monkeypatch, tmp_path):
+    """v0.11 lifecycle: an attempt row exists iff the student submitted.
+
+    Quitting a session that only poked at the tool (feature checks, a quick
+    look, a change of mind) leaves the learner model untouched: no row, no
+    hints, no code."""
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
@@ -351,21 +410,138 @@ def test_quit_persists_hints_and_retires_state(db, fake_console, monkeypatch, tm
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
 
-    # One hint (vague message → tier 0), then quit.
-    assert run_day(db, fake_console(["hint stuck", "quit"]), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    assert run_day(
+        db, fake_console(["hint stuck", "quit"]), MockBackend(),
+        "valid_parentheses", "andy", open_editor=False,
+    ) == "quit"
 
-    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
-    assert row["status"] == "unsolved"
-    assert row["hint_count"] == 1
-    assert json.loads(row["hints"])[0]["tier"] == 0
-    assert json.loads(row["hints"])[0]["kind"] == "ladder"
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
+    assert not (workbench / "valid_parentheses.state.json").exists()
+    # Nothing is left to resume either: the next session is a fresh one.
+    assert run_day(
+        db, fake_console(["quit"]), MockBackend(),
+        "valid_parentheses", "andy", open_editor=False,
+    ) == "quit"
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
+
+
+def test_session_hints_live_in_session_state(db, fake_console, monkeypatch, tmp_path):
+    """Hints and the ladder tier are session state (v0.11) — they reach the
+    attempt row only on submit, and die with an abandoned session."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    snapshot = SessionState(workbench)
+    run_day(
+        db, fake_console(["hint stuck", "quit"], actions={"quit": snapshot.capture}),
+        MockBackend(), "valid_parentheses", "andy", open_editor=False,
+    )
+
+    hints = snapshot.data["hints"]
+    assert [h["user"] for h in hints] == ["stuck"]
+    assert hints[0]["tier"] == 0 and hints[0]["kind"] == "ladder"
+    assert snapshot.data["tier"] == 1
+
+
+def test_quit_after_failed_submit_keeps_that_attempt(db, fake_console, monkeypatch, tmp_path):
+    """A submit is a real attempt even when it fails — quitting afterwards
+    keeps the record of the failed attempt and adds nothing."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    wrong = "def is_valid(s: str) -> bool:\n    return s.count('(') == s.count(')')\n"
+
+    console = fake_console(
+        ["submit", "quit"],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(wrong)},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+
+    rows = db.execute("SELECT status, code FROM attempts").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "wrong_answer"
+    assert rows[0]["code"] == wrong
     assert not (workbench / "valid_parentheses.state.json").exists()
 
-    # Next session is a fresh attempt, not a resume.
-    assert run_day(db, fake_console(["quit"]), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
-    attempts = db.execute("SELECT id FROM attempts ORDER BY id").fetchall()
-    assert len(attempts) == 2
-    assert attempts[0]["id"] != attempts[1]["id"]
+
+def test_resubmit_updates_the_same_attempt_row(db, fake_console, monkeypatch, tmp_path):
+    """Fixing a failed submission in the same session grades the *same*
+    attempt — one invocation never produces two rows."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    path = workbench / "valid_parentheses.py"
+    wrong = "def is_valid(s: str) -> bool:\n    return s.count('(') == s.count(')')\n"
+
+    console = fake_console(
+        [
+            "submit",                       # fails, records wrong_answer
+            "submit",                       # fixed, grades the same row
+            "O(n) one pass", "O(n) stack", "",
+            "The key insight: the stack.",
+            "done",
+        ],
+        actions={"submit": lambda: path.write_text(next(scripts))},
+    )
+    scripts = iter([wrong, SOLUTION])
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    rows = db.execute("SELECT id, status FROM attempts").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "correct"
+
+
+def test_crash_resume_reuses_the_session(db, fake_console, monkeypatch, tmp_path):
+    """The state file is the only resume path now (no `park` command): a
+    session killed before submitting keeps its hints and its code, and the
+    submit that eventually happens creates exactly one attempt."""
+    from dojo.session.state import WorkbenchState, load_state, save_state
+
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    path = workbench / "valid_parentheses.py"
+    path.write_text(SOLUTION)  # work in progress, no submit yet
+
+    # Simulate the interrupted session: state on disk, no attempt row.
+    from dojo.db import get_or_create_user
+
+    save_state(
+        WorkbenchState(
+            slug="valid_parentheses",
+            user_id=get_or_create_user(db, "andy"),
+            started_epoch=1_700_000_000.0,
+            tier=2,
+            hints=[{"kind": "ladder", "tier": 1, "user": "stuck", "hint": "..."}],
+        )
+    )
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
+
+    console = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "", "The key insight: the stack.", "done"]
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    row = db.execute("SELECT * FROM attempts").fetchone()
+    assert row["hint_count"] == 1  # the resumed session's hint survived
+    assert row["started_at"].startswith("2023-11-14")  # from the resumed state
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 1
+    assert load_state("valid_parentheses") is None  # retired on submit
 
 
 def test_new_session_starts_from_blank_template(db, fake_console, monkeypatch, tmp_path):
@@ -389,8 +565,8 @@ def test_new_session_starts_from_blank_template(db, fake_console, monkeypatch, t
     assert "def is_valid(s: str) -> bool:" in content  # template stub signature
     assert "pairs = {" not in content  # the old solution is gone
     assert (workbench / ".vscode" / "settings.json").exists()  # generated workspace
-    row = db.execute("SELECT code FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
-    assert "raise NotImplementedError" in row["code"]  # blank start is recorded
+    # Nothing was submitted, so nothing was recorded (v0.11).
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
 
 
 def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_path):
@@ -426,10 +602,11 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
 
     row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert row["polished"] == 1
+    assert row["recall_grade"] is None  # only warm-ups carry a recall grade
     discussion = json.loads(row["discussion"])
     assert len(discussion) == 1
     assert discussion[0]["user"] == "how else could I solve this?"
-    assert "you could" in discussion[0]["tutor"].lower() or len(discussion[0]["tutor"]) > 0
+    assert "you could" in discussion[0]["tutor"].lower()
     assert not (workbench / "valid_parentheses.state.json").exists()
     assert "Ask a question, or: polish" in console.text  # the post-solve hint (virtual text)
 
@@ -445,15 +622,19 @@ def test_bare_questions_and_command_words_with_text_are_hints(db, fake_console, 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
 
-    console = fake_console(["what is a heap", "check my solution please", "quit"])
+    snapshot = SessionState(workbench)
+    console = fake_console(
+        ["what is a heap", "check my solution please", "quit"],
+        actions={"quit": snapshot.capture},
+    )
     assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
     assert "Unknown command" not in console.text
     assert "visible cases passed" not in console.text  # check never ran
 
-    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
-    hints = json.loads(row["hints"])
+    # Both inputs reached the tutor as ladder hints — observable in the session
+    # state, since an abandoned session leaves no attempt row (v0.11).
+    hints = snapshot.data["hints"]
     assert [h["user"] for h in hints] == ["what is a heap", "check my solution please"]
-    assert row["hint_count"] == 2
 
 
 def test_check_shows_static_findings(db, fake_console, monkeypatch, tmp_path):
@@ -479,10 +660,10 @@ def test_check_shows_static_findings(db, fake_console, monkeypatch, tmp_path):
 # --------------------------------------------------- in-session learn (v0.8)
 
 def test_in_session_learn_parks_and_hands_back(db, fake_console, monkeypatch, tmp_path):
-    """`learn` parks the attempt (code + hints saved, state retired, row
-    'unsolved'), runs the teacher on the problem's pattern, and returns
+    """`learn` abandons the in-progress solve (nothing recorded, state
+    retired), runs the teacher on the problem's pattern, and returns
     'practice' on an accepted retry — the next run_day on the same slug is a
-    fresh attempt."""
+    fresh attempt with a fresh template."""
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
@@ -494,14 +675,13 @@ def test_in_session_learn_parks_and_hands_back(db, fake_console, monkeypatch, tm
     outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
     assert outcome == "practice"
 
-    parked = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
-    assert parked["status"] == "unsolved"
-    assert parked["hint_count"] == 1
+    # Abandoning for study records nothing — no phantom 'unsolved' row.
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
     learn = db.execute("SELECT * FROM learn_sessions").fetchone()
     assert learn["pattern"] == "stack"  # the current problem's pattern
     assert learn["completed"] == 1
     assert not (workbench / "valid_parentheses.state.json").exists()
-    assert "Paused for learning" in console.text
+    assert "Abandoned" in console.text
 
     # The caller loops: a fresh session on the same slug (the _cmd_day path).
     monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
@@ -512,12 +692,12 @@ def test_in_session_learn_parks_and_hands_back(db, fake_console, monkeypatch, tm
     assert run_day(db, retry, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
 
     rows = db.execute("SELECT id, status FROM attempts ORDER BY id").fetchall()
-    assert [r["status"] for r in rows] == ["unsolved", "correct"]
+    assert [r["status"] for r in rows] == ["correct"]
 
 
 def test_in_session_learn_named_topic(db, fake_console, monkeypatch, tmp_path):
-    """`learn <topic>` teaches another pattern but still parks the current
-    attempt (the handoff, if accepted, targets the parked slug)."""
+    """`learn <topic>` teaches another pattern and still abandons the current
+    solve (the handoff, if accepted, targets the same slug)."""
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
@@ -528,8 +708,7 @@ def test_in_session_learn_named_topic(db, fake_console, monkeypatch, tmp_path):
 
     learn = db.execute("SELECT * FROM learn_sessions").fetchone()
     assert learn["pattern"] == "heap"
-    parked = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
-    assert parked["status"] == "unsolved"
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
 
 
 def test_in_session_learn_typo_stays_in_session(db, fake_console, monkeypatch, tmp_path):
@@ -546,8 +725,8 @@ def test_in_session_learn_typo_stays_in_session(db, fake_console, monkeypatch, t
 
 
 def test_warmup_rejects_learn(db, fake_console, monkeypatch, tmp_path):
-    """A warm-up is a graded recall: `learn` is unavailable there (leaving a
-    warm-up is a lapse via quit, not a pause for study)."""
+    """A warm-up is a graded recall: `learn` is unavailable there. Leaving is
+    still a no-op (v0.11) — a lapse requires an explicit grade 1."""
     from dojo import scheduler
     from dojo.db import get_or_create_user
 
@@ -565,7 +744,7 @@ def test_warmup_rejects_learn(db, fake_console, monkeypatch, tmp_path):
     assert "isn't available" in console.text
     assert db.execute("SELECT COUNT(*) AS n FROM learn_sessions").fetchone()["n"] == 0
     updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
-    assert updated["lapses"] == 1
+    assert updated["lapses"] == 0
 
 
 def test_discuss_sees_submitted_code(db, fake_console, monkeypatch, tmp_path):
@@ -646,6 +825,19 @@ def test_complexity_double_check_can_edit_time(db, fake_console, monkeypatch, tm
     assert "Double-check" in console.text
 
 
+def _fit(best_class="O(n)", bracket=None, r2=0.9, confident=True, note=""):
+    from dojo.profiler import FitResult
+
+    return FitResult(
+        best_class=best_class,
+        bracket=bracket,
+        r2=r2,
+        loglog_slope=1.0,
+        confident=confident,
+        note=note,
+    )
+
+
 def _render_complexity_table(**cells) -> str:
     """Render the table through a real Console (ANSI, color forced on —
     FakeConsole only stores str(table), which is an object repr)."""
@@ -656,8 +848,7 @@ def _render_complexity_table(**cells) -> str:
     defaults = {
         "expected_time": "O(n)", "expected_space": "O(n)",
         "claimed_time": "O(n)", "claimed_space": "O(n)",
-        "measured_time": "O(n)", "measured_space": "O(n)",
-        "time_r2": 0.9, "space_r2": 0.9,
+        "time_fit": _fit(), "space_fit": _fit(),
     }
     defaults.update(cells)
     console = Console(
@@ -670,8 +861,10 @@ def _render_complexity_table(**cells) -> str:
 
 def test_complexity_table_shows_r2_not_flag(db):
     """The Flag column is gone: the R² column shows at a glance whether a
-    surprising measured class is a measurement artifact."""
-    out = _render_complexity_table(measured_time="O(n log n)", time_r2=0.612)
+    surprising measured class is worth investigating."""
+    out = _render_complexity_table(
+        time_fit=_fit(best_class="O(n log n)", r2=0.612, confident=False)
+    )
     assert "Flag" not in out
     assert "R²" in out
     assert "0.612" in out
@@ -679,7 +872,7 @@ def test_complexity_table_shows_r2_not_flag(db):
 
 
 def test_complexity_table_color_codes_matches_and_mismatches(db):
-    """All three agreeing → green; any cell in a mismatch → red."""
+    """All three agreeing → green; a genuine disagreement → red."""
     all_match = _render_complexity_table()
     assert "\x1b[32m" in all_match  # green
     assert "\x1b[31m" not in all_match  # no red anywhere
@@ -687,6 +880,43 @@ def test_complexity_table_color_codes_matches_and_mismatches(db):
     mismatch = _render_complexity_table(claimed_time="O(n^2)")
     assert "\x1b[31m" in mismatch  # the disagreeing time cells go red
     assert "\x1b[32m" in mismatch  # the agreeing space row stays green
+
+
+def test_complexity_table_does_not_redden_a_bracketed_measurement(db):
+    """v0.11: the profiler reports the range it can actually support. A claim
+    inside that range is not a disagreement — reddening it was the false-flag
+    that made the table cry wolf on half of all measured attempts."""
+    out = _render_complexity_table(
+        expected_time="O(n log n)",
+        claimed_time="O(n log n)",
+        time_fit=_fit(
+            best_class="O(n)",
+            bracket=("O(n)", "O(n log n)"),
+            confident=False,
+            note="cannot separate O(n) from O(n log n) at this noise level",
+        ),
+    )
+    assert "\x1b[31m" not in out  # nothing disagrees
+    assert "cannot separate" in _plain(out)  # ...and the reason is on screen
+
+
+def _plain(rendered: str) -> str:
+    """ANSI stripped and whitespace collapsed — rich wraps long notes, so
+    content assertions must not depend on where the wrap landed."""
+    import re
+
+    return re.sub(r"\s+", " ", re.sub(r"\x1b\[[0-9;]*m", "", rendered))
+
+
+def test_complexity_table_names_an_incomparable_axis(db):
+    """v0.11: a multi-parameter claim used to fall through the comparison
+    silently. It is now reported as not comparable, not as agreement."""
+    out = _render_complexity_table(
+        expected_time="O(n + m)", claimed_time="O(n + m)",
+        time_fit=_fit(best_class="O(n^2)"),
+    )
+    assert "does not speak to a claim in other variables" in _plain(out)
+    assert "\x1b[31m" not in out  # incomparable is not a disagreement
 
 
 def test_polish_reasks_complexity_and_updates_claims(db, fake_console, monkeypatch, tmp_path):
@@ -737,11 +967,15 @@ def test_hint_renders_markdown_in_bordered_panel(db, fake_console, monkeypatch, 
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
 
-    console = fake_console(["what is the invariant here?", "quit"])
+    workbench = tmp_path / "workbench"
+
+    snapshot = SessionState(workbench)
+    console = fake_console(
+        ["what is the invariant here?", "quit"], actions={"quit": snapshot.capture}
+    )
     assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
 
-    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
-    stored = json.loads(row["hints"])[0]["hint"]
+    stored = snapshot.data["hints"][0]["hint"]
     assert stored == MockBackend.TIER_RESPONSES[0]  # raw text stored, never flattened
 
 
@@ -780,7 +1014,9 @@ def test_typo_guard_decline_sends_question_to_tutor(db, fake_console, monkeypatc
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
 
-    console = fake_console(["qit", "n", "quit"])
+    workbench = tmp_path / "workbench"
+
+    snapshot = SessionState(workbench)
+    console = fake_console(["qit", "n", "quit"], actions={"quit": snapshot.capture})
     assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
-    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
-    assert json.loads(row["hints"])[0]["user"] == "qit"  # treated as a question
+    assert snapshot.data["hints"][0]["user"] == "qit"  # treated as a question

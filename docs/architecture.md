@@ -52,8 +52,8 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 
 - `users(name)` — one row per person; all data is per-user from day one.
 - `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests, signature, lc_number)` — the catalog. `function_name` + `visible_tests` + `signature` = "curated", i.e. ready for `dojo day`. `signature` is a def string, `{"functions": {...}}` for multi-function problems, or `{"methods": {...}}` for class problems. `lc_number` (v0.10) ties a problem to its LeetCode number — the roadmap ladder matches on it; problems without one (dojo's own) sit outside the ladder.
-- `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, static_analysis JSON, timings)` — the learner model. One invocation = one attempt row.
-- `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_review_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern).
+- `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, static_analysis JSON, timings, recall_grade)` — the learner model. **A row exists iff the student submitted** (v0.11): it is created on the first submit of a session, pass or fail, and updated thereafter, so `status` carries the judge's own verdict instead of a placeholder. `quit` records nothing. `recall_grade` (1–4) holds the warm-up grade — the retention model's one input, which used to be folded into the card aggregates and discarded.
+- `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_review_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern), updated by the published FSRS-4.5 equations with default weights (see docs/retention.md).
 - `learn_sessions(user, pattern, transcript JSON, created_at, completed)` — one row per learning-mode session (v0.8); the transcript is rewritten after each exchange, `completed` flips to 1 on graceful exit.
 
 `data/dojo.db`, `workbench/`, and `data/dojo.conf` are gitignored: personal state, not source. Migrations are additive only (`ALTER TABLE ... ADD COLUMN` or new tables); user data is never reset as a side effect. `db.connect()` owns the schema — a fresh DB gets the full `SCHEMA` on first connect.
@@ -86,9 +86,10 @@ The daily pick walks the groups top-down under a **hard prereq gate**: a pattern
 
 Session semantics:
 
-- Workbench state is per (slug, kind) and lasts exactly one session: retired (deleted) on submit and on quit, so every `dojo day` invocation gets a fresh attempt row — repeat sessions never overwrite earlier rows, and a warm-up never reuses a solve session's tier/hints.
-- Quitting persists code + hints to the abandoned row.
-- Every new session writes a blank template over the workbench file; previous solutions live on attempt rows and are recoverable via `dojo history` / `dojo show <id>`.
+- Workbench state is per slug (carrying its kind) and lasts exactly one session: retired on submit and on quit, so every `dojo day` invocation starts fresh — repeat sessions never overwrite earlier rows, and a warm-up never reuses a solve session's tier/hints.
+- Quitting records nothing at all — no row, no hints, no lapse (v0.11). The state file is retired, so a quit is a total abandonment.
+- Every new session writes a blank template over the workbench file; submitted code lives on attempt rows and is recoverable via `dojo history` / `dojo show <id>`.
+- **Crash recovery is the only resume path**: a session killed before submitting leaves its state file behind, and the next invocation resumes it with its code and hints intact.
 
 ## Editor launching
 

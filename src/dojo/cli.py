@@ -683,7 +683,15 @@ def _cmd_show(args) -> int:
         f"[dim]status: {row['status']} · started: {row['started_at']} · "
         f"submitted: {row['submitted_at'] or '—'} · "
         f"duration: {row['duration_seconds'] or '—'}s · "
-        f"hints: {row['hint_count']} · polished: {row['polished'] or 0}x[/dim]"
+        f"hints: {row['hint_count']} · polished: {row['polished'] or 0}x"
+        # v0.11: the recall grade is persisted on the attempt, so show it —
+        # it used to be folded into the card and thrown away.
+        + (
+            f" · recall grade: {row['recall_grade']}"
+            if row["recall_grade"] is not None
+            else ""
+        )
+        + "[/dim]"
     )
     table = ui_table("Complexity: claimed vs. measured")
     table.add_column("")

@@ -188,6 +188,8 @@ def build_review_prompt(
     expected_space: str | None,
     static_analysis=None,
     reflection: str | None = None,
+    measured_time_note: str | None = None,
+    measured_space_note: str | None = None,
 ) -> str:
     static_block = ""
     if static_analysis is not None:
@@ -205,13 +207,26 @@ def build_review_prompt(
     reflection_block = (
         f"\n\nSTUDENT REFLECTION:\n{reflection}" if reflection else ""
     )
+    # The measurement is evidence of variable strength, and the reviewer used
+    # to be handed a bare class with no way to tell a solid reading from a
+    # noisy one — it guessed, and defended students against its own tool.
+    measurement_block = ""
+    if measured_time_note or measured_space_note:
+        measurement_block = (
+            "\nMEASUREMENT CONFIDENCE: "
+            f"time: {measured_time_note or 'n/a'}; "
+            f"space: {measured_space_note or 'n/a'}"
+            "\nA measurement marked ambiguous or low-confidence is NOT evidence "
+            "against the student's claim — say so instead of treating it as a "
+            "disagreement."
+        )
     return (
         f"PROBLEM STATEMENT:\n{statement}\n\n"
         f"SUBMITTED CODE:\n{code[-6000:]}\n\n"
         f"Student's self-reported complexity: time={claimed_time}, space={claimed_space}\n"
         f"Empirically measured complexity: time={measured_time}, space={measured_space}\n"
         f"Problem's expected complexity: time={expected_time}, space={expected_space}"
-        f"{static_block}{reflection_block}\n\n"
+        f"{measurement_block}{static_block}{reflection_block}\n\n"
         "Review as JSON per the rubric."
     )
 

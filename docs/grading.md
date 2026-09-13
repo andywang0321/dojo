@@ -23,18 +23,44 @@ The random-bracket lesson: a *random* bracket string fails at the first unmatche
 
 ## The profiler
 
-For each of `[100, 200, 400, 800, 1600, 3200, 6400]`, the function runs on worst-case-shaped inputs: 3 repeats per size, median per size, GC disabled around the timed call, `tracemalloc` for peak space, one timed call per subprocess (the subprocess boundary contains hangs — never replace it with in-process timing). A least-squares fit over candidates {O(1), O(n), O(n log n), O(n²), O(n³)} picks the best R², with two safeguards:
+For each of `[100, 200, 400, 800, 1600, 3200, 6400]`, the function runs on worst-case-shaped inputs: 5 repeats per size, median per size, one measurement per subprocess (the subprocess boundary contains hangs — never replace it with in-process timing). Inside each subprocess three calls run, in this order:
 
-- **Occam tiebreak:** when two classes fit within ε of each other, the simpler one wins and confidence is flagged. The O(n) vs O(n log n) case is resolved by log-log slope (≈1.0 vs ≈1.1–1.2 at probe sizes).
-- **Honesty contract:** R² < 0.9 → "treat class as suggestive". Exponential growth isn't modeled; superlinear data shows up as a poor fit, not a wrong claim.
+1. an untimed warm-up call, which resolves first-call bytecode specialisation before anything is measured;
+2. **the timed call, with no tracer running** (GC disabled);
+3. the space call, with `tracemalloc` active and no timer.
 
-Two build-time lessons are baked into the tests: CPython 3.12+ resizes unshared `s[:-1]` strings *in place* (a "quadratic" string rebuild is actually linear), and 4 small sizes with constant overhead can make O(n log n) out-fit O(n) — hence the tiebreak. Don't add heuristics that convert low-confidence fits into confident classes.
+Each call gets a fresh deep copy of the arguments, so a solution that mutates its input in place cannot make later calls do different work than the first.
 
-**The allocator staircase (v0.8.1):** peak space for container-heavy solutions is a power-of-two staircase — a set/dict table serves the same capacity across a 2–4× range of n, then jumps. Sampled at exact doublings, consecutive points land in pairs on the same step, and a linear structure aliases as exponent 2: a real solve of `contains_duplicate` (`len(set(nums)) != len(nums)`, textbook O(n) space) measured "O(n²)" at r² = 0.968. Space points are therefore fit on every-second point (`fit.staircase_safe_points`, spacing ×4): in both CPython growth regimes (×4 for small tables, ×2 for large) a whole number of steps is crossed per sample, so linear growth reads as slope 1 — and smooth O(n) or genuine O(n²) data is unaffected. This is a measurement fix, not a verdict shortcut: R² and the honesty flags still come from the data, and the synthetic staircase test pins both the alias and the fix.
+**Why the order matters (v0.11).** `tracemalloc` used to be started *before* the timed call. Its per-allocation bookkeeping is itself superlinear, so the "time" being measured included the instrument: on one real solution the log-log slope was **1.164 with tracing and 0.889 without** — the difference between reporting O(n log n) and O(n). It misclassified 8 of the 15 measured attempts in the live database, and in all 8 the student's claim agreed with the problem's own documented expected class, so the measurement was the only outlier. Replaying those same solutions through the fixed protocol produces **0 disagreements**.
+
+### The decision rule
+
+Each candidate class f is fitted to the measurements as `y = k·f(n) + c` by least squares, and every candidate whose residual stays within the measurement's own noise of the best residual is **plausible**. The report is the simplest plausible class plus a **bracket** naming what the data cannot tell apart:
+
+```
+Time    O(n log n)    O(n log n)    O(n)…O(n log n)    0.998
+                                    cannot separate O(n) from O(n log n)
+```
+
+This replaced an R² comparison plus a magic log-log slope threshold (`NLN_SLOPE_THRESHOLD = 1.06`). That threshold sat *above* the slope actually measured for a genuine O(n log n) function (1.005–1.030 over four trials, biased low by the additive overhead every measurement carries), so sort-based solutions were classified O(n) every time — while the tracemalloc contamination pushed allocation-heavy linear code the other way. Two errors cancelling made the output look plausible.
+
+The deeper reason a threshold cannot work: over this probe ladder the O(n) and O(n log n) shapes differ by only ~0.3% of the signal variance, below realistic timing noise (the measured per-point spread is 3–12%). They are not separable by fit quality at that noise, and the honest output is a range — not a guess. Coarser distinctions (n vs n², n² vs n³) separate by orders of magnitude and are still reported as single classes with confidence.
+
+The guarantee is tested rather than asserted: across a noise sweep of 0–30% over all five candidate shapes, the classifier never returns a single wrong class (it brackets instead). Those tests are synthetic and deterministic — the old suite asserted a *measured* class and flaked under load, which tests the machine rather than the rule.
+
+Two safeguards survive from earlier stages: the **allocator staircase** fix (space fits use every second point — `fit.staircase_safe_points`: set/dict tables are power-of-two staircases that alias a linear structure as O(n²) at exact doublings), and the R² < 0.9 "treat class as suggestive" flag.
+
+### Comparison is three-valued
+
+`complexity.compare` returns **agree**, **disagree** or **incomparable**, and the table renders all three. The previous two-valued version silently dropped any class outside its canonical table: `O(n+m)`, `O(n*m)` and `O(k)` were unknown, so a student's `O(n+m)` claim produced *no* mismatch against a measured `O(n^2)` — a confident blank where the widest disagreement in the book should have been. Multi-parameter expressions are canonicalized (`O(n+m) ≡ O(m+n)`, `O(n*m) ≡ O(m*n)`), and an axis whose sides are not comparable says so instead of staying silent. A claim inside the measurement's bracket is not a disagreement, so a bracketed reading no longer reddens a correct claim.
 
 ## The reviewer
 
-Post-submission, rubric-scored JSON: correctness, approach quality, style/idiom, naming, edge cases, complexity-claim check, **complexity-reasoning** (is the *why* behind the claim sound?), plus **reflection feedback** (prose on the student's reflection — feedback, not a score), broader picture, overall comment. Inputs: statement, submitted code, self-reported complexity (the raw strings, so the reasoning is visible), measured complexity, expected complexity, the static-analysis block, and the student's reflection — which is why reflection now happens *before* the review. Hard rules: it critiques, never repairs — no alternative solutions, no code. Terminal-safe: plain text only, `de_markdown` applied at display time (underscores are never stripped — they may be identifiers like `two_sum`).
+Post-submission, rubric-scored JSON: correctness, approach quality, style/idiom, naming, edge cases, complexity-claim check, **complexity-reasoning** (is the *why* behind the claim sound?), plus **reflection feedback** (prose on the student's reflection — feedback, not a score), broader picture, overall comment. Inputs: statement, submitted code, self-reported complexity (the raw strings, so the reasoning is visible), measured complexity, expected complexity, the static-analysis block, and the student's reflection — which is why reflection now happens *before* the review.
+
+The reviewer also receives a **measurement confidence** line (R², plus whether the reading was bracketed or low-confidence) with the instruction that such a measurement is not evidence against the student's claim. It used to be handed a bare class and left to guess: in the live data it consistently defended students against the tool's own contaminated measurements ("the empirical measurement of O(n log n) is almost certainly an artifact of the benchmark harness"), which meant the AI layer was silently error-correcting the deterministic one. Making the measurement honest is the fix; telling the reviewer is the belt-and-braces.
+
+Hard rules: it critiques, never repairs — no alternative solutions, no code. Terminal-safe: plain text only, `de_markdown` applied at display time (underscores are never stripped — they may be identifiers like `two_sum`).
 
 Model output is schema-normalized (`reviewer.normalize_review`) before display and storage: rubric dimensions may arrive as `{"score", "comment"}` dicts or as bare numbers, and either shape must render (a real solve once returned bare ints and the chart came out empty). Scores are clamped to the 1–5 rubric (a 10-point-scale model once shipped 9/5 scores; the prompt now states the scale too), and a transient non-JSON response gets one retry before the review is skipped (a real first-submit review once died this way).
 

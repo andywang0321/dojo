@@ -20,12 +20,11 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 from dojo import complexity, scheduler, static
 from dojo.config import VENV_PYTHON, WORKBENCH_DIR
-from dojo.db import dumps_json, get_or_create_user, loads_json, now
+from dojo.db import dumps_json, get_or_create_user, iso_from_epoch, loads_json, now
 from dojo.editor import ensure_ide_config, launch as launch_editor
 from dojo.judge import JUDGE_CASES, ORACLES, PROFILER_INPUTS, run_cases
 from dojo.profiler import classify, measure, staircase_safe_points
@@ -143,90 +142,99 @@ def _truncate(text: str, limit: int = 60) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _axis_outcomes(
+    expected: str | None,
+    claimed: str | None,
+    measured: "FitResult | None",
+) -> dict[str, str]:
+    """The three pairwise comparisons of one axis. The measured side carries
+    its bracket, so a claim the measurement cannot rule out is not a
+    disagreement."""
+    bracket = measured.bracket if measured is not None else None
+    measured_class = measured.best_class if measured is not None else None
+    return {
+        "claim_vs_expected": complexity.compare(claimed, expected),
+        "measured_vs_claimed": complexity.compare(measured_class, claimed, b_bracket=bracket),
+        "measured_vs_expected": complexity.compare(measured_class, expected, b_bracket=bracket),
+    }
+
+
 def _show_complexity_table(
     console: Console,
     expected_time: str | None,
     expected_space: str | None,
     claimed_time: str | None,
     claimed_space: str | None,
-    measured_time: str | None,
-    measured_space: str | None,
-    time_r2: float | None = None,
-    space_r2: float | None = None,
+    time_fit: "FitResult | None",
+    space_fit: "FitResult | None",
 ) -> None:
+    """The three-way table. Red means *disagreement*; an axis whose sides are
+    not comparable (a multi-parameter claim against a single-parameter
+    measurement) is marked as such instead of being silently skipped, and a
+    bracketed measurement never reddens a claim it contains (v0.11)."""
     table = ui_table("Complexity: expected vs. claimed vs. measured")
     table.add_column("")
     table.add_column("Expected")
     table.add_column("You claimed")
     table.add_column("Measured")
     table.add_column("R²")
-    notes = []
-    if complexity.mismatch(claimed_time, expected_time):
-        notes.append("time: claim vs expected")
-    if complexity.mismatch(claimed_time, measured_time):
-        notes.append("time: claim vs measurement")
-    if complexity.mismatch(expected_time, measured_time):
-        notes.append("time: expected vs measurement")
-    if complexity.mismatch(claimed_space, expected_space):
-        notes.append("space: claim vs expected")
-    if complexity.mismatch(claimed_space, measured_space):
-        notes.append("space: claim vs measurement")
-    if complexity.mismatch(expected_space, measured_space):
-        notes.append("space: expected vs measurement")
-
-    def r2_cell(measured: str | None, r2: float | None) -> str:
-        return "—" if measured is None or r2 is None else str(r2)
+    notes: list[str] = []
+    ambiguous: list[str] = []
 
     def axis_cells(
-        expected: str | None, claimed: str | None, measured: str | None
+        axis: str,
+        expected: str | None,
+        claimed: str | None,
+        fit: "FitResult | None",
     ) -> tuple:
-        """Color-code the three cells of one axis: any cell participating in
-        a mismatch goes red; when all three agree, they go green. Cells
-        untouched by a mismatch stay neutral. Cell values are rendered as
-        literal `Text` — rich Tables strip markup in cells."""
-        claimed_vs_expected = complexity.mismatch(claimed, expected)
-        measured_vs_claimed = complexity.mismatch(measured, claimed)
-        measured_vs_expected = complexity.mismatch(measured, expected)
-        any_mismatch = claimed_vs_expected or measured_vs_claimed or measured_vs_expected
-        all_agree = (
-            not any_mismatch
-            and all(v is not None for v in (expected, claimed, measured))
-            and expected == claimed == measured
+        outcomes = _axis_outcomes(expected, claimed, fit)
+        measured_label = fit.label if fit is not None else None
+        disagree = {k for k, v in outcomes.items() if v == complexity.DISAGREE}
+        incomparable = {k for k, v in outcomes.items() if v == complexity.INCOMPARABLE}
+        for key in ("claim_vs_expected", "measured_vs_claimed", "measured_vs_expected"):
+            if key in disagree:
+                notes.append(f"{axis}: {key.replace('_', ' ')}")
+        if incomparable and expected and claimed and fit is not None:
+            ambiguous.append(
+                f"{axis}: the measurement scales a single size parameter, so it "
+                "does not speak to a claim in other variables"
+            )
+        if fit is not None and fit.bracket:
+            ambiguous.append(f"{axis}: {fit.note}")
+        agree_all = (
+            not disagree
+            and not incomparable
+            and all(v is not None for v in (expected, claimed, measured_label))
+            and all(outcome == complexity.AGREE for outcome in outcomes.values())
         )
 
         def cell(value: str | None, red: bool) -> Text | str:
-            text = value or "-"
+            text = value or "—"
             if red:
                 return Text(text, style="red")
-            if all_agree:
+            if agree_all:
                 return Text(text, style="green")
             return text
 
         return (
-            cell(expected, claimed_vs_expected or measured_vs_expected),
-            cell(claimed, claimed_vs_expected or measured_vs_claimed),
-            cell(measured, measured_vs_claimed or measured_vs_expected),
+            cell(expected, "claim_vs_expected" in disagree or "measured_vs_expected" in disagree),
+            cell(claimed, "claim_vs_expected" in disagree or "measured_vs_claimed" in disagree),
+            cell(measured_label, "measured_vs_claimed" in disagree or "measured_vs_expected" in disagree),
         )
 
     expected_cell, claimed_cell, measured_cell = axis_cells(
-        expected_time, claimed_time, measured_time
+        "time", expected_time, claimed_time, time_fit
     )
     table.add_row(
-        "Time",
-        expected_cell,
-        claimed_cell,
-        measured_cell,
-        r2_cell(measured_time, time_r2),
+        "Time", expected_cell, claimed_cell, measured_cell,
+        "—" if time_fit is None or time_fit.r2 is None else str(time_fit.r2),
     )
     expected_cell, claimed_cell, measured_cell = axis_cells(
-        expected_space, claimed_space, measured_space
+        "space", expected_space, claimed_space, space_fit
     )
     table.add_row(
-        "Space",
-        expected_cell,
-        claimed_cell,
-        measured_cell,
-        r2_cell(measured_space, space_r2),
+        "Space", expected_cell, claimed_cell, measured_cell,
+        "—" if space_fit is None or space_fit.r2 is None else str(space_fit.r2),
     )
     console.print(table)
     if notes:
@@ -235,6 +243,24 @@ def _show_complexity_table(
             "whether it's the algorithm, the claim, or measurement noise "
             "(low R² leans noise).[/yellow]"
         )
+    for line in dict.fromkeys(ambiguous):
+        console.print(f"[dim]{line}[/dim]")
+
+
+def _measurement_note(fit: "FitResult | None") -> str | None:
+    """What the reviewer needs to know about a measurement's strength — it
+    used to be handed a bare class and left to guess whether a disagreement
+    was evidence or an artifact."""
+    if fit is None:
+        return None
+    if fit.bracket:
+        return (
+            f"ambiguous at this noise level (R²={fit.r2}); the data cannot "
+            f"separate {' from '.join(fit.bracket)} — not evidence against the claim"
+        )
+    if not fit.confident:
+        return f"low confidence (R²={fit.r2}); treat as suggestive, not a verdict"
+    return f"R²={fit.r2}"
 
 
 def _write_template(problem: sqlite3.Row, force: bool = False) -> None:
@@ -278,10 +304,11 @@ def _check(console: Console, problem: sqlite3.Row, code_path: Path) -> bool:
 
 def _measure_complexity(
     console: Console, problem: sqlite3.Row, code_path: Path
-) -> tuple[str | None, float | None, str | None, float | None]:
-    """Empirical measurement + the three-way table (shared by submit and
-    polish). Returns (measured_time, time_r2, measured_space, space_r2)."""
-    measured_time = measured_space = time_r2 = space_r2 = None
+) -> tuple["FitResult | None", "FitResult | None"]:
+    """Empirical measurement, shared by submit and polish. Returns the time
+    and space fits — each carrying the class *and* the bracket the data
+    cannot resolve past."""
+    time_fit = space_fit = None
     if problem["slug"] in PROFILER_INPUTS:
         console.print("[bold]Measuring empirical complexity[/bold] (doubling input sizes, median of repeats)...")
         m = measure(
@@ -290,20 +317,24 @@ def _measure_complexity(
             PROFILER_INPUTS[problem["slug"]],
         )
         if m.time_points:
-            fit = classify([n for n, _ in m.time_points], [t for _, t in m.time_points])
-            measured_time, time_r2 = fit.best_class, round(fit.r2, 3)
+            time_fit = classify(
+                [n for n, _ in m.time_points],
+                [t for _, t in m.time_points],
+                spread=m.spread,
+            )
         if m.space_points:
             # Space fits on every-second point: container allocations are a
             # power-of-two staircase, and exact-doubling sampling aliases a
             # linear structure as O(n^2) (see fit.staircase_safe_points).
             safe = staircase_safe_points(m.space_points)
-            sfit = classify([n for n, _ in safe], [s for _, s in safe])
-            measured_space, space_r2 = sfit.best_class, round(sfit.r2, 3)
+            space_fit = classify(
+                [n for n, _ in safe], [s for _, s in safe], spread=m.spread
+            )
         if m.dropped:
             console.print(f"[dim](dropped sizes: {', '.join(m.dropped)})[/dim]")
     else:
         console.print("[dim]No profiler input generator registered for this problem — skipping measurement.[/dim]")
-    return measured_time, time_r2, measured_space, space_r2
+    return time_fit, space_fit
 
 
 def _ask_question(console: Console, label: str, default: str | None = None) -> str:
@@ -359,22 +390,70 @@ def _ask_complexity_claims(
     return claimed_time_raw, claimed_space_raw
 
 
+def _record_submit(
+    conn: sqlite3.Connection,
+    state: WorkbenchState,
+    problem: sqlite3.Row,
+    user_id: int,
+    report,
+) -> int:
+    """Create this session's attempt row on the first submit, update it on
+    every later one (v0.11: **an attempt exists iff the student submitted**).
+
+    The judge's own verdict is the status, so a failed submit is a real
+    attempt and `status` carries information — instead of the placeholder
+    'unsolved' that merely starting a session used to write."""
+    code = state.code_path.read_text()
+    submitted_at = now()
+    if state.attempt_id is None:
+        cur = conn.execute(
+            """
+            INSERT INTO attempts
+                (user_id, problem_id, kind, status, code, started_at, submitted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                problem["id"],
+                state.kind,
+                report.status,
+                code,
+                iso_from_epoch(state.started_epoch),
+                submitted_at,
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+    conn.execute(
+        "UPDATE attempts SET status = ?, code = ?, submitted_at = ? WHERE id = ?",
+        (report.status, code, submitted_at, state.attempt_id),
+    )
+    conn.commit()
+    return state.attempt_id
+
+
 def _submit(
     conn: sqlite3.Connection,
     console: Console,
     backend,
     problem: sqlite3.Row,
     state: WorkbenchState,
+    user_id: int,
     warmup: bool = False,
 ) -> tuple[str, str | None]:
     """Run the full pipeline on the current code. Returns
     ("keep_going", None) on failed cases, ("solved", reflection) on success.
-    Warm-ups skip the reflection prompt — the recall grade replaces it."""
+    Warm-ups skip the reflection prompt — the recall grade replaces it.
+
+    The attempt row is created by this call (v0.11): a session that never
+    submits never records anything."""
     code_path = state.code_path
     rng = random.Random(f"dojo-{problem['slug']}")
     cases = _build_cases(problem, rng)
     console.print(f"[bold]Judging {len(cases)} cases[/bold] (visible + generated + oracle-checked)...")
     report = run_cases(code_path, problem["function_name"], cases)
+    state.attempt_id = _record_submit(conn, state, problem, user_id, report)
+    save_state(state)
     if not report.all_passed:
         console.print(
             f"[red]✗ {report.passed}/{report.total} passed[/red]"
@@ -394,9 +473,7 @@ def _submit(
     claimed_time = complexity.parse(claimed_time_raw)
     claimed_space = complexity.parse(claimed_space_raw)
 
-    measured_time, time_r2, measured_space, space_r2 = _measure_complexity(
-        console, problem, code_path
-    )
+    time_fit, space_fit = _measure_complexity(console, problem, code_path)
 
     _show_complexity_table(
         console,
@@ -404,10 +481,8 @@ def _submit(
         problem["expected_space"],
         claimed_time,
         claimed_space,
-        measured_time,
-        measured_space,
-        time_r2,
-        space_r2,
+        time_fit,
+        space_fit,
     )
 
     # Reflect first, so the reviewer can comment on the reflection.
@@ -427,12 +502,14 @@ def _submit(
         code,
         claimed_time_raw,
         claimed_space_raw,
-        measured_time,
-        measured_space,
+        time_fit.label if time_fit else None,
+        space_fit.label if space_fit else None,
         problem["expected_time"],
         problem["expected_space"],
         static_analysis=analysis,
         reflection=reflection,
+        measured_time_note=_measurement_note(time_fit),
+        measured_space_note=_measurement_note(space_fit),
     )
     if "error" in review_json:
         console.print("[yellow]Reviewer unavailable (non-JSON response) — review skipped.[/yellow]")
@@ -460,10 +537,10 @@ def _submit(
             dumps_json(state.hints),
             claimed_time_raw,
             claimed_space_raw,
-            measured_time,
-            time_r2,
-            measured_space,
-            space_r2,
+            time_fit.label if time_fit else None,
+            time_fit.r2 if time_fit else None,
+            space_fit.label if space_fit else None,
+            space_fit.r2 if space_fit else None,
             dumps_json(review_json) if review_json else None,
             reflection,
             dumps_json(analysis.to_dict()),
@@ -475,7 +552,8 @@ def _submit(
         Panel(
             f"[bold green]Solved:[/bold green] {problem['title']} — attempt recorded.\n"
             f"Claimed: {claimed_time or '?'} / {claimed_space or '?'}  ·  "
-            f"Measured: {measured_time or '—'} / {measured_space or '—'}  ·  "
+            f"Measured: {(time_fit.label if time_fit else None) or '—'} / "
+            f"{(space_fit.label if space_fit else None) or '—'}  ·  "
             f"Hints used: {len(state.hints)}",
             title="Session complete",
         )
@@ -533,19 +611,15 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
     )
     claimed_time = complexity.parse(claimed_time_raw)
     claimed_space = complexity.parse(claimed_space_raw)
-    measured_time, time_r2, measured_space, space_r2 = _measure_complexity(
-        console, problem, code_path
-    )
+    time_fit, space_fit = _measure_complexity(console, problem, code_path)
     _show_complexity_table(
         console,
         problem["expected_time"],
         problem["expected_space"],
         claimed_time,
         claimed_space,
-        measured_time,
-        measured_space,
-        time_r2,
-        space_r2,
+        time_fit,
+        space_fit,
     )
 
     review_json = loads_json(row["review"], {})
@@ -556,11 +630,13 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
             code_path.read_text(),
             claimed_time_raw,
             claimed_space_raw,
-            measured_time,
-            measured_space,
+            time_fit.label if time_fit else None,
+            space_fit.label if space_fit else None,
             problem["expected_time"],
             problem["expected_space"],
             static_analysis=analysis,
+            measured_time_note=_measurement_note(time_fit),
+            measured_space_note=_measurement_note(space_fit),
         )
         if "error" in review_json:
             console.print("[yellow]Reviewer unavailable (non-JSON response) — review kept as-is.[/yellow]")
@@ -583,10 +659,10 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
             now(),
             claimed_time_raw,
             claimed_space_raw,
-            measured_time,
-            time_r2,
-            measured_space,
-            space_r2,
+            time_fit.label if time_fit else None,
+            time_fit.r2 if time_fit else None,
+            space_fit.label if space_fit else None,
+            space_fit.r2 if space_fit else None,
             dumps_json(analysis.to_dict()),
             dumps_json(review_json) if review_json else None,
             state.attempt_id,
@@ -641,29 +717,35 @@ def _post_solve_loop(conn: sqlite3.Connection, console: Console, backend, proble
             _discuss(conn, console, backend, problem, state, raw)
 
 
-def _persist_abandoned(conn: sqlite3.Connection, state: WorkbenchState, console: Console, message: str) -> None:
-    """The quit/learn parking persistence: code and hints land on the
-    attempt row, status stays 'unsolved' — grading honesty is preserved
-    because a later solve is a fresh attempt."""
-    conn.execute(
-        """
-        UPDATE attempts SET
-            code = ?, status = 'unsolved', hint_count = ?, hints = ?
-        WHERE id = ?
-        """,
-        (
-            state.code_path.read_text(),
-            len(state.hints),
-            dumps_json(state.hints),
-            state.attempt_id,
-        ),
-    )
-    conn.commit()
+def _abandon(console: Console, state: WorkbenchState, message: str) -> None:
+    """End a session with nothing recorded (v0.11). An attempt row exists iff
+    the student submitted, so abandoning — a glance at the tool, a change of
+    mind, a `learn` handoff — writes nothing to the learner model: no row, no
+    hints, no code, no lapse. The state file is retired, so the next
+    invocation starts fresh."""
     console.print(message)
+    retire_state(state.slug)
 
 
-def _ask_grade(console: Console, hints: int) -> int:
-    suggested = 4 if hints == 0 else 3 if hints == 1 else 2
+def suggested_grade(hints: list[dict]) -> int:
+    """A prior for the recall grade from the hints a session used (v0.11).
+
+    Only ``ladder`` hints count: a ``discussion`` question is exploring, not
+    struggling, and the old mapping counted every hint. The suggestion tops out
+    at 3 — a hint-free re-solve is evidence *against* struggle, not evidence of
+    ease, and FSRS's easy bonus multiplies the whole grown stability by 2.61,
+    so claiming "easy" should be a deliberate choice rather than the default.
+    Three or more ladder hints is a real lapse signal."""
+    ladder = sum(1 for h in hints if h.get("kind") != "discussion")
+    if not ladder:
+        return 3
+    if ladder <= 2:
+        return 2
+    return 1
+
+
+def _ask_grade(console: Console, hints: list[dict]) -> int:
+    suggested = suggested_grade(hints)
     raw = make_prompt(console)(
         f"Recall grade [4=easy 3=good 2=hard 1=forgot] (suggested {suggested}): "
     ).strip()
@@ -728,15 +810,10 @@ def run_day(
     state = load_state(slug)
     is_new_session = state is None or state.user_id != user_id or state.kind != kind
     if is_new_session:
-        cur = conn.execute(
-            "INSERT INTO attempts (user_id, problem_id, kind, status, started_at) "
-            "VALUES (?, ?, ?, 'unsolved', ?)",
-            (user_id, problem["id"], kind, now()),
-        )
-        conn.commit()
+        # No attempt row yet (v0.11): submitting creates it. A new session is
+        # only the state file and a blank template.
         state = WorkbenchState(
             slug=slug,
-            attempt_id=cur.lastrowid,
             user_id=user_id,
             started_epoch=time.time(),
             kind=kind,
@@ -830,17 +907,12 @@ def run_day(
             raw = fixed
             cmd, _, rest = fixed.partition(" ")
         if cmd in ("q", "quit") and not rest:
-            _persist_abandoned(
-                conn,
-                state,
+            _abandon(
                 console,
-                "[dim]Progress saved; attempt stays 'unsolved'. Next session "
+                state,
+                "[dim]Session abandoned — nothing recorded. Next session "
                 "starts fresh.[/dim]",
             )
-            if warmup and card is not None:
-                summary = scheduler.record_grade(conn, card, 1)
-                _show_card_update(console, card, summary, lapse=True)
-            retire_state(state.slug)
             return "quit"
         if cmd in ("c", "check") and not rest:
             _check(console, problem, state.code_path)
@@ -873,14 +945,12 @@ def run_day(
                         "`learn <topic>` instead.[/yellow]"
                     )
                     continue
-            _persist_abandoned(
-                conn,
-                state,
+            _abandon(
                 console,
-                "[dim]Paused for learning — progress saved; the attempt stays "
-                "'unsolved'. The learn session can hand you back to it.[/dim]",
+                state,
+                "[dim]Abandoned for study — nothing recorded; the learn "
+                "session can hand you back to this problem fresh.[/dim]",
             )
-            retire_state(state.slug)
             result = run_learn(
                 conn, console, backend, user_name, pattern, handoff_slug=state.slug
             )
@@ -910,17 +980,30 @@ def run_day(
                 console.print(f"[red]Audit failed: {exc}[/red]")
         elif cmd in ("s", "submit") and not rest:
             outcome, reflection = _submit(
-                conn, console, backend, problem, state, warmup=warmup
+                conn, console, backend, problem, state, user_id, warmup=warmup
             )
             if outcome == "solved":
                 if warmup and card is not None:
-                    grade = _ask_grade(console, len(state.hints))
+                    grade = _ask_grade(console, state.hints)
                     summary = scheduler.record_grade(conn, card, grade)
+                    # The grade itself is the retention model's one input —
+                    # persist it instead of keeping only the card aggregates.
+                    conn.execute(
+                        "UPDATE attempts SET recall_grade = ? WHERE id = ?",
+                        (grade, state.attempt_id),
+                    )
+                    conn.commit()
                     _show_card_update(console, card, summary, lapse=(grade == 1))
                     retire_state(state.slug)
                     return "warmup_done"
+                # A first solve carries evidence about the pattern in its own
+                # hint count — seed the card with it rather than a flat default.
                 scheduler.ensure_card(
-                    conn, user_id, problem["pattern"], reflection=reflection
+                    conn,
+                    user_id,
+                    problem["pattern"],
+                    reflection=reflection,
+                    grade=suggested_grade(state.hints),
                 )
                 if not warmup:
                     _post_solve_loop(conn, console, backend, problem, state)

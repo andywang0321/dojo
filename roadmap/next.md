@@ -1,17 +1,119 @@
 # next — backlog
 
-Learning mode has moved to [v0.8](v0.8.md) and is being implemented.
+The v0.10 progression and the [v0.11](v0.11.md) correctness stage have
+shipped (attempt lifecycle, complexity measurement, warm-up / retention).
 
-## Proposals from the v0.8 design audit (uncommitted, in rough priority order)
+## v0.11 audit findings (from the handoff code audit)
 
-1. **Judge ground-truth anchor + false-failure banner.** For LeetCode-fetched problems, validate the AI oracle against LeetCode's own judge once at curation time and store the verdict in the proposal provenance (dual-oracle agreement stays, but as a filter before the real check). In `_submit`, a distinct message when a submission fails only generated/oracle cases (visible cases pass) — "this could be a curation bug — `dojo report` audits it" — instead of a plain ✗. Converts the worst failure mode from silent trust loss into a visible, fixable event.
-2. **Warm-up rotation floor.** When a pattern has ≥2 solved problems, warm up on a *different* problem than the previous cycle for that card — breaks the worst of the recognition problem cheaply and sets up real variants.
-3. **Streak + reminder.** Status line shows consecutive practice days; the setup wizard offers a daily cron/launchd entry with the same consent UX as the PATH wrapper. The actual adoption risk is the habit, not the loop's interior.
-4. **Consolidate `profile` into `history`** (near-duplicate commands; keep `progress` for patterns, `show <id>` for detail) and hold the session command list ≤7. ✅ shipped in v0.9 — `profile` is now a hidden alias of `history`.
-5. **Reviewer calibration in `dojo progress`.** Reviewer scores vs. subsequent warm-up grades per pattern, plus hint-count correlation — an audit loop for the *reviewer*, mirroring what `report` does for the *curator*.
-6. **Learner-model steering.** Stall detection (tier at abandon, hint counts) feeding problem selection and the proactive learn offer — close the loop on "the learner model is the asset".
-7. **Write-up.** The never-solve-as-architecture idea, the honesty contract, and the grader self-audit loop are worth a public write-up; the design docs are the second-most-valuable artifact.
-8. **Terminal rendering polish.** ✅ shipped in v0.10.3 (the markdown flip: rich Markdown + syntax highlighting on all AI prose, dim title lines instead of Panels). Render AI output with rich `Markdown` (headings, lists, emphasis) instead of the flatten-then-strip `de_markdown` display path, and syntax-highlight code blocks with rich `Syntax` (teacher/discussion output, `dojo show` code panels). Keep `de_markdown` for transcript persistence and the non-TTY fallback, and pin the plain-text prompt contract tests when the display path changes. The prompt-color regression (`[bold cyan]dojo ›` flattening under prompt_toolkit) shipped fixed in v0.8.1 via rich-markup→ANSI conversion.
+Ordered roughly by how much trust they cost. Items marked **→ v0.11** are
+being fixed in the current stage rather than deferred.
+
+1. **The leak audit is fail-open.** `tutor._audit` returns `1` ("clean") when
+   the auditor returns non-JSON, omits `rating`, or returns a non-int — so a
+   tutor response containing a complete solution is **delivered** in all three
+   failure modes (verified by execution: a `two_sum` implementation reached the
+   student in 3/3 cases). Make the audit fail-closed with a visible signal, and
+   add one test per failure mode. Related: a discarded leak is already in
+   `data/logs/dojo.log` (`chat_json` logs the raw response *before* the discard
+   decision), so "discarded, never shown" is false with respect to the log.
+2. **The never-solve guard test is a token grep, not a boundary check.**
+   `tests/test_never_solve.py` greps five literal strings; it stays green if a
+   full solution is passed as the `statement` argument, if a new module name
+   appears (`dojo/solutions.py`), if `JUDGE_CASES`/`PROFILER_INPUTS` are used
+   (not in the list), or via a transitive import through `dojo.db`/`dojo.config`
+   (never scanned). Replace with an import-graph assertion plus a provenance
+   check on the tutor call site.
+3. **The judge's stdout channel is only half-isolated.** `isolated()` swaps
+   `sys.stdout` but not file descriptor 1: `os.write(1, …)`, `os.system`, or a
+   child process inherits into the protocol channel, corrupts the result JSON,
+   and `json.loads` then raises **out of `run_cases`** — killing the session.
+   Same bug class as the v0.10.1 print fix. Capture at the fd level.
+4. **Case-level errors are mislabeled.** `JudgeReport.status` is computed from
+   `n_passed` alone, so a case whose handler caught an exception reports
+   `wrong_answer`; the `error` status is unreachable for case errors.
+5. **No transport-error handling in the daily loop.** `cli.main` catches only
+   `KeyboardInterrupt`; ~11 AI call sites re-raise; `flow.py` has two `try`
+   blocks. One transient API/network failure ends a session with a traceback.
+   Degrade tutor/reviewer to "unavailable" and keep the loop alive; test with a
+   backend that raises.
+6. **The prereq gate degrades to "content exhausted."** `_prereqs_satisfied`
+   asks whether a prerequisite has an unsolved *curated* ladder problem left, so
+   an empty bank satisfies it trivially — 12 of 18 groups report OPEN with only
+   7 problems solved. Either gate on roadmap coverage with uncurated rows
+   counted, or document the degradation; today the status line promises
+   "prerequisites gated."
+7. **The curator prompt still enumerates the pre-v0.10 taxonomy.**
+   `CURATOR_SYSTEM` lists `dynamic_programming`, `math`, `graph` (9 old
+   patterns) while `curator.validate` enforces the 18 NeetCode slugs — so
+   `dojo curate` cannot curate any DP/Math/Geometry problem at all. `dojo fetch`
+   survives only because it passes a pattern hint. Fix the prompt's enum.
+8. **Mock and live reviews are indistinguishable in the learner model.**
+   Nothing records which backend produced a review; a `DOJO_AI_BACKEND=mock`
+   row sits in `attempts` next to live ones (attempt 2 in the live DB is canned
+   mock text, and it lacks `complexity_reasoning`/`reflection_feedback`). Add a
+   backend/model provenance column before any analysis of the model.
+9. **`duration_seconds` measures wall-clock since session start** (one sample:
+   84,773 s ≈ 23.5 h across a closed laptop) and is consumed by nothing. Either
+   measure real solve time or document it as a session span.
+10. **MockBackend keys canned branches on system-prompt substrings**, so a test
+    fixture constrains production prompt wording — `TEACHER_SYSTEM` is forbidden
+    from containing "tutor"/"discussion", and the discussion branch has already
+    silently died once. Replace with an explicit role argument on the backend
+    protocol, and delete the `or len(tutor) > 0` escape hatch at
+    `tests/test_flow.py:435` (it makes the assertion unfalsifiable).
+11. **The CLI command layer is untested.** 11 of 15 `_cmd_*` functions are never
+    invoked by the suite, and no test drives `main()` into a real `run_day`.
+    Add one `main(["day", slug])` smoke test plus tests for
+    `show`/`history`/`check`/`warmup`/`report --fix`.
+12. **Content, not code: 121 of 150 ladder problems are landed but uncurated**
+    (29 curated + ladder-tagged), so the ladder and the prereq gate operate over
+    a 29-problem subset. The "126 still to fetch" note is really "121 still to
+    curate."
+13. **`problems.source` is a dead column** — always `'seed'`, even for the 155
+    fetched/lc-numbered rows, so provenance is unrecoverable.
+
+## v0.11 work — shipped
+
+- Warm-up picks rotate (per-problem `MAX(submitted_at)` aggregation).
+- The recall grade is persisted (`attempts.recall_grade`); per-pattern recall
+  curves are now reconstructible, which unblocks item 5 below.
+- The profiler measures time with no tracer running, reports the range it can
+  support, and no longer flags a claim it cannot rule out (8/15 false flags →
+  0/15 on the stored solutions).
+- Multi-parameter complexity claims are compared, not silently skipped.
+- `quit` records nothing: an attempt row exists iff the student submitted.
+
+## Proposals from the v0.8 design audit
+
+1. **Judge ground-truth anchor + false-failure banner.** For LeetCode-fetched
+   problems, validate the AI oracle against LeetCode's own judge once at
+   curation time and store the verdict in the proposal provenance (dual-oracle
+   agreement stays, but as a filter before the real check). In `_submit`, a
+   distinct message when a submission fails only generated/oracle cases (visible
+   cases pass) — "this could be a curation bug — `dojo report` audits it" —
+   instead of a plain ✗. Converts the worst failure mode from silent trust loss
+   into a visible, fixable event.
+2. **Warm-up rotation floor.** → superseded by the v0.11 rotation fix (the
+   rotation never happened at all); only the *variant* idea below remains.
+3. **Streak + reminder.** Status line shows consecutive practice days; the setup
+   wizard offers a daily cron/launchd entry with the same consent UX as the PATH
+   wrapper. The actual adoption risk is the habit, not the loop's interior.
+4. **Consolidate `profile` into `history`** (near-duplicate commands; keep
+   `progress` for patterns, `show <id>` for detail) and hold the session command
+   list ≤7. ✅ shipped in v0.9 — `profile` is now a hidden alias of `history`.
+5. **Reviewer calibration in `dojo progress`.** Reviewer scores vs. subsequent
+   warm-up grades per pattern, plus hint-count correlation — an audit loop for
+   the *reviewer*, mirroring what `report` does for the *curator*. Unblocked by
+   the v0.11 grade-persistence fix.
+6. **Learner-model steering.** Stall detection (tier at abandon, hint counts)
+   feeding problem selection and the proactive learn offer. Note the current
+   offer fires only on `unstudied(pattern)` — a pattern you have *attempted and
+   failed* is "studied" by definition, so the offer is structurally blind to the
+   strongest signal. Trigger on repeated abandonment instead.
+7. **Write-up.** The never-solve-as-architecture idea, the honesty contract, and
+   the grader self-audit loop are worth a public write-up; the design docs are
+   the second-most-valuable artifact.
+8. **Terminal rendering polish.** ✅ shipped in v0.10.3 (the markdown flip).
 
 ## Backlog (unchanged)
 

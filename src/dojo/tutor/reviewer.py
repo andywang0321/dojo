@@ -56,6 +56,8 @@ def review(
     expected_space: str | None,
     static_analysis=None,
     reflection: str | None = None,
+    measured_time_note: str | None = None,
+    measured_space_note: str | None = None,
 ) -> dict:
     prompt = build_review_prompt(
         statement,
@@ -68,6 +70,8 @@ def review(
         expected_space,
         static_analysis=static_analysis,
         reflection=reflection,
+        measured_time_note=measured_time_note,
+        measured_space_note=measured_space_note,
     )
     result = backend.chat_json(REVIEWER_SYSTEM, prompt)
     if isinstance(result, dict) and result.get("error"):

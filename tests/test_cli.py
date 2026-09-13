@@ -109,13 +109,21 @@ def test_ensure_seeded_upserts_and_is_idempotent(tmp_path):
 
 def test_due_counts(db):
     from dojo import scheduler
-    from dojo.db import now
 
     uid = get_or_create_user(db, "andy")
     due_now = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
-    scheduler.ensure_card(db, uid, "heap")  # first review due tomorrow-ish
+    soon = scheduler.ensure_card(db, uid, "heap")
+    # A freshly seeded "good" card is days out, not hours (v0.11), so pin the
+    # 24-hour window explicitly instead of relying on the seeding policy.
+    db.execute(
+        "UPDATE pattern_cards SET due_at = datetime('now', '+6 hours') WHERE id = ?",
+        (soon["id"],),
+    )
+    db.commit()
+    later = scheduler.ensure_card(db, uid, "trees")  # days out: in neither count
     assert scheduler.due_now_count(db, uid) == 1
-    assert scheduler.due_next_day_count(db, uid) >= 1
+    assert scheduler.due_next_day_count(db, uid) == 1
+    assert later["due_at"] > scheduler.now()
 
 
 # ----------------------------------------------------- shared picker + learn
@@ -507,3 +515,55 @@ def test_roadmap_tree_renders_branches_and_expansion(db):
 
     out = _render_roadmap(entries=entries, next_pick=next_pick, expand_all=True)
     assert "valid_palindrome" in out  # --all expands everything
+
+
+# ------------------------------------------------- attempt detail (v0.11)
+
+
+def test_show_displays_the_recall_grade(db, tmp_path, monkeypatch, capsys):
+    """v0.11: the warm-up recall grade is persisted on the attempt row, so
+    `dojo show` surfaces it. It used to be folded into the card aggregates and
+    discarded, which made per-pattern recall curves unreconstructible."""
+    import argparse
+
+    from dojo.cli import _cmd_show
+    from dojo.db import now
+
+    pid = _seed_curated_problem(db)
+    uid = get_or_create_user(db, "andy")
+    cur = db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, "
+        "submitted_at, recall_grade) VALUES (?, ?, 'warmup', 'correct', ?, ?, 2)",
+        (uid, pid, now(), now()),
+    )
+    db.commit()
+
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    args = argparse.Namespace(attempt_id=cur.lastrowid, code=False)
+
+    assert _cmd_show(args) == 0
+    # rich wraps the status line at the captured console width; collapse
+    # whitespace so the assertion does not depend on where the wrap landed.
+    assert "recall grade: 2" in " ".join(capsys.readouterr().out.split())
+
+
+def test_show_omits_the_grade_for_a_solve(db, tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from dojo.cli import _cmd_show
+    from dojo.db import now
+
+    pid = _seed_curated_problem(db)
+    uid = get_or_create_user(db, "andy")
+    cur = db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
+        "VALUES (?, ?, 'solve', 'correct', ?, ?)",
+        (uid, pid, now(), now()),
+    )
+    db.commit()
+
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    args = argparse.Namespace(attempt_id=cur.lastrowid, code=False)
+
+    assert _cmd_show(args) == 0
+    assert "recall grade" not in " ".join(capsys.readouterr().out.split())

@@ -36,7 +36,7 @@ dojo <slug>                 # the same, on a specific problem
 dojo warmup                 # due retrievals only
 ```
 
-Inside a session, the prompt shows the commands as **virtual text** right after your cursor — they vanish the moment you type: `open`, `check`, `learn`, `submit`, `quit`. Anything else you type is a question to the tutor — the `hint` command is gone; you just ask. Every session becomes one attempt row in your history.
+Inside a session, the prompt shows the commands as **virtual text** right after your cursor — they vanish the moment you type: `open`, `check`, `learn`, `submit`, `quit`. Anything else you type is a question to the tutor — the `hint` command is gone; you just ask. **Submitting records an attempt; `quit` records nothing at all** — no row, no hints, no lapse. That is deliberate: glancing at a problem, poking at a feature, or changing your mind should not land in your history. A session that dies (crash, closed laptop) is resumed by running the same command again; the workbench state survives.
 
 After the review you're not done: **`polish`** re-grades your edited code and updates the attempt (a satisfying "perfect" pass), and any question you type opens a post-solve conversation (solutions allowed now). **`done`** closes the session.
 
@@ -55,7 +55,7 @@ After the review you're not done: **`polish`** re-grades your edited code and up
 
 `dojo learn [topic]` opens a conversation with the **teacher** — a different agent from the tutor. It opens with a short primer (the concept, why it exists, core operations with their complexity, one canonical example), then answers freely, Socratic-style, with ML/statistics analogies. `practice` hands off to the easiest unsolved problem in the topic; `done` ends the session.
 
-Inside a solve, `learn` **parks** your attempt (progress saved, stays 'unsolved') and opens the same conversation on the problem's pattern — accepting the handoff retries **the same problem** with a fresh blank template, so the graded solve stays honest. When the daily scheduler picks a problem from a pattern you've never studied or attempted, dojo offers to learn first — one keystroke declines, and the session proceeds either way.
+Inside a solve, `learn` **abandons** the in-progress attempt (nothing recorded) and opens the same conversation on the problem's pattern — accepting the handoff retries **the same problem** with a fresh blank template, so the graded solve stays honest. When the daily scheduler picks a problem from a pattern you've never studied or attempted, dojo offers to learn first — one keystroke declines, and the session proceeds either way.
 
 The never-solve boundary narrows here, deliberately: the teacher's context is the topic and the conversation only — never a problem statement — so it may show topic-canonical code (implementing a heap is legitimate teaching). Grading oracles still never enter any agent's context.
 
@@ -84,8 +84,8 @@ The daily pick follows the **NeetCode 150 roadmap** (`data/roadmap.toml`, vendor
 
 ## Honest caveats
 
-- The profiler reports *evidence* ("consistent with O(n) at tested scales", R², confidence), never proofs; a mismatch between expected / claimed / measured is a signal to investigate. Space fits sample every second probe point — set/dict tables are power-of-two staircases that would otherwise make linear code measure as O(n²) (see docs/grading.md).
-- Warm-ups re-solve the least recently solved problem in a pattern; a pattern needs at least one solved problem to warm up.
+- The profiler reports *evidence* ("consistent with O(n) at tested scales", R², confidence), never proofs; a mismatch between expected / claimed / measured is a signal to investigate. When the data cannot separate two classes it says so — a measured `O(n)…O(n log n)` is a range, not a verdict, and a claim inside it is not flagged. Time is measured with no tracer running (tracemalloc's own bookkeeping used to inflate the slope and make allocation-heavy linear code read as O(n log n)); space is measured separately, sampling every second probe point because set/dict tables are power-of-two staircases that would otherwise make linear code measure as O(n²) (see docs/grading.md).
+- Warm-ups re-solve the least recently practised problem in a pattern (consecutive warm-ups rotate once a pattern has more than one solved problem); a pattern needs at least one solved problem to warm up. Quitting a warm-up records nothing — mark a lapse yourself with grade 1.
 - `dojo fetch` / `dojo curate` need the API key (the curated oracle is AI-generated and gated by an automated verification suite).
 - The teacher has no grader behind it — it's instructed to be humble about uncertainty, but pedagogy is unverified by construction. If a definition feels off, double-check it elsewhere.
 - One computer, one user: dojo remembers you in a gitignored config; `dojo user` switches the rare exception.

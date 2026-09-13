@@ -14,4 +14,5 @@ Delivered and planned development stages. Each stage file records what shipped a
 | [v0.8](v0.8.md) — learning mode | ✅ delivered | Topic teacher + in-session learn + proactive offer; the documented never-solve narrowing. |
 | [v0.9](v0.9.md) — onboarding | ✅ delivered | Minimal help (`dojo help`), new-user README, setup key detection, `profile` → history alias. |
 | [v0.10](v0.10.md) — systemic pattern progression | ✅ delivered | 18 NeetCode groups, hard prereq gate, ladder picks, `dojo roadmap`; content batches follow (126 of 150 still to fetch). |
+| [v0.11](v0.11.md) — the correctness stage | ✅ delivered | Attempt lifecycle (`quit` records nothing), FSRS-4.5 with default weights, rotating warm-ups + persisted recall grades, and a profiler that separates its instruments and reports ranges instead of guesses. |
 | [next](next.md) — backlog | 🔜 | Audit proposals (judge ground-truth anchor, warm-up rotation, streak + reminder, …), TUI polish, sync, warm-up variants. |
