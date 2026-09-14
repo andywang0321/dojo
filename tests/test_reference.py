@@ -308,3 +308,186 @@ def test_add_reference_rejects_unknown_and_uncurated_slugs(sandbox):
             SLUG, backend, overrides_path=overrides_path,
             registry_path=registry_path, registry_namespace=namespace, db_path=db_path,
         )
+
+
+# ------------------------------------------- model shape variance (the real bug)
+
+#: What the model actually returned in the first live run: a correct canonical
+#: solution with no decorator at all. Every one of the 48 logged proposals looked
+#: like this, so `dojo reference --all` refused the entire bank while reporting a
+#: gate failure that had never compared anything.
+UNDECORATED = '''
+def sum_list(values: list[int]) -> int:
+    return sum(values)
+'''
+
+WRONG_SLUG = '''
+@reference("sum-list")
+def _sum_list_reference(values: list[int]) -> int:
+    return sum(values)
+'''
+
+
+def test_the_prompt_gives_the_model_the_slug_and_the_decorator():
+    """The prompt contract. Without the slug the model cannot write the
+    decorator, and without the instruction it does not know one is required —
+    which is exactly how the first live run failed 48 times."""
+    from dojo.curator.prompts import REFERENCE_SYSTEM, build_reference_prompt
+
+    prompt = build_reference_prompt(
+        "sum_list", "Sum List [Easy]\n\nSum it.", "sum_list", None, VISIBLE, None, "O(n)", "O(1)"
+    )
+    assert "SLUG: sum_list" in prompt
+    assert '@reference("sum_list")' in prompt
+    assert "@reference" in REFERENCE_SYSTEM
+    assert "undecorated" in REFERENCE_SYSTEM.lower()
+
+
+def test_an_undecorated_reference_is_repaired_not_refused():
+    """The regression: an undecorated canonical solution must install, and the
+    written source must carry the decorator (the file is the source of truth — a
+    reference registered only in memory disappears on the next import)."""
+    from dojo.curator.curator import _ensure_reference_registered
+
+    ns = make_isolated_namespace()
+    before_names, before_refs = set(ns), set(ns["REFERENCES"])
+    exec(compile(UNDECORATED, "<reference sum_list>", "exec"), ns)
+
+    source, note = _ensure_reference_registered(
+        "sum_list", UNDECORATED, ns,
+        before_names=before_names, before_refs=before_refs, function_name="sum_list",
+    )
+    assert "no decorator" in note
+    assert ns["REFERENCES"]["sum_list"]([1, 2, 3]) == 6
+    assert '@reference("sum_list")' in source
+    # and the repaired source still runs, registering properly this time
+    ns2 = make_isolated_namespace()
+    exec(compile(source, "<reference sum_list>", "exec"), ns2)
+    assert "sum_list" in ns2["REFERENCES"]
+
+
+def test_a_wrong_slug_decorator_is_renamed():
+    from dojo.curator.curator import _ensure_reference_registered
+
+    ns = make_isolated_namespace()
+    before_names, before_refs = set(ns), set(ns["REFERENCES"])
+    exec(compile(WRONG_SLUG, "<reference sum_list>", "exec"), ns)
+    assert "sum_list" not in ns["REFERENCES"]
+
+    source, note = _ensure_reference_registered(
+        "sum_list", WRONG_SLUG, ns,
+        before_names=before_names, before_refs=before_refs, function_name="sum_list",
+    )
+    assert "different slug" in note
+    assert ns["REFERENCES"]["sum_list"]([1, 2]) == 3
+    assert '@reference("sum_list")' in source
+    ns2 = make_isolated_namespace()
+    exec(compile(source, "<reference sum_list>", "exec"), ns2)
+    assert "sum_list" in ns2["REFERENCES"]
+
+
+def test_an_unusable_response_names_the_real_cause():
+    """The old message ('the reference disagrees with the oracle') pointed at the
+    gate when the gate had not run — the wrong trail entirely."""
+    from dojo.curator.curator import _ensure_reference_registered
+
+    ns = make_isolated_namespace()
+    before_names, before_refs = set(ns), set(ns["REFERENCES"])
+    with pytest.raises(CuratorError, match="defines no usable entry point"):
+        _ensure_reference_registered(
+            "sum_list", "x = 1\n", ns,
+            before_names=before_names, before_refs=before_refs, function_name="sum_list",
+        )
+
+
+def test_add_reference_installs_an_undecorated_model_response(sandbox):
+    """End to end through `add_reference`, with the backend returning precisely
+    what the live model returned."""
+    overrides_path, registry_path, db_path, namespace = sandbox
+    from dojo.db import connect
+
+    with connect(db_path) as conn:
+        conn.execute("UPDATE problems SET function_name = 'sum_list' WHERE slug = ?", (SLUG,))
+        conn.execute(
+            "UPDATE problems SET visible_tests = '[]' WHERE slug = ?", (SLUG,)
+        )
+        conn.commit()
+
+    summary = add_reference(
+        SLUG,
+        MockBackend(referencer={"reference_code": UNDECORATED, "note": "sum()"}),
+        overrides_path=overrides_path,
+        registry_path=registry_path,
+        registry_namespace=namespace,
+        db_path=db_path,
+        verify=lambda: (True, "verified"),
+    )
+    assert SLUG in namespace["REFERENCES"]
+    text = registry_path.read_text()
+    assert '@reference("sum_list")' in text
+    assert "no decorator" in summary["note"]
+
+
+# --------------------------------------------- class problems (min_stack shape)
+
+CLASS_ORACLE = '''
+@oracle("counter")
+def _counter_oracle(ops: list[list]) -> list:
+    value = 0
+    out = []
+    for op in ops:
+        method, *args = op
+        if method == "add":
+            value += args[0]
+            out.append(None)
+        elif method == "get":
+            out.append(value)
+    return out
+'''
+
+CLASS_CASE = '''
+@judge_case("counter")
+def _counter_case(n, rng):
+    ops = [["add", rng.randint(-5, 5)]]
+    ops.append(["get"])
+    return [], _counter_oracle(ops), {"ops": ops}
+'''
+
+#: What the model writes for a class problem: the class, not an op-list driver.
+CLASS_REFERENCE = '''
+class Counter:
+    def __init__(self) -> None:
+        self.value = 0
+
+    def add(self, amount: int) -> None:
+        self.value += amount
+
+    def get(self) -> int:
+        return self.value
+'''
+
+
+def test_a_class_reference_is_wrapped_in_the_op_list_driver():
+    """`min_stack` is the curated set's one class problem, and its oracle follows
+    the op-list convention while the natural (and student-facing) form is the
+    class itself. Writing the class is not an error to reject — the judge harness
+    already drives a class that way for the student, so the same driver is
+    generated here."""
+    from dojo.curator.curator import _ensure_reference_registered
+
+    ns = make_isolated_namespace()
+    exec(compile(CLASS_ORACLE, "<o>", "exec"), ns)
+    exec(compile(CLASS_CASE, "<g>", "exec"), ns)
+    before_names, before_refs = set(ns), set(ns["REFERENCES"])
+    exec(compile(CLASS_REFERENCE, "<reference counter>", "exec"), ns)
+
+    source, note = _ensure_reference_registered(
+        "counter", CLASS_REFERENCE, ns,
+        before_names=before_names, before_refs=before_refs, function_name="Counter",
+    )
+    assert "class" in note and "driver" in note
+    assert "@reference(\"counter\")" in source
+
+    # The wrapped reference answers the op list exactly as the oracle does.
+    findings = reference_findings("counter", ns, [])
+    assert findings == [], findings

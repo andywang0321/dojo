@@ -24,6 +24,11 @@ a second artifact with its own admission rule — it is installed only if it agr
 with the oracle on every visible test and generated case, judged by the judge's
 own verdict modes. `dojo reference <slug>` generates one for an existing problem;
 `dojo reference --all` backfills the bank. A refused reference writes nothing.
+The prompt gives the model the problem's slug and requires `@reference("<slug>")`
+on the entry point; a response that omits it (or decorates with a different slug,
+or answers a class problem with the class rather than the op-list driver) is
+repaired rather than refused — `curator._ensure_reference_registered` — and the
+repair is written into the source, since the file is what the next import reads.
 
 ## `dojo curate` — the AI curation pipeline
 

@@ -411,6 +411,89 @@ def reference_findings(
     return findings
 
 
+def _ensure_reference_registered(
+    slug: str,
+    source: str,
+    namespace: dict,
+    *,
+    before_names: set[str],
+    before_refs: set[str],
+    function_name: str,
+) -> tuple[str, str]:
+    """Make ``source`` register a reference under ``slug``; return (source, note).
+
+    Repairing shape variance here rather than failing follows the precedent of
+    `reviewer.normalize_review`: the model returning a bare `def`, a different
+    slug, or the class itself instead of the op-list driver is a formatting slip,
+    and the response otherwise holds a good canonical solution.
+
+    It is not hypothetical. All 48 reference proposals in the first live run came
+    back undecorated — the prompt mentioned the decorator only as "already in
+    scope" and never told the model the slug — so every problem was reported as
+    failing a gate that had never compared anything. The file is the source of
+    truth (a reference registered in memory but not decorated would vanish on the
+    next import), so any repair is written into the returned source too.
+    """
+    import inspect
+
+    if slug in namespace["REFERENCES"]:
+        return source, ""
+
+    # The model may have used a slug of its own invention; one fresh key is that.
+    fresh = [k for k in namespace["REFERENCES"] if k not in before_refs]
+    if len(fresh) == 1:
+        namespace["REFERENCES"][slug] = namespace["REFERENCES"].pop(fresh[0])
+
+    # Definitions this source added — the reliable discriminator, since the
+    # decorators already in the namespace are names too.
+    mine = [
+        namespace[name]
+        for name in namespace
+        if name not in before_names
+        and (inspect.isfunction(namespace[name]) or inspect.isclass(namespace[name]))
+    ]
+    entry = next((f for f in mine if f.__name__ == function_name), None)
+    if entry is None and len(mine) == 1:
+        entry = mine[0]
+    if entry is None:
+        raise CuratorError(
+            f"the returned source defines no usable entry point for '{slug}' "
+            f"({len(mine)} definition(s) found, none named '{function_name}') and did "
+            f"not register @reference('{slug}')"
+        )
+
+    if inspect.isclass(entry):
+        # A class problem (min_stack, and the design problems like it): the
+        # oracle's convention is one argument — the [method, *args] op list — but
+        # the natural thing to write, and what the student writes, is the class.
+        # Drive it exactly the way the judge harness drives the student's class.
+        wrapper = (
+            f'\n\n@reference("{slug}")\n'
+            f"def _{slug}_reference(ops: list[list]) -> list:\n"
+            f"    instance = {entry.__name__}()\n"
+            f"    out: list = []\n"
+            f"    for op in ops:\n"
+            f"        method, *args = op\n"
+            f"        out.append(getattr(instance, method)(*args))\n"
+            f"    return out\n"
+        )
+        exec(compile(wrapper, f"<reference wrapper {slug}>", "exec"), namespace)
+        return source + wrapper, "the model returned a class — wrapped it in the op-list driver"
+
+    namespace["REFERENCES"][slug] = entry
+
+    lines = source.splitlines()
+    index = entry.__code__.co_firstlineno - 1  # first decorator line, or the def
+    decorated = re.fullmatch(r"\s*@reference\(\s*['\"][^'\"]*['\"]\s*\)\s*", lines[index])
+    if decorated:
+        lines[index] = f'@reference("{slug}")'
+        note = "the returned decorator named a different slug — renamed"
+    else:
+        lines.insert(index, f'@reference("{slug}")')
+        note = "the returned source had no decorator — added @reference(...)"
+    return "\n".join(lines), note
+
+
 def _source_or_none(fn) -> str | None:
     """The function's source, when Python can still find it.
 
@@ -470,6 +553,7 @@ def add_reference(
     raw = backend.chat_json(
         REFERENCE_SYSTEM,
         build_reference_prompt(
+            slug,
             problem["statement"],
             problem["function_name"],
             entry.get("signature"),
@@ -495,10 +579,20 @@ def add_reference(
     trial = make_isolated_namespace()
     for store in ("ORACLES", "JUDGE_CASES", "CHECKERS"):
         trial[store].update(registry_namespace.get(store, {}))
+    before_names = set(trial)
+    before_refs = set(trial["REFERENCES"])
     try:
         exec(compile(source, f"<reference {slug}>", "exec"), trial)
     except Exception as exc:  # noqa: BLE001
         raise CuratorError(f"the reference failed to execute: {exc}") from exc
+    source, repair = _ensure_reference_registered(
+        slug,
+        source,
+        trial,
+        before_names=before_names,
+        before_refs=before_refs,
+        function_name=problem["function_name"],
+    )
     findings = reference_findings(slug, trial, visible_tests)
     if findings:
         raise CuratorError(
@@ -521,11 +615,10 @@ def add_reference(
         _restore(registry_namespace, snapshot)
         registry_path.write_text(registry_text)
         raise CuratorError(f"verification gate failed; rolled back.\n{output}")
-    return {
-        "slug": slug,
-        "note": raw.get("note", ""),
-        "verification": output or "verified",
-    }
+    note = raw.get("note", "")
+    if repair:
+        note = f"{note} ({repair})" if note else repair
+    return {"slug": slug, "note": note, "verification": output or "verified"}
 
 
 def apply(

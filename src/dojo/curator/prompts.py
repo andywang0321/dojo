@@ -125,19 +125,27 @@ Requirements:
 - Fast and correct at the problem's stated target complexity. If the statement
   carries a "You should aim for ..." line, that is the target. Never submit a
   brute force or an obviously suboptimal approach.
+- **Decorate the entry point with `@reference("<slug>")`, using the slug given
+  in the task.** That decorator is what registers the solution; an undecorated
+  function registers nothing and the response is rejected as malformed. The
+  decorator name is already in scope — do not import or define it.
 - Implement the same entry point and argument order as the oracle you are shown,
   so it can be run on identical inputs. For class problems the convention is one
   argument: the list of [method, *args] operations.
 - Self-contained: the code may import only random, math, and the decorator
-  reference (already in scope). No network, no filesystem, no dojo imports.
+  reference. No network, no filesystem, no dojo imports.
 - Deterministic where the problem allows ties: prefer the canonical order the
   oracle produces.
 
-Respond with JSON only: {"reference_code": "<python source>", "note": "<one line on the approach and its complexity>"}.
+Respond with JSON only: {"reference_code": "<python source, starting with @reference(\"<slug>\")>", "note": "<one line on the approach and its complexity>"}.
+
+For example, for slug "sum_list":
+    {"reference_code": "@reference(\"sum_list\")\ndef _sum_list_reference(values: list[int]) -> int:\n    return sum(values)\n", "note": "built-in sum; O(n) time, O(1) space"}
 """
 
 
 def build_reference_prompt(
+    slug: str,
     statement: str,
     function_name: str,
     signature: str | None,
@@ -157,6 +165,7 @@ def build_reference_prompt(
         else ""
     )
     return (
+        f"SLUG: {slug}   (decorate the entry point: @reference(\"{slug}\"))\n\n"
         f"PROBLEM STATEMENT:\n{statement}\n\n"
         f"ENTRY POINT: {function_name}{signature or ''}\n"
         f"TARGET COMPLEXITY: time={expected_time or 'unknown'}, "
