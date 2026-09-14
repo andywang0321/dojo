@@ -15,7 +15,8 @@ import textwrap
 from types import SimpleNamespace
 
 from dojo.bank import load_overrides
-from dojo.judge import CHECKERS, JUDGE_CASES, ORACLES, run_cases
+from dojo.curator.curator import reference_findings
+from dojo.judge import CHECKERS, JUDGE_CASES, ORACLES, REFERENCES, run_cases
 from dojo.judge import registry as reg
 
 
@@ -269,3 +270,30 @@ def test_references_survive_the_real_judge(tmp_path):
             )
         report = run_cases(path, entry.function_name, cases)
         assert report.all_passed, f"{slug}: {report.status}; {report.results[:3]}"
+
+
+# ------------------------------------------------ canonical references (v0.12)
+
+
+def test_every_reference_agrees_with_its_oracle():
+    """The durable half of the reference admission gate.
+
+    A canonical reference is the performance baseline the probe measures the
+    student against, so a wrong one yields wrong verdicts about the student — a
+    far worse failure than a missing one. `curator.add_reference` gates each
+    reference at admission; this re-runs the same gate over the whole corpus, so
+    a reference that drifts (or is hand-edited in) cannot survive CI.
+    """
+    overrides = load_overrides()
+    for slug in REFERENCES:
+        entry = overrides.get(slug)
+        visible = entry.visible_tests if entry else []
+        findings = reference_findings(slug, vars(reg), visible)
+        assert not findings, f"{slug}: {findings}"
+
+
+def test_references_only_exist_for_curated_slugs():
+    overrides = load_overrides()
+    for slug in REFERENCES:
+        assert slug in overrides, f"{slug} has a reference but is not curated"
+        assert slug in ORACLES, f"{slug} has a reference but no oracle to gate it against"

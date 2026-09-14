@@ -36,6 +36,13 @@ below), or {"ops": [...], "expected": [...]} for class problems.
 - "oracle_code": Python source with an @oracle("<slug>")-decorated function \
 computing expected outputs. Prefer a simple brute-force reference. Omit only \
 for pure predicate problems.
+- "reference_code": Python source with a @reference("<slug>")-decorated function \
+holding the fast, intended-complexity implementation a strong candidate would \
+write. It is the performance baseline dojo measures the \
+student against, so it must be asymptotically optimal (matching the statement's \
+"You should aim for ..." line when there is one) — never a brute force. It must \
+be self-contained, use the same argument order as the oracle, and produce \
+outputs the oracle agrees with. Omit it only when the oracle is already optimal.
 - "judge_case_code": Python source with a @judge_case("<slug>")-decorated \
 function (n, rng) -> (args, expected) or (args, expected, extras). Clamp n \
 into the problem's constraints (the caller sends 0..12; handle 0). Extras \
@@ -102,3 +109,59 @@ def build_curator_prompt(statement: str, hints: dict | None = None) -> str:
             f"unless clearly wrong:\n{lines}"
         )
     return f"Curate this problem:\n\n{statement}{hint_block}\n\nReturn the JSON artifact set."
+
+
+# MockBackend keys its canned reference on the phrase "canonical reference" in
+# this prompt (backend.py); no other system prompt contains it. Rewording the
+# first line breaks that branch silently — keep the phrase, or update the mock
+# and tests/test_prompt_routing.py in the same commit (rule 6).
+REFERENCE_SYSTEM = """\
+You are writing ONE artifact: the canonical reference solution to an interview
+problem you are given. dojo already has a brute-force oracle for correctness; what it lacks
+is a fast, intended-complexity implementation to use as a performance baseline —
+the solution a strong candidate would actually submit.
+
+Requirements:
+- Fast and correct at the problem's stated target complexity. If the statement
+  carries a "You should aim for ..." line, that is the target. Never submit a
+  brute force or an obviously suboptimal approach.
+- Implement the same entry point and argument order as the oracle you are shown,
+  so it can be run on identical inputs. For class problems the convention is one
+  argument: the list of [method, *args] operations.
+- Self-contained: the code may import only random, math, and the decorator
+  reference (already in scope). No network, no filesystem, no dojo imports.
+- Deterministic where the problem allows ties: prefer the canonical order the
+  oracle produces.
+
+Respond with JSON only: {"reference_code": "<python source>", "note": "<one line on the approach and its complexity>"}.
+"""
+
+
+def build_reference_prompt(
+    statement: str,
+    function_name: str,
+    signature: str | None,
+    visible_tests: list[dict],
+    oracle_code: str | None,
+    expected_time: str | None,
+    expected_space: str | None,
+) -> str:
+    """Everything the reference writer needs — statement, the call convention,
+    and the target complexity. The oracle is shown because it pins the argument
+    order and the canonical output order."""
+    tests = "\n".join(f"- {case}" for case in visible_tests[:6]) or "(none)"
+    oracle_block = (
+        f"\n\nTHE EXISTING BRUTE-FORCE ORACLE (same signature and call convention):\n"
+        f"```python\n{oracle_code}\n```"
+        if oracle_code
+        else ""
+    )
+    return (
+        f"PROBLEM STATEMENT:\n{statement}\n\n"
+        f"ENTRY POINT: {function_name}{signature or ''}\n"
+        f"TARGET COMPLEXITY: time={expected_time or 'unknown'}, "
+        f"space={expected_space or 'unknown'}\n\n"
+        f"VISIBLE TEST CASES:\n{tests}"
+        f"{oracle_block}\n\n"
+        "Write the canonical solution as JSON per the system prompt."
+    )

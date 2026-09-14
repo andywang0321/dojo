@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import textwrap
 
+import dojo.judge
+
 from dojo import complexity
 from dojo.session.flow import run_day
 from dojo.tutor.backend import MockBackend
@@ -26,6 +28,51 @@ SOLUTION = textwrap.dedent(
         return not stack
     '''
 )
+
+
+REFERENCE_SOURCE = textwrap.dedent(
+    '''
+    @reference("valid_parentheses")
+    def _reference_is_valid(s: str) -> bool:
+        pairs = {")": "(", "]": "[", "}": "{"}
+        stack = []
+        for ch in s:
+            if ch in "([{":
+                stack.append(ch)
+            elif not stack or stack.pop() != pairs[ch]:
+                return False
+        return not stack
+    '''
+)
+
+
+def _reference_is_valid(s: str) -> bool:
+    """Module-level so `inspect.getsource` can find it (the gate needs source)."""
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack = []
+    for ch in s:
+        if ch in "([{":
+            stack.append(ch)
+        elif not stack or stack.pop() != pairs[ch]:
+            return False
+    return not stack
+
+
+#: Disagrees with any correct solution on the probe input. (A reference that
+#: simply returned `True` would *agree*, because the valid_parentheses probe
+#: input is a well-formed string — the scale probe compares one input per size,
+#: so it is a free side-check rather than a substitute for the judge's cases.)
+LYING_SOURCE = textwrap.dedent(
+    '''
+    @reference("valid_parentheses")
+    def _lying_reference(s: str) -> bool:
+        return False
+    '''
+)
+
+
+def _lying_reference(s: str) -> bool:
+    return False
 
 
 def _seed_problem(conn):
@@ -77,16 +124,14 @@ class SessionState:
 def test_full_day_flow(db, fake_console, monkeypatch, tmp_path):
     _seed_problem(db)
 
-    # Shrink profiler sizes so the test stays fast.
-    from dojo.profiler import measure as real_measure
-
-    def fast_measure(code_path, function_name, input_generator, **kwargs):
-        return real_measure(
-            code_path, function_name, input_generator,
-            sizes=[100, 200, 400, 800, 1600], repeats=3,
-        )
-
-    monkeypatch.setattr("dojo.session.flow.measure", fast_measure)
+    _fast_probe(monkeypatch)
+    # This test pins the *degradation* path: with no reference registered the
+    # probe still runs (and still reports failures) but claims nothing about
+    # growth. Deleting the live entry makes that explicit — the real registry
+    # gains references over time, and a test that depends on their absence is a
+    # trap. (It bit immediately: registering a reference for
+    # valid_parentheses broke this test's premise.)
+    monkeypatch.delitem(dojo.judge.REFERENCES, "valid_parentheses", raising=False)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
 
@@ -123,14 +168,16 @@ def test_full_day_flow(db, fake_console, monkeypatch, tmp_path):
     ).fetchone()
     assert row["status"] == "correct"
     assert row["self_reported_time"].startswith("O(n)")
-    # Wiring, not classification: the pipeline measured, stored a class (or the
-    # range it could support) plus an R², and rendered a review. Class accuracy
-    # belongs to tests/test_fit.py (the rule) and tests/test_profiler.py (real
-    # code) — and this test truncates the size ladder for speed, so any class
-    # assertion here would be an assertion about the machine's load.
-    assert complexity.parse(row["measured_time_class"]) is not None
-    assert row["measured_time_r2"] is not None and row["measured_time_r2"] > 0.8
-    assert complexity.parse(row["measured_space_class"]) is not None
+    # Wiring, not classification: the pipeline probed at scale, stored the probe
+    # record, and rendered a review. What the verdict *says* is tested in
+    # tests/test_growth.py (the rule) and tests/test_probe.py (the measurement).
+    # This problem has no registered reference in tests, so the honest verdict is
+    # "no reference" and no class is claimed — which is itself the v0.12 contract.
+    record = json.loads(row["measurement"])
+    assert record["reference_used"] is False
+    assert row["measured_time_class"] is None
+    assert record["time"]["kind"] == "unreferenced"
+    assert "no reference" in console.text
     review = json.loads(row["review"])
     assert "broader_picture" in review
     assert "stack" in review["broader_picture"].lower() or "LIFO" in review["broader_picture"]
@@ -197,7 +244,7 @@ def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -225,12 +272,22 @@ def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
     assert card["due_at"] > card["created_at"]  # first review scheduled in the future
 
 
-def _fast_measure(code_path, function_name, input_generator, **kwargs):
-    from dojo.profiler import measure as real_measure
+def _fast_probe(monkeypatch):
+    """Shrink the scale probe's ladder so flow tests stay quick.
 
-    return real_measure(
-        code_path, function_name, input_generator, sizes=[100, 200, 400, 800], repeats=2
-    )
+    The real probe still runs — the point of these tests is the pipeline, and a
+    stubbed probe would stop exercising the pairing, the failure reporting, and
+    the verdict wiring."""
+    from dojo.profiler import probe as probe_mod
+
+    real = probe_mod.run_probe
+
+    def small(student, generator, reference=None, **kwargs):
+        kwargs.setdefault("sizes", [100, 200, 400, 800])
+        kwargs.setdefault("repeats", 1)
+        return real(student, generator, reference, **kwargs)
+
+    monkeypatch.setattr("dojo.profiler.probe.run_probe", small)
 
 
 def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path):
@@ -250,7 +307,7 @@ def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path)
 
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -344,7 +401,7 @@ def test_repeated_solves_create_distinct_attempts(db, fake_console, monkeypatch,
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -372,7 +429,7 @@ def test_repeated_warmups_create_distinct_attempts(db, fake_console, monkeypatch
     card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -477,7 +534,7 @@ def test_resubmit_updates_the_same_attempt_row(db, fake_console, monkeypatch, tm
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -511,7 +568,7 @@ def test_crash_resume_reuses_the_session(db, fake_console, monkeypatch, tmp_path
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -575,7 +632,7 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -684,7 +741,7 @@ def test_in_session_learn_parks_and_hands_back(db, fake_console, monkeypatch, tm
     assert "Abandoned" in console.text
 
     # The caller loops: a fresh session on the same slug (the _cmd_day path).
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
     retry = fake_console(
         ["submit", "O(n) one pass", "O(n) stack", "", "The key insight: the stack.", "done"],
         actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
@@ -754,7 +811,7 @@ def test_discuss_sees_submitted_code(db, fake_console, monkeypatch, tmp_path):
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -798,7 +855,7 @@ def test_complexity_double_check_can_edit_time(db, fake_console, monkeypatch, tm
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -825,20 +882,32 @@ def test_complexity_double_check_can_edit_time(db, fake_console, monkeypatch, tm
     assert "Double-check" in console.text
 
 
-def _fit(best_class="O(n)", bracket=None, r2=0.9, confident=True, note=""):
-    from dojo.profiler import FitResult
+def _verdict(kind="matches", student_class="O(n)", steps=0, trend=1.0, note=""):
+    """A growth verdict as the probe would produce it."""
+    from dojo.profiler import growth
 
-    return FitResult(
-        best_class=best_class,
-        bracket=bracket,
-        r2=r2,
-        loglog_slope=1.0,
-        confident=confident,
-        note=note,
+    return growth.Verdict(
+        kind=kind,
+        trend=trend,
+        student_class=student_class,
+        reference_class="O(n)",
+        steps=steps,
+        note=note or f"grows like the reference — consistent with {student_class}",
     )
 
 
-def _render_complexity_table(**cells) -> str:
+def _measurement(time=None, space=None, reference_used=True):
+    from dojo.session.flow import Measurement
+
+    return Measurement(
+        slug="valid_parentheses",
+        time=time or _verdict(),
+        space=space or _verdict(),
+        reference_used=reference_used,
+    )
+
+
+def _render_complexity_table(time_verdict=None, space_verdict=None, **cells) -> str:
     """Render the table through a real Console (ANSI, color forced on —
     FakeConsole only stores str(table), which is an object repr)."""
     from rich.console import Console
@@ -848,7 +917,7 @@ def _render_complexity_table(**cells) -> str:
     defaults = {
         "expected_time": "O(n)", "expected_space": "O(n)",
         "claimed_time": "O(n)", "claimed_space": "O(n)",
-        "time_fit": _fit(), "space_fit": _fit(),
+        "measurement": _measurement(time=time_verdict, space=space_verdict),
     }
     defaults.update(cells)
     console = Console(
@@ -859,15 +928,19 @@ def _render_complexity_table(**cells) -> str:
     return cap.get()
 
 
-def test_complexity_table_shows_r2_not_flag(db):
-    """The Flag column is gone: the R² column shows at a glance whether a
-    surprising measured class is worth investigating."""
+def test_complexity_table_shows_the_ratio_not_r2(db):
+    """The R² column is gone with the fit. The measured side is now a paired
+    comparison, so the number beside it is the cost ratio against the
+    reference — always available, even when no class can be named."""
     out = _render_complexity_table(
-        time_fit=_fit(best_class="O(n log n)", r2=0.612, confident=False)
+        time_verdict=_verdict(
+            kind="worse", student_class="O(n^2)", steps=2, trend=64.0,
+            note="grows 2 classes faster than the reference (O(n)) — grown 64.00x",
+        )
     )
-    assert "Flag" not in out
-    assert "R²" in out
-    assert "0.612" in out
+    assert "R²" not in out
+    assert "vs reference" in out
+    assert "64.00×" in out
     assert "Red cells disagree" in out  # the evidence note survives
 
 
@@ -882,22 +955,39 @@ def test_complexity_table_color_codes_matches_and_mismatches(db):
     assert "\x1b[32m" in mismatch  # the agreeing space row stays green
 
 
-def test_complexity_table_does_not_redden_a_bracketed_measurement(db):
-    """v0.11: the profiler reports the range it can actually support. A claim
-    inside that range is not a disagreement — reddening it was the false-flag
-    that made the table cry wolf on half of all measured attempts."""
-    out = _render_complexity_table(
-        expected_time="O(n log n)",
-        claimed_time="O(n log n)",
-        time_fit=_fit(
-            best_class="O(n)",
-            bracket=("O(n)", "O(n log n)"),
-            confident=False,
-            note="cannot separate O(n) from O(n log n) at this noise level",
-        ),
+def test_an_unresolved_measurement_never_reddens_a_claim(db):
+    """v0.12: when the probe cannot resolve a class it says so, and an
+    unresolved measurement is not evidence against the student. Reddening a
+    claim on the strength of 'we could not tell' was the v0.11 defect."""
+    from dojo.profiler import growth
+
+    unresolved = growth.Verdict(
+        kind=growth.UNRESOLVED,
+        trend=5.0,
+        student_class=None,
+        reference_class="O(n)",
+        steps=None,
+        note="the cost ratio grown 5.00x matches no complexity class closely enough",
     )
-    assert "\x1b[31m" not in out  # nothing disagrees
-    assert "cannot separate" in _plain(out)  # ...and the reason is on screen
+    out = _render_complexity_table(time_verdict=unresolved)
+    assert "\x1b[31m" not in out
+    assert "no complexity class" in _plain(out)
+    assert "5.00×" in out  # the number is still reported
+
+
+def test_a_failure_at_scale_is_shown_as_failing_not_as_unresolved(db):
+    from dojo.profiler import growth
+
+    failed = growth.Verdict(
+        kind=growth.FAILED,
+        trend=None,
+        student_class=None,
+        reference_class="O(n)",
+        steps=None,
+        note="your code failed at n=400: ValueError: Not enough elements!",
+    )
+    out = _render_complexity_table(time_verdict=failed)
+    assert "your code failed at n=400" in _plain(out)
 
 
 def _plain(rendered: str) -> str:
@@ -909,11 +999,11 @@ def _plain(rendered: str) -> str:
 
 
 def test_complexity_table_names_an_incomparable_axis(db):
-    """v0.11: a multi-parameter claim used to fall through the comparison
-    silently. It is now reported as not comparable, not as agreement."""
+    """A multi-parameter claim used to fall through the comparison silently.
+    It is now reported as not comparable, not as agreement."""
     out = _render_complexity_table(
         expected_time="O(n + m)", claimed_time="O(n + m)",
-        time_fit=_fit(best_class="O(n^2)"),
+        time_verdict=_verdict(student_class="O(n^2)"),
     )
     assert "does not speak to a claim in other variables" in _plain(out)
     assert "\x1b[31m" not in out  # incomparable is not a disagreement
@@ -926,7 +1016,7 @@ def test_polish_reasks_complexity_and_updates_claims(db, fake_console, monkeypat
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
-    monkeypatch.setattr("dojo.session.flow.measure", _fast_measure)
+    _fast_probe(monkeypatch)
 
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
@@ -1020,3 +1110,112 @@ def test_typo_guard_decline_sends_question_to_tutor(db, fake_console, monkeypatc
     console = fake_console(["qit", "n", "quit"], actions={"quit": snapshot.capture})
     assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
     assert snapshot.data["hints"][0]["user"] == "qit"  # treated as a question
+
+
+# ------------------------------------------- the scale probe in a session
+
+
+def test_a_failure_at_scale_is_reported_and_recorded(db, fake_console, monkeypatch, tmp_path):
+    """The finding that started v0.12: code that passes the judge (n <= 12) and
+    then dies on a large input used to produce NULL columns and a 5/5 review.
+    It is now a first-class result, with the size and the message."""
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    fragile = textwrap.dedent(
+        """
+        def is_valid(s: str) -> bool:
+            if len(s) > 500:
+                raise ValueError("Not enough elements!")
+            pairs = {")": "(", "]": "[", "}": "{"}
+            stack = []
+            for ch in s:
+                if ch in "([{":
+                    stack.append(ch)
+                elif not stack or stack.pop() != pairs[ch]:
+                    return False
+            return not stack
+        """
+    )
+    console = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "", "The stack mirrors openings.", "done"],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(fragile)},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    record = json.loads(row["measurement"])
+    assert record["failed_at"] == 400  # the probe input is 2n characters long
+    assert "ValueError" in record["failure"]
+    assert "Your code failed at n=400" in console.text.replace("\n", " ")
+
+    from dojo.profiler import growth
+
+    assert record["time"]["kind"] == growth.FAILED
+
+
+def test_a_registered_reference_yields_a_growth_verdict(db, fake_console, monkeypatch, tmp_path):
+    """With a reference available the probe compares growth against it; identical
+    algorithms must come back as matching."""
+    import dojo.judge
+    from dojo.judge import REFERENCES
+
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setitem(REFERENCES, "valid_parentheses", _reference_is_valid)
+    monkeypatch.setattr(
+        "dojo.session.flow.reference_source", lambda slug: REFERENCE_SOURCE
+    )
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "", "The stack mirrors openings.", "done"],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    record = json.loads(row["measurement"])
+    assert record["reference_used"] is True
+    assert record["time"]["kind"] == "matches"
+    assert row["measured_time_class"] == "O(n)"  # derived from the reference
+    assert all(p["ratio"] is not None for p in record["points"])
+    assert dojo.judge.REFERENCES["valid_parentheses"] is _reference_is_valid
+
+
+def test_an_output_mismatch_at_scale_is_reported(db, fake_console, monkeypatch, tmp_path):
+    """The probe compares outputs while it is already running both — so a
+    disagreement at scale is found for free. Here the reference is the wrong
+    party (the real oracle disagrees with it), so the finding must be reported as
+    *unconfirmed* rather than as a verdict on the student."""
+    from dojo.judge import REFERENCES
+
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setitem(REFERENCES, "valid_parentheses", _lying_reference)
+    monkeypatch.setattr("dojo.session.flow.reference_source", lambda slug: LYING_SOURCE)
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "", "The stack mirrors openings.", "done"],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    record = json.loads(
+        db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()["measurement"]
+    )
+    assert record["mismatch_at"] is not None
+    assert record["mismatch_confirmed"] is False
+    assert "differs from the reference" in console.text.replace("\n", " ")
+    assert "dojo report" in console.text.replace("\n", " ")

@@ -239,9 +239,16 @@ def record_grade(conn: sqlite3.Connection, card: sqlite3.Row, grade: int) -> dic
 def due_cards(
     conn: sqlite3.Connection, user_id: int, limit: int | None = None
 ) -> list[sqlite3.Row]:
+    # `datetime(...)` on both sides, not a raw string compare: due_at is TEXT and
+    # a writer using SQLite's own `datetime('now')` emits a *naive* stamp
+    # ("2026-09-14 23:30:03") whose space separator sorts before the "T" of the
+    # ISO form dojo writes, so a card would read as overdue by a day. SQLite
+    # parses both shapes, so normalizing here makes the schedule robust to any
+    # writer rather than to exactly one.
     query = (
-        "SELECT * FROM pattern_cards WHERE user_id = ? AND due_at <= ? "
-        "ORDER BY due_at ASC"
+        "SELECT * FROM pattern_cards WHERE user_id = ? "
+        "AND datetime(due_at) <= datetime(?) "
+        "ORDER BY datetime(due_at) ASC"
     )
     params: list = [user_id, now()]
     if limit is not None:
@@ -465,7 +472,8 @@ def humanize_due(due_iso: str) -> str:
 def due_now_count(conn: sqlite3.Connection, user_id: int) -> int:
     """Cards due right now — the `dojo` status line."""
     return conn.execute(
-        "SELECT COUNT(*) AS n FROM pattern_cards WHERE user_id = ? AND due_at <= ?",
+        "SELECT COUNT(*) AS n FROM pattern_cards "
+        "WHERE user_id = ? AND datetime(due_at) <= datetime(?)",
         (user_id, now()),
     ).fetchone()["n"]
 
@@ -478,7 +486,8 @@ def due_next_day_count(conn: sqlite3.Connection, user_id: int) -> int:
     return conn.execute(
         """
         SELECT COUNT(*) AS n FROM pattern_cards
-        WHERE user_id = ? AND due_at > ? AND due_at <= ?
+        WHERE user_id = ? AND datetime(due_at) > datetime(?)
+          AND datetime(due_at) <= datetime(?)
         """,
         (user_id, now(), tomorrow),
     ).fetchone()["n"]

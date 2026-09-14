@@ -4,7 +4,7 @@ import-time prints must never crash dojo or corrupt the protocol channel."""
 import textwrap
 
 from dojo.judge import run_cases
-from dojo.profiler import measure
+from dojo.profiler import probe as probe_mod
 
 CASES = [
     {"args": [3], "expected": 6, "label": "a"},
@@ -76,7 +76,13 @@ def test_print_in_solution_does_not_corrupt_measurement(tmp_path):
             """
         )
     )
-    m = measure(path, "double", lambda n, rng: [n], sizes=[100, 200, 400], repeats=1)
-    assert len(m.time_points) == 3
-    assert all(t > 0 for _, t in m.time_points)
-    assert m.dropped == []
+    result = probe_mod.run_probe(
+        probe_mod.Target("yours", path, "double"),
+        lambda n, rng: [n],
+        sizes=[100, 200, 400],
+        repeats=1,
+    )
+    # Prints go to stderr inside the probe harness, so the JSON channel stays
+    # intact and every size still measures.
+    assert [p.n for p in result.points] == [100, 200, 400]
+    assert all(p.student.ok and p.student.ms > 0 for p in result.points)

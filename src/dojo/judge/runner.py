@@ -32,6 +32,11 @@ import json
 import sys
 import time
 
+# Verdict semantics live in one place, shared with the curator's reference gate
+# (v0.12) — the harness judges the student's code by the same rules the gate
+# judges a canonical solution by.
+from dojo.judge.compare import canonical, check_equal, rounded
+
 try:
     from dojo.judge.registry import CHECKERS
 except ImportError:  # pragma: no cover - dojo is always importable here
@@ -52,49 +57,6 @@ def isolated(call):
         return call(), buffer.getvalue()[:PRINT_CAP]
     finally:
         sys.stdout = real
-
-
-def canonical(value):
-    """Deep-sort lists (and dicts by key) for order-insensitive compare."""
-    if isinstance(value, list):
-        key = lambda v: json.dumps(v, sort_keys=True, default=str)
-        return sorted((canonical(v) for v in value), key=key)
-    if isinstance(value, dict):
-        key = lambda kv: json.dumps(kv[0], sort_keys=True, default=str)
-        return [(k, canonical(v)) for k, v in sorted(value.items(), key=key)]
-    return value
-
-
-def rounded(value, ndigits):
-    if isinstance(value, float):
-        return round(value, ndigits)
-    if isinstance(value, list):
-        return [rounded(v, ndigits) for v in value]
-    if isinstance(value, dict):
-        return {k: rounded(v, ndigits) for k, v in value.items()}
-    return value
-
-
-def approx_equal(a, b, tol):
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return abs(a - b) <= tol if isinstance(a, float) or isinstance(b, float) else a == b
-    if isinstance(a, list) and isinstance(b, list):
-        return len(a) == len(b) and all(approx_equal(x, y, tol) for x, y in zip(a, b))
-    if isinstance(a, dict) and isinstance(b, dict):
-        return a.keys() == b.keys() and all(approx_equal(a[k], b[k], tol) for k in a)
-    return a == b
-
-
-def check_equal(got, expected, mode):
-    if mode.startswith("approx"):
-        tol = float(mode.split(":", 1)[1]) if ":" in mode else 1e-9
-        return approx_equal(got, expected, tol)
-    if mode.startswith("rounded"):
-        ndigits = int(mode.split(":", 1)[1]) if ":" in mode else 4
-        got, expected = rounded(got, ndigits), rounded(expected, ndigits)
-    elif mode == "sorted":
-        got, expected = canonical(got), canonical(expected)
-    return json.dumps(got, sort_keys=True) == json.dumps(expected, sort_keys=True)
 
 
 def main():

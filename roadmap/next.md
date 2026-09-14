@@ -1,7 +1,9 @@
 # next — backlog
 
-The v0.10 progression and the [v0.11](v0.11.md) correctness stage have
-shipped (attempt lifecycle, complexity measurement, warm-up / retention).
+The v0.10 progression, the [v0.11](v0.11.md) correctness stage (attempt
+lifecycle, warm-up, retention) and the [v0.12](v0.12.md) measurement stage have
+shipped. The profiler is now a paired scale probe against a canonical reference,
+and its failures are findings rather than blanks.
 
 ## v0.11 audit findings (from the handoff code audit)
 

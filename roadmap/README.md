@@ -15,4 +15,5 @@ Delivered and planned development stages. Each stage file records what shipped a
 | [v0.9](v0.9.md) — onboarding | ✅ delivered | Minimal help (`dojo help`), new-user README, setup key detection, `profile` → history alias. |
 | [v0.10](v0.10.md) — systemic pattern progression | ✅ delivered | 18 NeetCode groups, hard prereq gate, ladder picks, `dojo roadmap`; content batches follow (126 of 150 still to fetch). |
 | [v0.11](v0.11.md) — the correctness stage | ✅ delivered | Attempt lifecycle (`quit` records nothing), FSRS-4.5 with default weights, rotating warm-ups + persisted recall grades, and a profiler that separates its instruments and reports ranges instead of guesses. |
+| [v0.12](v0.12.md) — the measurement stage | ✅ delivered | The profiler becomes a paired scale probe: failures at scale are first-class findings, and growth is measured against a gated canonical reference instead of fitted absolutely. |
 | [next](next.md) — backlog | 🔜 | Audit proposals (judge ground-truth anchor, warm-up rotation, streak + reminder, …), TUI polish, sync, warm-up variants. |

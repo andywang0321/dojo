@@ -114,7 +114,9 @@ def test_due_counts(db):
     due_now = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
     soon = scheduler.ensure_card(db, uid, "heap")
     # A freshly seeded "good" card is days out, not hours (v0.11), so pin the
-    # 24-hour window explicitly instead of relying on the seeding policy.
+    # 24-hour window explicitly instead of relying on the seeding policy. Written
+    # in SQLite's *naive* format on purpose: the counts must be format-agnostic
+    # (see test_scheduler.test_due_comparisons_survive_a_naive_timestamp).
     db.execute(
         "UPDATE pattern_cards SET due_at = datetime('now', '+6 hours') WHERE id = ?",
         (soon["id"],),

@@ -43,6 +43,15 @@ class ProblemOverride:
     visible_tests: list[dict] = field(default_factory=list)
     signature: str | dict | None = None
     lc_number: int | None = None
+    #: v0.12: cap the scale probe's largest input for this problem. Needed when
+    #: the algorithm's own cost model only holds below some n (a product that
+    #: leaves 32-bit range turns a linear solution superlinear).
+    probe_max_n: int | None = None
+    #: v0.12: how the scale probe compares the student's output with the
+    #: reference's — "strict" (default) or "sorted" for order-insensitive
+    #: answers, mirroring the judge's per-case comparators. "none" disables the
+    #: comparison for problems whose verdicts are predicates.
+    scale_compare: str = "strict"
 
 
 def _normalize_complexity(raw: str) -> str:
@@ -120,6 +129,8 @@ def load_overrides(path: Path = PROBLEM_OVERRIDES) -> dict[str, ProblemOverride]
             visible_tests=entry.get("visible_tests", []),
             signature=entry.get("signature"),
             lc_number=entry.get("lc_number"),
+            probe_max_n=entry.get("probe_max_n"),
+            scale_compare=entry.get("scale_compare", "strict"),
         )
         for slug, entry in raw.items()
     }

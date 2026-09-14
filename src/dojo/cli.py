@@ -650,11 +650,19 @@ def _cmd_history(args) -> int:
 
 
 def _measured_cell(row, axis: str) -> str:
+    """One axis of `dojo show`'s complexity table.
+
+    v0.12: the measured side is a paired comparison, so the useful detail is the
+    cost-ratio trend rather than an R² from a fit that no longer exists."""
     cls = row[f"measured_{axis}_class"]
+    record = loads_json(row["measurement"], None) if "measurement" in row.keys() else None
+    verdict = (record or {}).get(axis) or {}
+    trend = verdict.get("trend")
     if not cls:
+        if verdict.get("kind") == "failed":
+            return verdict.get("note", "failed at scale")
         return "—"
-    r2 = row[f"measured_{axis}_r2"]
-    return f"{cls} (r²={round(r2, 3)})" if r2 is not None else cls
+    return f"{cls} (×{trend:.2f} vs reference)" if trend else cls
 
 
 def _cmd_show(args) -> int:
@@ -700,6 +708,29 @@ def _cmd_show(args) -> int:
     table.add_row("Time", row["self_reported_time"] or "—", _measured_cell(row, "time"))
     table.add_row("Space", row["self_reported_space"] or "—", _measured_cell(row, "space"))
     console.print(table)
+
+    # v0.12: what the scale probe found is often the most important thing on the
+    # row — a crash or an output disagreement at a size the judge never reaches.
+    record = loads_json(row["measurement"], None) if "measurement" in row.keys() else None
+    if record:
+        if record.get("failure"):
+            where = record.get("failed_at")
+            console.print(
+                f"[red]scale probe: failed at n={where:,}: {record['failure']}[/red]"
+                if where
+                else f"[red]scale probe: {record['failure']}[/red]"
+            )
+        if record.get("mismatch_at"):
+            confirmed = " (oracle-confirmed)" if record.get("mismatch_confirmed") else ""
+            console.print(
+                f"[red]scale probe: output differs from the reference at "
+                f"n={record['mismatch_at']:,}{confirmed}[/red]"
+            )
+        if not record.get("reference_used"):
+            console.print(
+                "[dim]scale probe: no reference registered for this problem, so "
+                "growth was not compared.[/dim]"
+            )
 
     hints = loads_json(row["hints"], [])
     if hints:
@@ -975,6 +1006,68 @@ def _cmd_fetch(args) -> int:
     return 0
 
 
+def _cmd_reference(args) -> int:
+    """Generate and gate the canonical reference solutions the probe measures
+    against (v0.12).
+
+    A reference is only admitted when it agrees with the brute-force oracle
+    everywhere the oracle can run, so a failed generation writes nothing."""
+    from dojo.curator import CuratorError, add_reference
+    from dojo.judge import ORACLES, REFERENCES
+    from dojo.tutor import get_backend
+
+    console = Console()
+    if not args.slug and not args.all:
+        console.print("[red]Pass a slug, or --all to backfill the bank.[/red]")
+        return 1
+    try:
+        backend = get_backend()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 1
+
+    with connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT slug FROM problems WHERE function_name IS NOT NULL "
+            "AND visible_tests IS NOT NULL ORDER BY slug"
+        ).fetchall()
+    curated = [r["slug"] for r in rows]
+    if args.slug:
+        if args.slug not in curated:
+            console.print(f"[red]'{args.slug}' is not a curated problem.[/red]")
+            return 1
+        targets = [args.slug]
+    else:
+        targets = [s for s in curated if args.force or s not in REFERENCES]
+
+    if not targets:
+        console.print("[green]Every curated problem already has a reference.[/green]")
+        return 0
+
+    written = skipped = failed = 0
+    for slug in targets:
+        if slug not in ORACLES:
+            console.print(
+                f"[yellow]• {slug}: no @oracle to gate against — skipped.[/yellow]"
+            )
+            skipped += 1
+            continue
+        try:
+            summary = add_reference(slug, backend, overwrite=args.force)
+        except CuratorError as exc:
+            console.print(f"[yellow]• {slug}: {exc}[/yellow]")
+            failed += 1
+            continue
+        note = f" — {summary['note']}" if summary.get("note") else ""
+        console.print(f"[green]• {slug}: reference installed{note}[/green]")
+        written += 1
+
+    console.print(
+        f"[dim]{written} installed · {skipped} skipped (no oracle) · {failed} refused[/dim]"
+    )
+    return 0 if failed == 0 else 1
+
+
 def _cmd_report(args) -> int:
     import json
 
@@ -1242,6 +1335,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="land without running the curator",
     )
     p_fetch.set_defaults(func=_cmd_fetch)
+
+    p_reference = sub.add_parser(
+        "reference", help="generate the canonical reference a problem is measured against"
+    )
+    p_reference.add_argument("slug", nargs="?", help="problem slug")
+    p_reference.add_argument(
+        "--all", action="store_true", help="every curated problem that lacks a reference"
+    )
+    p_reference.add_argument(
+        "--force", action="store_true", help="replace an existing reference"
+    )
+    p_reference.set_defaults(func=_cmd_reference)
 
     p_report = sub.add_parser("report", help="audit a problem's curation (AI); --fix re-curates")
     p_report.add_argument("slug", nargs="?", help="problem slug (default: active session)")

@@ -18,11 +18,13 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from dojo import bank
 from dojo.config import DB_PATH, PROBLEMS_DIR, PROBLEM_OVERRIDES, REPO_ROOT
 from dojo.db import connect
+from dojo.judge.compare import check_equal
 from dojo.patterns import PATTERNS
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -41,7 +43,7 @@ REQUIRED_FIELDS = (
     "judge_case_code",
 )
 
-_REGISTRY_DICTS = ("ORACLES", "JUDGE_CASES", "PROFILER_INPUTS", "CHECKERS")
+_REGISTRY_DICTS = ("ORACLES", "JUDGE_CASES", "REFERENCES", "PROFILER_INPUTS", "CHECKERS")
 
 
 class CuratorError(RuntimeError):
@@ -82,7 +84,13 @@ def validate(proposal: dict) -> None:
             raise CuratorError("each visible test needs 'args' or 'ops'")
         if "expected" not in case:
             raise CuratorError("each visible test needs 'expected'")
-    for field in ("oracle_code", "judge_case_code", "checker_code", "profiler_code"):
+    for field in (
+        "oracle_code",
+        "judge_case_code",
+        "reference_code",
+        "checker_code",
+        "profiler_code",
+    ):
         if field in proposal and proposal[field]:
             try:
                 compile(proposal[field], f"<curator {field}>", "exec")
@@ -113,6 +121,7 @@ def make_isolated_namespace() -> dict:
     ns = {
         "ORACLES": {},
         "JUDGE_CASES": {},
+        "REFERENCES": {},
         "PROFILER_INPUTS": {},
         "CHECKERS": {},
         "random": __import__("random"),
@@ -131,13 +140,20 @@ def make_isolated_namespace() -> dict:
 
     ns["oracle"] = decorator(ns["ORACLES"])
     ns["judge_case"] = decorator(ns["JUDGE_CASES"])
+    ns["reference"] = decorator(ns["REFERENCES"])
     ns["profiler_input"] = decorator(ns["PROFILER_INPUTS"])
     ns["checker"] = decorator(ns["CHECKERS"])
     return ns
 
 
 def _exec_proposal(proposal: dict, namespace: dict) -> None:
-    for field in ("oracle_code", "judge_case_code", "checker_code", "profiler_code"):
+    for field in (
+        "oracle_code",
+        "judge_case_code",
+        "reference_code",
+        "checker_code",
+        "profiler_code",
+    ):
         source = proposal.get(field)
         if source:
             exec(compile(source, f"<dual {field}>", "exec"), namespace)
@@ -312,6 +328,206 @@ def audit_curation(
     return audit
 
 
+def _module_view(namespace: dict):
+    """A module-like view of an isolated namespace, so predicate checkers that
+    reach for a sibling function (``module.decode(...)``) still work."""
+    return SimpleNamespace(
+        **{k: v for k, v in namespace.items() if not k.startswith("_")}
+    )
+
+
+def _case_findings(label, case, reference_fn, checkers, module_view) -> list[str]:
+    args = case.get("args")
+    if case.get("ops") is not None:
+        args = [case["ops"]]  # class problems: the oracle takes the op list
+    try:
+        got = reference_fn(*(args or []))
+    except Exception as exc:  # noqa: BLE001 - reported, never raised
+        return [f"{label}: the reference raised {type(exc).__name__}: {exc}"]
+
+    predicate = case.get("predicate")
+    if predicate:
+        checker = checkers.get(predicate)
+        if checker is None:
+            return [f"{label}: predicate '{predicate}' has no registered checker"]
+        try:
+            ok = bool(checker(module_view, got, case.get("args")))
+        except Exception as exc:  # noqa: BLE001
+            return [
+                f"{label}: the '{predicate}' checker could not validate the "
+                f"reference ({type(exc).__name__}: {exc})"
+            ]
+        return [] if ok else [f"{label}: the reference fails the '{predicate}' checker"]
+
+    expected = case.get("expected")
+    mode = case.get("compare", "strict")
+    if not check_equal(got, expected, mode):
+        return [f"{label}: the reference returned {got!r}, the case expects {expected!r}"]
+    return []
+
+
+def reference_findings(
+    slug: str, namespace: dict, visible_tests: list[dict] | None = None
+) -> list[str]:
+    """The admission gate for a canonical reference (v0.12).
+
+    A reference is worth exactly as much as its agreement with the trust anchor,
+    so it is admitted only where the oracle can run: every visible test and every
+    generated case, judged by the *judge's own* verdict modes (a predicate case
+    goes through its checker). Returns human-readable findings; empty = admitted.
+
+    ``namespace`` may be the isolated curation namespace or the live registry —
+    both expose REFERENCES / ORACLES / JUDGE_CASES / CHECKERS.
+    """
+    reference_fn = namespace.get("REFERENCES", {}).get(slug)
+    if reference_fn is None:
+        return [f"no @reference('{slug}') was registered"]
+    if namespace.get("ORACLES", {}).get(slug) is None:
+        return [f"'{slug}' has no @oracle, so a reference cannot be gated against it"]
+
+    cases = [(f"visible {i + 1}", case) for i, case in enumerate(visible_tests or [])]
+    generator = namespace.get("JUDGE_CASES", {}).get(slug)
+    if generator is not None:
+        for n in (0, 3, 7, 12):
+            for seed in range(5):
+                rng = random.Random(f"ref-{slug}-{n}-{seed}")
+                generated = generator(n, rng)
+                args, expected = generated[:2]
+                extras = generated[2] if len(generated) > 2 else {}
+                cases.append(
+                    (
+                        f"generated n={n} seed={seed}",
+                        {**extras, "args": args, "expected": expected},
+                    )
+                )
+
+    checkers = namespace.get("CHECKERS", {})
+    module_view = _module_view(namespace)
+    findings: list[str] = []
+    for label, case in cases:
+        findings.extend(_case_findings(label, case, reference_fn, checkers, module_view))
+        if len(findings) >= 5:
+            break
+    return findings
+
+
+def _source_or_none(fn) -> str | None:
+    """The function's source, when Python can still find it.
+
+    The oracle normally lives in a real file, but a registry can also be built
+    dynamically (as the tests do). Showing the oracle to the reference writer is
+    an aid — it pins the argument order and the canonical output order — not a
+    requirement, so a missing source degrades to a prompt without it instead of
+    crashing the command."""
+    import inspect
+
+    try:
+        return inspect.getsource(fn)
+    except (OSError, TypeError):
+        return None
+
+
+def add_reference(
+    slug: str,
+    backend,
+    *,
+    overrides_path: Path = PROBLEM_OVERRIDES,
+    registry_path: Path | None = None,
+    registry_namespace: dict | None = None,
+    db_path: Path = DB_PATH,
+    verify: Callable[[], tuple[bool, str]] = _run_verification,
+    overwrite: bool = False,
+) -> dict:
+    """Generate, gate, and install the canonical reference for a curated problem.
+
+    Nothing is written until the proposal has been proved equivalent to the
+    oracle everywhere the oracle can run, so the common failure path needs no
+    rollback: a reference that disagrees is simply refused.
+    """
+    from dojo.curator.prompts import REFERENCE_SYSTEM, build_reference_prompt
+
+    if registry_namespace is None or registry_path is None:
+        registry_namespace, registry_path = _default_registry_namespace()
+    if slug in registry_namespace.get("REFERENCES", {}) and not overwrite:
+        raise CuratorError(f"'{slug}' already has a reference — pass --force to replace it")
+
+    with connect(db_path) as conn:
+        problem = conn.execute("SELECT * FROM problems WHERE slug = ?", (slug,)).fetchone()
+    if problem is None:
+        raise CuratorError(f"unknown problem '{slug}'")
+    if not problem["function_name"]:
+        raise CuratorError(f"'{slug}' is not curated (no function_name)")
+    oracle = registry_namespace.get("ORACLES", {}).get(slug)
+    if oracle is None:
+        raise CuratorError(
+            f"'{slug}' has no @oracle in judge/registry.py — a reference can only be "
+            "admitted against a brute-force anchor"
+        )
+
+    overrides = json.loads(overrides_path.read_text())
+    entry = overrides.get(slug) or {}
+    visible_tests = entry.get("visible_tests", [])
+    raw = backend.chat_json(
+        REFERENCE_SYSTEM,
+        build_reference_prompt(
+            problem["statement"],
+            problem["function_name"],
+            entry.get("signature"),
+            visible_tests,
+            _source_or_none(oracle),
+            problem["expected_time"],
+            problem["expected_space"],
+        ),
+    )
+    if "error" in raw:
+        raise CuratorError(f"the reference writer returned non-JSON: {raw['error']}")
+    source = (raw.get("reference_code") or "").strip()
+    if not source:
+        raise CuratorError("the reference writer returned no reference_code")
+    try:
+        compile(source, f"<reference {slug}>", "exec")
+    except SyntaxError as exc:
+        raise CuratorError(f"the reference does not compile: {exc}") from exc
+
+    # Gate in an isolated namespace seeded with the live registries: the gate
+    # needs the real oracle, and nothing may touch the live namespace until it
+    # has passed.
+    trial = make_isolated_namespace()
+    for store in ("ORACLES", "JUDGE_CASES", "CHECKERS"):
+        trial[store].update(registry_namespace.get(store, {}))
+    try:
+        exec(compile(source, f"<reference {slug}>", "exec"), trial)
+    except Exception as exc:  # noqa: BLE001
+        raise CuratorError(f"the reference failed to execute: {exc}") from exc
+    findings = reference_findings(slug, trial, visible_tests)
+    if findings:
+        raise CuratorError(
+            "the reference disagrees with the oracle — refused:\n" + "\n".join(findings)
+        )
+
+    registry_text = registry_path.read_text()
+    snapshot = _snapshot(registry_namespace)
+    block = f"\n\n# --- canonical reference ({slug}) ---\n{source}\n"
+    try:
+        exec(compile(source, f"<reference {slug}>", "exec"), registry_namespace)
+        registry_path.write_text(registry_text + block)
+    except Exception as exc:  # noqa: BLE001
+        _restore(registry_namespace, snapshot)
+        registry_path.write_text(registry_text)
+        raise CuratorError(f"installing the reference failed: {exc}") from exc
+
+    ok, output = verify()
+    if not ok:
+        _restore(registry_namespace, snapshot)
+        registry_path.write_text(registry_text)
+        raise CuratorError(f"verification gate failed; rolled back.\n{output}")
+    return {
+        "slug": slug,
+        "note": raw.get("note", ""),
+        "verification": output or "verified",
+    }
+
+
 def apply(
     proposal: dict,
     *,
@@ -343,7 +559,13 @@ def apply(
 
     # 1. Register the code in the live namespace (and validate it runs).
     namespace_snapshot = _snapshot(registry_namespace)
-    for field in ("oracle_code", "judge_case_code", "checker_code", "profiler_code"):
+    for field in (
+        "oracle_code",
+        "judge_case_code",
+        "reference_code",
+        "checker_code",
+        "profiler_code",
+    ):
         source = proposal.get(field)
         if not source:
             continue
@@ -360,10 +582,36 @@ def apply(
         _restore(registry_namespace, namespace_snapshot)
         raise CuratorError("no @oracle registered and the visible tests are not all predicate-checked")
 
+    # 1b. A canonical reference is optional, but a wrong one is worse than none:
+    # the probe would derive confident verdicts about the student from a broken
+    # baseline. Gate it here, before anything is written, so a refusal needs no
+    # rollback of files.
+    if proposal.get("reference_code"):
+        if slug not in registry_namespace["REFERENCES"]:
+            _restore(registry_namespace, namespace_snapshot)
+            raise CuratorError(
+                "reference_code did not register a @reference for the slug"
+            )
+        findings = reference_findings(
+            slug, registry_namespace, proposal["visible_tests"]
+        )
+        if findings:
+            _restore(registry_namespace, namespace_snapshot)
+            raise CuratorError(
+                "the proposal's reference disagrees with its oracle — refused:\n"
+                + "\n".join(findings)
+            )
+
     # 2. Write the artifacts.
     registry_block = "\n\n# --- curated by dojo curate: %s ---\n" % slug + "\n".join(
         proposal.get(field, "")
-        for field in ("oracle_code", "judge_case_code", "checker_code", "profiler_code")
+        for field in (
+            "oracle_code",
+            "judge_case_code",
+            "reference_code",
+            "checker_code",
+            "profiler_code",
+        )
         if proposal.get(field)
     ) + "\n"
     overrides[slug] = {

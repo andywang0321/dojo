@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import random
 import sqlite3
+import tempfile
 import time
+from pathlib import Path
+
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from rich.console import Console
@@ -26,8 +30,17 @@ from dojo import complexity, scheduler, static
 from dojo.config import VENV_PYTHON, WORKBENCH_DIR
 from dojo.db import dumps_json, get_or_create_user, iso_from_epoch, loads_json, now
 from dojo.editor import ensure_ide_config, launch as launch_editor
-from dojo.judge import JUDGE_CASES, ORACLES, PROFILER_INPUTS, run_cases
-from dojo.profiler import classify, measure, staircase_safe_points
+from dojo.judge import (
+    JUDGE_CASES,
+    ORACLES,
+    PROFILER_INPUTS,
+    reference_source,
+    run_cases,
+)
+from dojo.judge.compare import check_equal
+import dojo.profiler.probe as probe_mod
+
+from dojo.profiler import growth
 from dojo.render import render_ai, review_markdown
 from dojo.session.learn import resolve_pattern, run_learn
 from dojo.session.state import (
@@ -143,19 +156,18 @@ def _truncate(text: str, limit: int = 60) -> str:
 
 
 def _axis_outcomes(
-    expected: str | None,
-    claimed: str | None,
-    measured: "FitResult | None",
+    expected: str | None, claimed: str | None, measured: str | None
 ) -> dict[str, str]:
-    """The three pairwise comparisons of one axis. The measured side carries
-    its bracket, so a claim the measurement cannot rule out is not a
-    disagreement."""
-    bracket = measured.bracket if measured is not None else None
-    measured_class = measured.best_class if measured is not None else None
+    """The three pairwise comparisons of one axis.
+
+    ``measured`` is the class the *differential* measurement concluded — the
+    reference's class when the student's growth matches it, or the class the
+    trend names when it does not. It is None whenever the probe could not
+    resolve one, which reads as incomparable rather than as agreement."""
     return {
         "claim_vs_expected": complexity.compare(claimed, expected),
-        "measured_vs_claimed": complexity.compare(measured_class, claimed, b_bracket=bracket),
-        "measured_vs_expected": complexity.compare(measured_class, expected, b_bracket=bracket),
+        "measured_vs_claimed": complexity.compare(measured, claimed),
+        "measured_vs_expected": complexity.compare(measured, expected),
     }
 
 
@@ -165,50 +177,49 @@ def _show_complexity_table(
     expected_space: str | None,
     claimed_time: str | None,
     claimed_space: str | None,
-    time_fit: "FitResult | None",
-    space_fit: "FitResult | None",
+    measurement: "Measurement",
 ) -> None:
-    """The three-way table. Red means *disagreement*; an axis whose sides are
-    not comparable (a multi-parameter claim against a single-parameter
-    measurement) is marked as such instead of being silently skipped, and a
-    bracketed measurement never reddens a claim it contains (v0.11)."""
+    """The three-way table (v0.12).
+
+    The measured column holds what the probe actually concluded, which is always
+    a claim about the *comparison* with the reference, never a fitted class: it
+    shows the derived class when the trend supports one and the verdict when it
+    does not. Red still means disagreement; incomparable axes are named rather
+    than left blank."""
     table = ui_table("Complexity: expected vs. claimed vs. measured")
     table.add_column("")
     table.add_column("Expected")
     table.add_column("You claimed")
     table.add_column("Measured")
-    table.add_column("R²")
+    table.add_column("vs reference")
     notes: list[str] = []
-    ambiguous: list[str] = []
+    asides: list[str] = []
 
-    def axis_cells(
-        axis: str,
-        expected: str | None,
-        claimed: str | None,
-        fit: "FitResult | None",
-    ) -> tuple:
-        outcomes = _axis_outcomes(expected, claimed, fit)
-        measured_label = fit.label if fit is not None else None
+    def axis_cells(axis: str, expected, claimed, verdict) -> tuple:
+        measured = verdict.student_class if verdict.resolved else None
+        outcomes = _axis_outcomes(expected, claimed, measured)
         disagree = {k for k, v in outcomes.items() if v == complexity.DISAGREE}
         incomparable = {k for k, v in outcomes.items() if v == complexity.INCOMPARABLE}
         for key in ("claim_vs_expected", "measured_vs_claimed", "measured_vs_expected"):
             if key in disagree:
                 notes.append(f"{axis}: {key.replace('_', ' ')}")
-        if incomparable and expected and claimed and fit is not None:
-            ambiguous.append(
-                f"{axis}: the measurement scales a single size parameter, so it "
-                "does not speak to a claim in other variables"
+        if verdict.kind in (growth.UNRESOLVED, growth.UNREFERENCED, growth.FAILED):
+            asides.append(f"{axis}: {verdict.note}")
+        elif incomparable and expected and claimed and measured:
+            asides.append(
+                f"{axis}: the probe scales a single size parameter, so it does not "
+                "speak to a claim in other variables"
             )
-        if fit is not None and fit.bracket:
-            ambiguous.append(f"{axis}: {fit.note}")
+        elif verdict.steps:
+            asides.append(f"{axis}: {verdict.note}")
         agree_all = (
             not disagree
             and not incomparable
-            and all(v is not None for v in (expected, claimed, measured_label))
+            and all(v is not None for v in (expected, claimed, measured))
             and all(outcome == complexity.AGREE for outcome in outcomes.values())
         )
 
-        def cell(value: str | None, red: bool) -> Text | str:
+        def cell(value, red: bool):
             text = value or "—"
             if red:
                 return Text(text, style="red")
@@ -219,48 +230,76 @@ def _show_complexity_table(
         return (
             cell(expected, "claim_vs_expected" in disagree or "measured_vs_expected" in disagree),
             cell(claimed, "claim_vs_expected" in disagree or "measured_vs_claimed" in disagree),
-            cell(measured_label, "measured_vs_claimed" in disagree or "measured_vs_expected" in disagree),
+            cell(measured or verdict.label, "measured_vs_claimed" in disagree or "measured_vs_expected" in disagree),
         )
 
-    expected_cell, claimed_cell, measured_cell = axis_cells(
-        "time", expected_time, claimed_time, time_fit
-    )
-    table.add_row(
-        "Time", expected_cell, claimed_cell, measured_cell,
-        "—" if time_fit is None or time_fit.r2 is None else str(time_fit.r2),
-    )
-    expected_cell, claimed_cell, measured_cell = axis_cells(
-        "space", expected_space, claimed_space, space_fit
-    )
-    table.add_row(
-        "Space", expected_cell, claimed_cell, measured_cell,
-        "—" if space_fit is None or space_fit.r2 is None else str(space_fit.r2),
-    )
+    for axis, expected, claimed, verdict in (
+        ("time", expected_time, claimed_time, measurement.time),
+        ("space", expected_space, claimed_space, measurement.space),
+    ):
+        expected_cell, claimed_cell, measured_cell = axis_cells(axis, expected, claimed, verdict)
+        table.add_row(
+            axis.capitalize(), expected_cell, claimed_cell, measured_cell,
+            verdict.trend_label,
+        )
     console.print(table)
     if notes:
         console.print(
             "[yellow]Red cells disagree (evidence, not verdicts) — investigate "
-            "whether it's the algorithm, the claim, or measurement noise "
-            "(low R² leans noise).[/yellow]"
+            "whether it's the algorithm, the claim, or the reference.[/yellow]"
         )
-    for line in dict.fromkeys(ambiguous):
+    for line in dict.fromkeys(asides):
         console.print(f"[dim]{line}[/dim]")
 
 
-def _measurement_note(fit: "FitResult | None") -> str | None:
-    """What the reviewer needs to know about a measurement's strength — it
-    used to be handed a bare class and left to guess whether a disagreement
-    was evidence or an artifact."""
-    if fit is None:
-        return None
-    if fit.bracket:
-        return (
-            f"ambiguous at this noise level (R²={fit.r2}); the data cannot "
-            f"separate {' from '.join(fit.bracket)} — not evidence against the claim"
+def _show_measurement(console: Console, measurement: "Measurement") -> None:
+    """Anything the probe found that the table cannot express: a crash at scale,
+    or an output that disagrees with the reference."""
+    if measurement.failure is not None:
+        where = f" at n={measurement.failed_at:,}" if measurement.failed_at else ""
+        console.print(
+            f"[red]✗ Your code failed{where}: {measurement.failure}[/red]"
         )
-    if not fit.confident:
-        return f"low confidence (R²={fit.r2}); treat as suggestive, not a verdict"
-    return f"R²={fit.r2}"
+        console.print(
+            "[dim]That is a real finding, not a measurement artifact: the scale "
+            "probe runs your code on large inputs, which the judge's cases "
+            "(n ≤ 12) never do.[/dim]"
+        )
+    if measurement.mismatch_at is not None:
+        console.print(
+            f"[red]✗ Output differs from the reference at n={measurement.mismatch_at:,}"
+            f"{' (confirmed against the oracle)' if measurement.mismatch_confirmed else ''}[/red]"
+        )
+        if not measurement.mismatch_confirmed:
+            console.print(
+                "[dim]The oracle could not run at that size, so this could be a "
+                "curation problem rather than a bug in your code — `dojo report` "
+                "audits the problem.[/dim]"
+            )
+    if not measurement.reference_used:
+        console.print(
+            "[dim]No reference solution is registered for this problem, so the "
+            "growth check has nothing to compare against. `dojo reference "
+            f"{measurement.slug}` adds one.[/dim]"
+        )
+    elif measurement.reference_failed_at is not None:
+        console.print(
+            f"[yellow]The reference itself failed at n={measurement.reference_failed_at:,}"
+            f" ({measurement.reference_failure}) — the comparison stops there. "
+            "That is a curation problem, not a fact about your code: "
+            "`dojo report` audits it.[/yellow]"
+        )
+
+
+def _measurement_note(verdict: "growth.Verdict") -> str | None:
+    """What the reviewer needs to know about a measurement — it used to be handed
+    a bare class and left to guess whether a disagreement was evidence or an
+    artifact."""
+    if verdict is None:
+        return None
+    if verdict.resolved:
+        return verdict.note
+    return f"{verdict.note} — NOT evidence against the student's claim"
 
 
 def _write_template(problem: sqlite3.Row, force: bool = False) -> None:
@@ -302,39 +341,203 @@ def _check(console: Console, problem: sqlite3.Row, code_path: Path) -> bool:
     return report.all_passed
 
 
+@dataclass
+class Measurement:
+    """What the scale probe concluded for one attempt (v0.12).
+
+    Deliberately not a fitted complexity class: the probe measures the student's
+    cost curve *against a reference implementation*, so every field here is
+    either a paired comparison or a fact about running the code at scale."""
+
+    slug: str
+    time: "growth.Verdict"
+    space: "growth.Verdict"
+    reference_used: bool = False
+    failure: str | None = None
+    failed_at: int | None = None
+    mismatch_at: int | None = None
+    mismatch_confirmed: bool = False
+    reference_failed_at: int | None = None
+    reference_failure: str | None = None
+    points: list[dict] = field(default_factory=list)
+
+    def to_json(self) -> dict:
+        return {
+            "time": asdict(self.time),
+            "space": asdict(self.space),
+            "reference_used": self.reference_used,
+            "failure": self.failure,
+            "failed_at": self.failed_at,
+            "mismatch_at": self.mismatch_at,
+            "mismatch_confirmed": self.mismatch_confirmed,
+            "reference_failed_at": self.reference_failed_at,
+            "reference_failure": self.reference_failure,
+            "points": self.points,
+        }
+
+
+def _skipped_measurement(slug: str, note: str) -> Measurement:
+    verdict = growth.Verdict(
+        kind=growth.UNREFERENCED,
+        trend=None,
+        student_class=None,
+        reference_class=None,
+        steps=None,
+        note=note,
+    )
+    return Measurement(slug=slug, time=verdict, space=verdict)
+
+
+def _reference_target(slug: str, directory: Path) -> "probe_mod.Target | None":
+    """Write the registered reference somewhere the probe can import it."""
+    source = reference_source(slug)
+    if not source:
+        return None
+    path = directory / f"reference_{slug}.py"
+    path.write_text(source)
+    from dojo.judge import REFERENCES
+
+    return probe_mod.Target("reference", path, REFERENCES[slug].__name__)
+
+
+def _probe_settings(slug: str) -> tuple[int | None, str]:
+    """Per-problem probe policy from the curation overrides: an optional size cap
+    (when the algorithm's cost model only holds below some n) and the comparison
+    mode for the output check."""
+    from dojo.bank import load_overrides
+
+    entry = load_overrides().get(slug)
+    if entry is None:
+        return None, "strict"
+    return entry.probe_max_n, entry.scale_compare
+
+
+def _oracle_confirms(slug: str, n: int) -> bool:
+    """At the disputed size, does the brute-force oracle side with the reference?
+
+    The mismatch we found is student != reference. If the oracle agrees with the
+    reference there, the student's output is the wrong one and this is a real
+    bug. If the oracle cannot run at that size — or the problem has no oracle —
+    the finding stays *unconfirmed*, because it might equally be the reference
+    that is wrong, and that is a curation problem rather than the student's."""
+    oracle = ORACLES.get(slug)
+    generator = PROFILER_INPUTS.get(slug)
+    reference = _live_reference(slug)
+    if oracle is None or generator is None or reference is None:
+        return False
+    _, compare = _probe_settings(slug)
+    if compare == "none":
+        return False
+    args = generator(n, random.Random(f"confirm-{n}"))
+    try:
+        return check_equal(reference(*args), oracle(*args), compare)
+    except Exception:  # noqa: BLE001 - the anchor could not run at this size
+        return False
+
+
+def _live_reference(slug: str):
+    from dojo.judge import REFERENCES
+
+    return REFERENCES.get(slug)
+
+
 def _measure_complexity(
     console: Console, problem: sqlite3.Row, code_path: Path
-) -> tuple["FitResult | None", "FitResult | None"]:
-    """Empirical measurement, shared by submit and polish. Returns the time
-    and space fits — each carrying the class *and* the bracket the data
-    cannot resolve past."""
-    time_fit = space_fit = None
-    if problem["slug"] in PROFILER_INPUTS:
-        console.print("[bold]Measuring empirical complexity[/bold] (doubling input sizes, median of repeats)...")
-        m = measure(
-            code_path,
-            problem["function_name"],
-            PROFILER_INPUTS[problem["slug"]],
+) -> Measurement:
+    """Run the scale probe: student against the canonical reference, at a ladder
+    of sizes, reporting failures and the growth comparison (v0.12)."""
+    slug = problem["slug"]
+    generator = PROFILER_INPUTS.get(slug)
+    if generator is None:
+        console.print(
+            "[dim]No profiler input registered for this problem — skipping the "
+            "scale probe.[/dim]"
         )
-        if m.time_points:
-            time_fit = classify(
-                [n for n, _ in m.time_points],
-                [t for _, t in m.time_points],
-                spread=m.spread,
+        return _skipped_measurement(
+            slug, "this problem has no registered probe input to measure with"
+        )
+
+    max_n, compare = _probe_settings(slug)
+    sizes = probe_mod.ladder(max_n or probe_mod.DEFAULT_MAX_N)
+    declared_time = complexity.parse(problem["expected_time"])
+    declared_space = complexity.parse(problem["expected_space"])
+
+    console.print(
+        f"[bold]Scale probe[/bold] (n = {sizes[0]:,} … {sizes[-1]:,}, "
+        "student paired with the reference)..."
+    )
+    with tempfile.TemporaryDirectory(prefix="dojo_probe_") as tmp:
+        reference = _reference_target(slug, Path(tmp))
+        if reference is None:
+            console.print(
+                "[dim]No canonical reference registered — measuring your code "
+                "alone (duration only).[/dim]"
             )
-        if m.space_points:
-            # Space fits on every-second point: container allocations are a
-            # power-of-two staircase, and exact-doubling sampling aliases a
-            # linear structure as O(n^2) (see fit.staircase_safe_points).
-            safe = staircase_safe_points(m.space_points)
-            space_fit = classify(
-                [n for n, _ in safe], [s for _, s in safe], spread=m.spread
-            )
-        if m.dropped:
-            console.print(f"[dim](dropped sizes: {', '.join(m.dropped)})[/dim]")
-    else:
-        console.print("[dim]No profiler input generator registered for this problem — skipping measurement.[/dim]")
-    return time_fit, space_fit
+        result = probe_mod.run_probe(
+            probe_mod.Target("yours", code_path, problem["function_name"]),
+            generator,
+            reference,
+            sizes=sizes,
+            compare=compare if compare != "none" else "strict",
+        )
+
+    failure_point = result.first_failure()
+    failure = failure_point.student.error if failure_point else None
+    failed_at = failure_point.n if failure_point else None
+    reference_failure_point = result.reference_failure()
+
+    mismatch_point = result.first_mismatch() if compare != "none" else None
+    mismatch_at = mismatch_point.n if mismatch_point else None
+    if mismatch_at is not None and mismatch_at > sizes[0]:
+        mismatch_at = probe_mod.locate_mismatch(
+            probe_mod.Target("yours", code_path, problem["function_name"]),
+            reference,
+            generator,
+            mismatch_at,
+            compare=compare,
+        )
+    confirmed = mismatch_at is not None and _oracle_confirms(slug, mismatch_at)
+
+    time_verdict = growth.verdict(
+        result.time_ratios,
+        declared_class=declared_time,
+        has_reference=result.has_reference,
+        failure=failure,
+        failed_at=failed_at,
+    )
+    space_verdict = growth.verdict(
+        result.space_ratios,
+        declared_class=declared_space,
+        has_reference=result.has_reference,
+    )
+    return Measurement(
+        slug=slug,
+        time=time_verdict,
+        space=space_verdict,
+        reference_used=result.has_reference,
+        failure=failure,
+        failed_at=failed_at,
+        mismatch_at=mismatch_at,
+        mismatch_confirmed=confirmed,
+        reference_failed_at=(
+            reference_failure_point.n if reference_failure_point else None
+        ),
+        reference_failure=(
+            reference_failure_point.reference.error if reference_failure_point else None
+        ),
+        points=[
+            {
+                "n": p.n,
+                "student_ms": p.student.ms,
+                "reference_ms": p.reference.ms if p.reference else None,
+                "ratio": p.time_ratio,
+                "space_ratio": p.space_ratio,
+                "error": p.student.error,
+                "spread": round(p.spread, 4),
+            }
+            for p in result.points
+        ],
+    )
 
 
 def _ask_question(console: Console, label: str, default: str | None = None) -> str:
@@ -473,16 +676,15 @@ def _submit(
     claimed_time = complexity.parse(claimed_time_raw)
     claimed_space = complexity.parse(claimed_space_raw)
 
-    time_fit, space_fit = _measure_complexity(console, problem, code_path)
-
+    measurement = _measure_complexity(console, problem, code_path)
+    _show_measurement(console, measurement)
     _show_complexity_table(
         console,
         problem["expected_time"],
         problem["expected_space"],
         claimed_time,
         claimed_space,
-        time_fit,
-        space_fit,
+        measurement,
     )
 
     # Reflect first, so the reviewer can comment on the reflection.
@@ -502,14 +704,14 @@ def _submit(
         code,
         claimed_time_raw,
         claimed_space_raw,
-        time_fit.label if time_fit else None,
-        space_fit.label if space_fit else None,
+        measurement.time.label,
+        measurement.space.label,
         problem["expected_time"],
         problem["expected_space"],
         static_analysis=analysis,
         reflection=reflection,
-        measured_time_note=_measurement_note(time_fit),
-        measured_space_note=_measurement_note(space_fit),
+        measured_time_note=_measurement_note(measurement.time),
+        measured_space_note=_measurement_note(measurement.space),
     )
     if "error" in review_json:
         console.print("[yellow]Reviewer unavailable (non-JSON response) — review skipped.[/yellow]")
@@ -524,9 +726,9 @@ def _submit(
             duration_seconds = ?,
             hint_count = ?, hints = ?,
             self_reported_time = ?, self_reported_space = ?,
-            measured_time_class = ?, measured_time_r2 = ?,
-            measured_space_class = ?, measured_space_r2 = ?,
-            review = ?, reflection = ?, static_analysis = ?
+            measured_time_class = ?, measured_time_r2 = NULL,
+            measured_space_class = ?, measured_space_r2 = NULL,
+            measurement = ?, review = ?, reflection = ?, static_analysis = ?
         WHERE id = ?
         """,
         (
@@ -537,10 +739,9 @@ def _submit(
             dumps_json(state.hints),
             claimed_time_raw,
             claimed_space_raw,
-            time_fit.label if time_fit else None,
-            time_fit.r2 if time_fit else None,
-            space_fit.label if space_fit else None,
-            space_fit.r2 if space_fit else None,
+            measurement.time.student_class,
+            measurement.space.student_class,
+            dumps_json(measurement.to_json()),
             dumps_json(review_json) if review_json else None,
             reflection,
             dumps_json(analysis.to_dict()),
@@ -552,8 +753,7 @@ def _submit(
         Panel(
             f"[bold green]Solved:[/bold green] {problem['title']} — attempt recorded.\n"
             f"Claimed: {claimed_time or '?'} / {claimed_space or '?'}  ·  "
-            f"Measured: {(time_fit.label if time_fit else None) or '—'} / "
-            f"{(space_fit.label if space_fit else None) or '—'}  ·  "
+            f"Measured: {measurement.time.label} / {measurement.space.label}  ·  "
             f"Hints used: {len(state.hints)}",
             title="Session complete",
         )
@@ -611,15 +811,15 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
     )
     claimed_time = complexity.parse(claimed_time_raw)
     claimed_space = complexity.parse(claimed_space_raw)
-    time_fit, space_fit = _measure_complexity(console, problem, code_path)
+    measurement = _measure_complexity(console, problem, code_path)
+    _show_measurement(console, measurement)
     _show_complexity_table(
         console,
         problem["expected_time"],
         problem["expected_space"],
         claimed_time,
         claimed_space,
-        time_fit,
-        space_fit,
+        measurement,
     )
 
     review_json = loads_json(row["review"], {})
@@ -630,13 +830,13 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
             code_path.read_text(),
             claimed_time_raw,
             claimed_space_raw,
-            time_fit.label if time_fit else None,
-            space_fit.label if space_fit else None,
+            measurement.time.label,
+            measurement.space.label,
             problem["expected_time"],
             problem["expected_space"],
             static_analysis=analysis,
-            measured_time_note=_measurement_note(time_fit),
-            measured_space_note=_measurement_note(space_fit),
+            measured_time_note=_measurement_note(measurement.time),
+            measured_space_note=_measurement_note(measurement.space),
         )
         if "error" in review_json:
             console.print("[yellow]Reviewer unavailable (non-JSON response) — review kept as-is.[/yellow]")
@@ -649,9 +849,9 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
         UPDATE attempts SET
             code = ?, submitted_at = ?,
             self_reported_time = ?, self_reported_space = ?,
-            measured_time_class = ?, measured_time_r2 = ?,
-            measured_space_class = ?, measured_space_r2 = ?,
-            static_analysis = ?, review = ?, polished = polished + 1
+            measured_time_class = ?, measured_time_r2 = NULL,
+            measured_space_class = ?, measured_space_r2 = NULL,
+            measurement = ?, static_analysis = ?, review = ?, polished = polished + 1
         WHERE id = ?
         """,
         (
@@ -659,10 +859,9 @@ def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite
             now(),
             claimed_time_raw,
             claimed_space_raw,
-            time_fit.label if time_fit else None,
-            time_fit.r2 if time_fit else None,
-            space_fit.label if space_fit else None,
-            space_fit.r2 if space_fit else None,
+            measurement.time.student_class,
+            measurement.space.student_class,
+            dumps_json(measurement.to_json()),
             dumps_json(analysis.to_dict()),
             dumps_json(review_json) if review_json else None,
             state.attempt_id,

@@ -1,9 +1,22 @@
-"""Registries for oracles, judge-case generators, and profiler inputs.
+"""Registries for oracles, judge-case generators, references, and profiler inputs.
 
-ORACLES ARE REFERENCE IMPLEMENTATIONS. They exist only to produce expected
-outputs for correctness testing. Never feed oracle code to the tutor agent —
-the never-solve guarantee depends on reference solutions staying out of the
-tutor's context.
+TWO KINDS OF REFERENCE IMPLEMENTATION LIVE HERE, with different jobs (v0.12):
+
+- ``ORACLES`` — brute-force correctness anchors. Their only job is to produce
+  expected outputs, and "prefer a simple brute force" is deliberate: an obvious
+  implementation is one you can trust. They cannot double as performance
+  baselines, because they *are* the slow thing (``products_of_array_except_self``
+  targets O(n) while its oracle is an O(n^2) double loop), and they cannot run at
+  scale at all.
+- ``REFERENCES`` — canonical, intended-complexity solutions. They are the scale
+  and performance baseline the v0.12 probe measures against, which is what makes
+  a growth verdict possible at all. A reference is admitted only if it agrees
+  with the oracle wherever the oracle can run (see ``curator.add_reference``).
+
+Neither may ever reach the tutor agent: the never-solve guarantee depends on
+reference implementations staying out of the tutor's context. A canonical
+reference raises the cost of a leak — it is directly paste-able — so the
+boundary test matters more here, not less.
 
 Curation conventions (see AGENTS.md "Curating a new problem"):
 - Where a prompt allows "any order", the contract is pinned to a canonical
@@ -16,6 +29,12 @@ Curation conventions (see AGENTS.md "Curating a new problem"):
   never let a solution early-exit. Problems without a registered profiler
   input skip measurement (fixed-size inputs, exponential output, or growth
   too flat to measure honestly at probe sizes).
+- v0.12: those inputs must also respect the problem's *value* constraints, not
+  just its shape. `products_of_array_except_self` was generated with values up
+  to +-20 at n=6400, which drives the running product to ~19,000 bits and
+  violates the problem's own 32-bit guarantee — so a correct O(n) solution
+  measured as superlinear at r2=0.995. The contract test pins shape; the
+  `dojo report` audit pins value ranges.
 """
 
 from __future__ import annotations
@@ -37,10 +56,16 @@ JUDGE_CASES: dict[str, Callable[[int, random.Random], tuple[list, Any, ...]]] = 
 #: never tutor context.
 CHECKERS: dict[str, Callable[..., bool]] = {}
 
+#: slug -> callable(*args) -> canonical output. A fast implementation at the
+#: problem's *intended* complexity: the probe's performance baseline and its
+#: large-input correctness comparator. Admitted only against the oracle.
+REFERENCES: dict[str, Callable[..., Any]] = {}
+
 #: slug -> (n, rng) -> args: inputs of size ~n for complexity measurement.
 #: These must exercise worst-case-ish paths, not early exits — a random
 #: bracket string fails at the first unmatched closer, which would make an
-#: O(n) solution *measure* as O(1).
+#: O(n) solution *measure* as O(1). They must also respect the problem's
+#: *value* constraints, not just its shape (see the module docstring).
 PROFILER_INPUTS: dict[str, Callable[[int, random.Random], list]] = {}
 
 
@@ -55,6 +80,19 @@ def oracle(slug: str) -> Callable[..., Any]:
 def judge_case(slug: str) -> Callable:
     def register(fn) -> Callable:
         JUDGE_CASES[slug] = fn
+        return fn
+
+    return register
+
+
+def reference(slug: str) -> Callable[..., Any]:
+    """Register the canonical solution for ``slug`` (v0.12).
+
+    Must be self-contained and use the same call convention as the oracle, so
+    the probe can run it on the same inputs."""
+
+    def register(fn: Callable[..., Any]) -> Callable[..., Any]:
+        REFERENCES[slug] = fn
         return fn
 
     return register
@@ -1084,3 +1122,80 @@ def _min_stack_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
             if method == "pop":
                 size -= 1
     return [], _min_stack_oracle(ops), {"ops": ops}
+
+
+# ------------------------------------------------- canonical references (v0.12)
+#
+# The probe's performance baseline, and the large-input comparator. Each entry
+# must agree with the oracle for its slug everywhere the oracle can run
+# (tests/test_registry.py re-checks the whole set); a wrong reference would make
+# the probe derive confident verdicts about the student from a broken baseline.
+#
+# Where the oracle is already the intended-complexity solution it is duplicated
+# here deliberately: a reference must stand alone so the probe can run it in a
+# subprocess, and keeping the two roles explicit is what stops a brute-force
+# oracle from silently becoming a performance baseline.
+
+
+@reference("contains_duplicate")
+def _contains_duplicate_reference(nums: list[int]) -> bool:
+    return len(nums) != len(set(nums))
+
+
+@reference("valid_parentheses")
+def _valid_parentheses_reference(s: str) -> bool:
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack: list[str] = []
+    for ch in s:
+        if ch in "([{":
+            stack.append(ch)
+        elif not stack or stack.pop() != pairs[ch]:
+            return False
+    return not stack
+
+
+@reference("array_intersection")
+def _intersection_reference(A: list[int], B: list[int]) -> list[int]:
+    return sorted(set(A) & set(B))
+
+
+@reference("products_of_array_except_self")
+def _prod_except_self_reference(nums: list[int]) -> list[int]:
+    """Prefix/suffix products — the intended O(n).
+
+    The oracle is an O(n^2) double loop, so before this reference existed the
+    problem had no fast baseline at all: the probe could only have reported a
+    correct O(n) solution as "faster than the reference", which says nothing."""
+    size = len(nums)
+    out = [1] * size
+    left = 1
+    for i in range(size):
+        out[i] = left
+        left *= nums[i]
+    right = 1
+    for i in range(size - 1, -1, -1):
+        out[i] *= right
+        right *= nums[i]
+    return out
+
+
+@reference("top_k_frequent_elements")
+def _top_k_freq_reference(nums: list[int], k: int) -> list[int]:
+    """Frequency buckets — the intended O(n).
+
+    Mirrors the oracle's tie-break exactly (count descending, then value
+    ascending): the gate compares the two under the judge's own equality, so a
+    reference that broke ties differently would be — correctly — refused."""
+    counts: dict[int, int] = {}
+    for num in nums:
+        counts[num] = counts.get(num, 0) + 1
+    buckets: dict[int, list[int]] = {}
+    for value, count in counts.items():
+        buckets.setdefault(count, []).append(value)
+    out: list[int] = []
+    for count in sorted(buckets, reverse=True):
+        for value in sorted(buckets[count]):
+            out.append(value)
+            if len(out) == k:
+                return out
+    return out

@@ -4,7 +4,7 @@
 
 1. **Never solve, always scaffold.** Enforced in layers: the tutor's context contains only the statement, your code, the ladder tier, and hint history — never reference solutions; hard rules in the system prompt; and a leak-check call that scores every hint 1–5 and regenerates anything ≥ 3.
 2. **The tutor and the reviewer are different agents.** One guides during the solve, the other grades after it. A single agent would grade its own hints and "repair" your code.
-3. **Empirical complexity is evidence, not proof.** The profiler fits growth curves and reports R², slope, and confidence. A mismatch is a flag to investigate — it may be the algorithm, the claim, or measurement noise. Distinguishing those is itself the lesson.
+3. **Empirical measurement needs a baseline, not a model.** The profiler compares your cost curve against a reference implementation's, measured back-to-back. A single fitted curve cannot separate O(n) from O(n log n) at feasible sizes; a paired ratio cancels everything the two share and can. Where even that is unsupported, it says so.
 4. **You state your complexity before the machine measures it.** Interview behavior is the real signal for ML research engineer loops.
 5. **The learner model is the asset.** Problems are a commodity; `attempts` rows are the durable record of what actually happened.
 6. **Dogfood or die.** Every feature must serve a real session within days of being built — the tool is allowed to exist only to the extent it produces actual solves.
@@ -35,7 +35,7 @@ src/dojo/
   static.py         # radon cyclomatic complexity + ruff at submit
   scheduler.py      # FSRS-lite cards, due reviews, warm-up + new-problem picks
   judge/            # registry (oracles, generators, checkers) + subprocess runner
-  profiler/         # fit (curve fitting) + measure (doubling sizes, tracemalloc)
+  profiler/         # probe (paired scale measurement) + growth (ratio verdict)
   tutor/            # backend (mock | deepseek), prompts, hint ladder, reviewer
   curator/          # AI curation pipeline (propose, validate, apply-with-rollback, dual-oracle)
   fetcher/          # LeetCode GraphQL intake: HTML -> text, snippet -> signature
@@ -52,7 +52,7 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 
 - `users(name)` — one row per person; all data is per-user from day one.
 - `problems(slug, title, difficulty, pattern, statement, function_name, expected_time, expected_space, visible_tests, signature, lc_number)` — the catalog. `function_name` + `visible_tests` + `signature` = "curated", i.e. ready for `dojo day`. `signature` is a def string, `{"functions": {...}}` for multi-function problems, or `{"methods": {...}}` for class problems. `lc_number` (v0.10) ties a problem to its LeetCode number — the roadmap ladder matches on it; problems without one (dojo's own) sit outside the ladder.
-- `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class + r², review JSON, reflection, static_analysis JSON, timings, recall_grade)` — the learner model. **A row exists iff the student submitted** (v0.11): it is created on the first submit of a session, pass or fail, and updated thereafter, so `status` carries the judge's own verdict instead of a placeholder. `quit` records nothing. `recall_grade` (1–4) holds the warm-up grade — the retention model's one input, which used to be folded into the card aggregates and discarded.
+- `attempts(user, problem, kind[solve|warmup], code, status, hint_count, hints JSON, self_reported_*, measured_*_class, measurement JSON, review JSON, reflection, static_analysis JSON, timings, recall_grade)` — the learner model. `measured_*_class` holds the class the *differential* measurement derived (`measurement` carries the full record: paired points, verdicts, failures); the `measured_*_r2` columns stopped being written in v0.12 with the fit they described. **A row exists iff the student submitted** (v0.11): it is created on the first submit of a session, pass or fail, and updated thereafter, so `status` carries the judge's own verdict instead of a placeholder. `quit` records nothing. `recall_grade` (1–4) holds the warm-up grade — the retention model's one input, which used to be folded into the card aggregates and discarded.
 - `pattern_cards(user, pattern, stability, difficulty, reps, lapses, due_at, last_review_at, last_reflection, ...)` — the retention schedule; one card per (user, pattern), updated by the published FSRS-4.5 equations with default weights (see docs/retention.md).
 - `learn_sessions(user, pattern, transcript JSON, created_at, completed)` — one row per learning-mode session (v0.8); the transcript is rewritten after each exchange, `completed` flips to 1 on graceful exit.
 
@@ -60,7 +60,7 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 
 ## The daily flow, mechanically
 
-`solve in $EDITOR → check (visible tests + advisory static analysis) → hint ladder → submit → judge (visible + generated + oracle) → self-report complexity → empirical profiler → three-way complexity table → reflection → AI review → post-solve loop (polish / discuss / done) → persist attempt`.
+`solve in $EDITOR → check (visible tests + advisory static analysis) → hint ladder → submit → judge (visible + generated + oracle) → self-report complexity → scale probe (student vs reference) → three-way complexity table → reflection → AI review → post-solve loop (polish / discuss / done) → persist attempt`.
 
 ### Tutor modes (v0.6)
 
@@ -110,8 +110,9 @@ All `$EDITOR` behavior lives in `editor.py`. GUI editors detach via `Popen(start
 
 ## Known limitations
 
-- The profiler models polynomial-ish growth only; exponential/constant-factor pathologies show as low-R² reports.
-- `generate_parentheses` has no profiler input (its output is exponential, so polynomial fitting would misreport the algorithm); `peak_elements`, `min_stack` and `valid_sudoku` have none either (O(log n) is flat at probe sizes, O(1) per op is flat, and a sudoku board is fixed 9×9).
+- The probe reports growth *relative to a reference*; without one it reports only durability at scale. Exponential output (e.g. `generate_parentheses`) has no generator and is skipped entirely.
+- `generate_parentheses` has no probe input (its output is exponential, so no size ladder is meaningful); `peak_elements`, `min_stack` and `valid_sudoku` have none either (growth is flat or the board is a fixed 9×9).
+- Comparing outputs at scale compares *one* input per size, so it is a free side-check rather than a substitute for the judge's cases; randomized fuzzing with shrinking is still backlog (`roadmap/next.md`).
 - The judge compares by strict JSON equality by default (float `1.0` vs `1` mismatch); per-case comparators (`sorted` / `approx` / `rounded` / `predicate` / `ops`) handle any-order outputs, floats, property checks, and class APIs.
 - Session duration is measured from session start, not across editor time.
 - Terminal editors detach only inside tmux or on macOS; elsewhere `open` falls back to blocking.

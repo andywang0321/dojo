@@ -15,6 +15,16 @@ Patterns live in `dojo/patterns.py` — the single source of truth shared by the
 
 Trees use the nested-list representation `[value, left, right]` (`None` = missing child / empty tree), documented in the tree prompts. `tests/test_registry.py` pins the whole contract: overrides, signatures, oracles, checkers, and generators cover exactly the same slug set; every visible test and generated case agrees with its reference; representative references pass through the real judge subprocess.
 
+## The canonical reference
+
+Every curated problem may also carry a **reference**: a fast, intended-complexity
+solution used as the scale probe's baseline. The brute-force oracle cannot serve
+that role (it is the slow thing, and it cannot run at scale), so the reference is
+a second artifact with its own admission rule — it is installed only if it agrees
+with the oracle on every visible test and generated case, judged by the judge's
+own verdict modes. `dojo reference <slug>` generates one for an existing problem;
+`dojo reference --all` backfills the bank. A refused reference writes nothing.
+
 ## `dojo curate` — the AI curation pipeline
 
 Paste a statement (`dojo curate`, or `--text` / `--file`), and the curator agent — structurally separate from the tutor — generates the full artifact set:

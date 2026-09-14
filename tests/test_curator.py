@@ -57,6 +57,7 @@ def _make_namespace() -> dict:
     ns = {
         "ORACLES": {},
         "JUDGE_CASES": {},
+        "REFERENCES": {},
         "PROFILER_INPUTS": {},
         "CHECKERS": {},
         "random": random,
@@ -75,6 +76,7 @@ def _make_namespace() -> dict:
 
     ns["oracle"] = decorator(ns["ORACLES"])
     ns["judge_case"] = decorator(ns["JUDGE_CASES"])
+    ns["reference"] = decorator(ns["REFERENCES"])
     ns["profiler_input"] = decorator(ns["PROFILER_INPUTS"])
     ns["checker"] = decorator(ns["CHECKERS"])
     return ns
@@ -404,3 +406,78 @@ def test_apply_overwrite_rolls_back_to_original(paths):
     assert json.loads(overrides_path.read_text()) == original_overrides
     assert existing_file.read_text() == '"""old statement"""\n'
     assert registry_path.read_text() == registry_text
+
+
+# ----------------------------------- references through the curate pipeline
+
+
+#: The canonical single-pass form of the canned problem (both diagonals, the
+#: centre counted once) — it must agree with the canned oracle exactly, which is
+#: what the gate checks.
+REFERENCE_CODE = '''
+@reference("matrix_diagonal_sum")
+def _diagonal_reference(matrix: list[list[int]]) -> int:
+    size = len(matrix)
+    total = 0
+    for i in range(size):
+        total += matrix[i][i] + matrix[i][size - 1 - i]
+    if size % 2:
+        total -= matrix[size // 2][size // 2]
+    return total
+'''
+
+WRONG_REFERENCE_CODE = '''
+@reference("matrix_diagonal_sum")
+def _diagonal_reference(matrix: list[list[int]]) -> int:
+    return 0
+'''
+
+
+def test_apply_installs_a_curator_reference(paths):
+    """A proposal that carries a reference must actually install it.
+
+    The probe measures every future attempt of this problem against that
+    baseline, so a silently dropped reference is as bad as a wrong one."""
+    problems_dir, overrides_path, registry_path, db_path = paths
+    namespace = _make_namespace()
+    proposal = dict(CANNED_PROPOSAL, reference_code=REFERENCE_CODE)
+
+    summary = apply(
+        proposal,
+        problems_dir=problems_dir,
+        overrides_path=overrides_path,
+        registry_path=registry_path,
+        registry_namespace=namespace,
+        db_path=db_path,
+        verify=lambda: (True, "all good"),
+    )
+
+    assert summary["slug"] == "matrix_diagonal_sum"
+    assert "matrix_diagonal_sum" in namespace["REFERENCES"]
+    assert "@reference" in registry_path.read_text()
+
+
+def test_apply_refuses_a_disagreeing_reference_before_writing(paths):
+    """A wrong reference is worse than a missing one. The gate runs before any
+    file is touched, so the refusal leaves nothing to roll back."""
+    problems_dir, overrides_path, registry_path, db_path = paths
+    namespace = _make_namespace()
+    registry_before = registry_path.read_text()
+    overrides_before = overrides_path.read_text()
+
+    with pytest.raises(CuratorError, match="reference disagrees with its oracle"):
+        apply(
+            dict(CANNED_PROPOSAL, reference_code=WRONG_REFERENCE_CODE),
+            problems_dir=problems_dir,
+            overrides_path=overrides_path,
+            registry_path=registry_path,
+            registry_namespace=namespace,
+            db_path=db_path,
+            verify=lambda: (True, "all good"),
+        )
+
+    assert registry_path.read_text() == registry_before
+    assert overrides_path.read_text() == overrides_before
+    assert not (problems_dir / "arrays_and_hashing" / "matrix_diagonal_sum.py").exists()
+    assert "matrix_diagonal_sum" not in namespace["REFERENCES"]
+    assert "matrix_diagonal_sum" not in namespace["ORACLES"]

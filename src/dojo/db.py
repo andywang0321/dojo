@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS attempts (
     static_analysis      TEXT,   -- JSON: radon complexity + ruff findings
     polished             INTEGER NOT NULL DEFAULT 0,  -- post-solve re-submissions
     discussion           TEXT,   -- JSON: post-solve chat transcript
-    recall_grade         INTEGER -- v0.11: 1..4 on warm-ups, NULL on solves
+    recall_grade         INTEGER, -- v0.11: 1..4 on warm-ups, NULL on solves
+    measurement          TEXT    -- v0.12: JSON scale-probe record + verdicts
 );
 
 CREATE TABLE IF NOT EXISTS pattern_cards (
@@ -131,6 +132,10 @@ def migrate(conn: sqlite3.Connection) -> None:
         # v0.11: the recall grade is the event the retention model exists to
         # capture; it used to be folded into card aggregates and thrown away.
         conn.execute("ALTER TABLE attempts ADD COLUMN recall_grade INTEGER")
+    if "measurement" not in attempts_cols:
+        # v0.12: the full scale-probe record (paired points, verdicts, failures).
+        # measured_*_r2 stops being written — there is no fit to report any more.
+        conn.execute("ALTER TABLE attempts ADD COLUMN measurement TEXT")
     problems_cols = {r["name"] for r in conn.execute("PRAGMA table_info(problems)")}
     if "signature" not in problems_cols:
         conn.execute("ALTER TABLE problems ADD COLUMN signature TEXT")

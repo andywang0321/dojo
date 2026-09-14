@@ -336,3 +336,28 @@ def test_humanize_due():
     assert "30 minutes" in scheduler.humanize_due(soon)
     assert "3.0 days" in scheduler.humanize_due(later)
     assert scheduler.humanize_due(past) == "overdue"
+
+
+def test_due_comparisons_survive_a_naive_timestamp(db):
+    """Regression: due_at is TEXT, and a naive stamp ("2026-01-01 09:00:00")
+    sorts *before* the ISO form dojo writes ("2026-01-01T09:00:00+00:00") because
+    a space precedes "T". Comparing the raw strings therefore read a card due
+    tomorrow as overdue today — a bug that only showed up when the wall clock
+    made the two stamps share a date, which is exactly when a test stops
+    catching it. The comparisons now go through SQLite's `datetime()`.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    uid = get_or_create_user(db, "andy")
+    naive = (datetime.now(timezone.utc) + timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S")
+    assert "T" not in naive  # the shape SQLite's own datetime('now') produces
+    db.execute(
+        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, reps, "
+        "lapses, due_at, created_at) VALUES (?, 'heap', 1.0, 5.0, 0, 0, ?, ?)",
+        (uid, naive, now()),
+    )
+    db.commit()
+
+    assert scheduler.due_now_count(db, uid) == 0
+    assert scheduler.due_next_day_count(db, uid) == 1
+    assert scheduler.due_cards(db, uid) == []

@@ -4,22 +4,26 @@ purpose (never-solve rule 1)."""
 
 from dojo.curator.curator import (
     CuratorError,
+    add_reference,
     apply,
     audit_curation,
     curate_dual,
     differential_check,
     make_isolated_namespace,
     propose,
+    reference_findings,
     validate,
 )
 
 __all__ = [
     "CuratorError",
+    "add_reference",
     "apply",
     "audit_curation",
     "curate_dual",
     "differential_check",
     "make_isolated_namespace",
     "propose",
+    "reference_findings",
     "validate",
 ]

@@ -21,44 +21,103 @@ Student code runs in an isolated subprocess with a JSON protocol: the harness im
 
 The random-bracket lesson: a *random* bracket string fails at the first unmatched closer, which would make an O(n) solution measure as O(1). Profiler inputs must be worst-case-shaped — `valid_parentheses` uses n nested opens followed by n closes.
 
-## The profiler
+## The scale probe (v0.12)
 
-For each of `[100, 200, 400, 800, 1600, 3200, 6400]`, the function runs on worst-case-shaped inputs: 5 repeats per size, median per size, one measurement per subprocess (the subprocess boundary contains hangs — never replace it with in-process timing). Inside each subprocess three calls run, in this order:
+The profiler is no longer a complexity classifier. It runs the student's code at
+increasing sizes and reports two things it can actually establish:
 
-1. an untimed warm-up call, which resolves first-call bytecode specialisation before anything is measured;
-2. **the timed call, with no tracer running** (GC disabled);
-3. the space call, with `tracemalloc` active and no timer.
+1. **Failure at scale.** An exception or timeout on a worst-case-shaped input,
+   with the size and the message. This is the only place dojo runs user code
+   above n ≈ 12 — the judge's generated cases are `n = randint(0, 12)` by design —
+   and it is the thing that caught a real `ValueError` that the AI reviewer had
+   scored 5/5 on correctness.
+2. **Growth, relative to the canonical reference solution.** Both implementations
+   run interleaved at each size, so machine drift is common-mode and the *ratio*
+   cancels every constant factor they share: interpreter overhead, cache
+   behaviour, allocator staircases.
 
-Each call gets a fresh deep copy of the arguments, so a solution that mutates its input in place cannot make later calls do different work than the first.
+### Why not an absolute fit
 
-**Why the order matters (v0.11).** `tracemalloc` used to be started *before* the timed call. Its per-allocation bookkeeping is itself superlinear, so the "time" being measured included the instrument: on one real solution the log-log slope was **1.164 with tracing and 0.889 without** — the difference between reporting O(n log n) and O(n). It misclassified 8 of the 15 measured attempts in the live database, and in all 8 the student's claim agreed with the problem's own documented expected class, so the measurement was the only outlier. Replaying those same solutions through the fixed protocol produces **0 disagreements**.
+v0.11 fitted a single cost curve and named a class. That cannot work, and the
+numbers are not close: over a feasible ladder (n = 100 … 6,400) O(n) and
+O(n log n) differ by **~0.3% of the signal variance** while the measured
+per-point spread is **3–12%**. The honest output was therefore a bracket —
+`O(n)…O(n log n)` — which is not useful enough to be worth the machinery.
 
-### The decision rule
+The levers that look like they should fix it do not. Extending the ladder from 6
+to 14 doublings (n up to 1.6 million — infeasible for any quadratic solution)
+moves the noise the rule can tolerate from 4.06% to 3.48%. Quintupling the
+repeats moves the observed spread from 6.6% to 5.9%, because the residual
+variance is *systematic* (CPU state, cache, memory layout), not sampling error.
 
-Each candidate class f is fitted to the measurements as `y = k·f(n) + c` by least squares, and every candidate whose residual stays within the measurement's own noise of the best residual is **plausible**. The report is the simplest plausible class plus a **bracket** naming what the data cannot tell apart:
+Comparing against a reference removes the problem instead of fighting it. The
+same implementation on both sides gives a flat ratio (measured trend 0.87–1.04
+over repeated runs); quadratic code against a linear reference gives a trend of
+~64. The library that does this the absolute way, `big-O` (used by
+`python-zipp`), has the same ceiling — its own documentation example separates
+Linear from Linearithmic by a factor of 2.5 in residuals, and its most serious
+user treats the result as a bound and marks the tests flaky.
 
-```
-Time    O(n log n)    O(n log n)    O(n)…O(n log n)    0.998
-                                    cannot separate O(n) from O(n log n)
-```
+### The verdict
 
-This replaced an R² comparison plus a magic log-log slope threshold (`NLN_SLOPE_THRESHOLD = 1.06`). That threshold sat *above* the slope actually measured for a genuine O(n log n) function (1.005–1.030 over four trials, biased low by the additive overhead every measurement carries), so sort-based solutions were classified O(n) every time — while the tracemalloc contamination pushed allocation-heavy linear code the other way. Two errors cancelling made the output look plausible.
+The ratio trend is matched against the trends the candidate classes would
+produce, anchored on the problem's declared complexity, so the answer is a class
+*relative to the reference*:
 
-The deeper reason a threshold cannot work: over this probe ladder the O(n) and O(n log n) shapes differ by only ~0.3% of the signal variance, below realistic timing noise (the measured per-point spread is 3–12%). They are not separable by fit quality at that noise, and the honest output is a range — not a guess. Coarser distinctions (n vs n², n² vs n³) separate by orders of magnitude and are still reported as single classes with confidence.
+| kind | meaning |
+|---|---|
+| `matches` | grows like the reference — consistent with the target class |
+| `worse` / `better` | N classes above/below it, with the ratio that says so |
+| `unresolved` | the ratio matches no class closely enough — reported as such, never rounded to one |
+| `failed` | the code broke at scale; the size and message are the finding |
+| `unreferenced` | no reference registered, so growth was not compared |
 
-The guarantee is tested rather than asserted: across a noise sweep of 0–30% over all five candidate shapes, the classifier never returns a single wrong class (it brackets instead). Those tests are synthetic and deterministic — the old suite asserted a *measured* class and flaked under load, which tests the machine rather than the rule.
+`tests/test_growth.py` pins the rule on synthetic ratio series derived from real
+class pairs — including the counter-case (n^1.5, which sits between n and n² and
+must come back unresolved) — and never from wall-clock timing. Adding a
+reference is gated: see `curator.reference_findings`.
 
-Two safeguards survive from earlier stages: the **allocator staircase** fix (space fits use every second point — `fit.staircase_safe_points`: set/dict tables are power-of-two staircases that alias a linear structure as O(n²) at exact doublings), and the R² < 0.9 "treat class as suggestive" flag.
+### Probe protocol
 
-### Comparison is three-valued
+Per (size, repeat), one subprocess per target, interleaved:
 
-`complexity.compare` returns **agree**, **disagree** or **incomparable**, and the table renders all three. The previous two-valued version silently dropped any class outside its canonical table: `O(n+m)`, `O(n*m)` and `O(k)` were unknown, so a student's `O(n+m)` claim produced *no* mismatch against a measured `O(n^2)` — a confident blank where the widest disagreement in the book should have been. Multi-parameter expressions are canonicalized (`O(n+m) ≡ O(m+n)`, `O(n*m) ≡ O(m*n)`), and an axis whose sides are not comparable says so instead of staying silent. A claim inside the measurement's bracket is not a disagreement, so a bracketed reading no longer reddens a correct claim.
+1. an untimed, untraced warm-up call;
+2. **the timed call with no tracer running** — and with the argument copy made
+   *outside* the timed window (v0.11 put it inside: at n=6400 the deepcopy was
+   0.769 ms of the 1.005 ms reported, so 76% of the "algorithm time" was the
+   profiler's own bookkeeping);
+3. the space call with `tracemalloc` active and untimed;
+4. the result reduced to a digest, so an output that disagrees with the
+   reference is noticed for free.
+
+An exception or timeout stops the ascent (bigger is pointless once it breaks) and
+skips the remaining repeats of a timed-out size. The ladder is capped per problem
+by an optional `probe_max_n` override, and the output comparison mode comes from
+`scale_compare` (`strict` by default, `sorted` for order-insensitive answers).
+
+Space no longer needs the `staircase_safe_points` subsample from v0.8.1: a
+staircase in the container sizes appears in *both* curves and cancels in the
+ratio.
+
+## The reference
+
+`ORACLES` and `REFERENCES` are different artifacts with different jobs
+(`judge/registry.py`):
+
+- **oracle** — brute-force correctness anchor. Deliberately simple, because an
+  obvious implementation is one you can trust. It cannot double as a performance
+  baseline (it *is* the slow thing: `products_of_array_except_self` targets O(n)
+  while its oracle is an O(n²) double loop) and it cannot run at scale at all.
+- **reference** — canonical, intended-complexity solution. The probe's baseline.
+  Admitted only when it agrees with the oracle on every visible test and
+  generated case, judged by the judge's own verdict modes; `tests/test_registry.py`
+  re-runs that gate over the whole corpus so a drifted reference cannot survive CI.
 
 ## The reviewer
 
 Post-submission, rubric-scored JSON: correctness, approach quality, style/idiom, naming, edge cases, complexity-claim check, **complexity-reasoning** (is the *why* behind the claim sound?), plus **reflection feedback** (prose on the student's reflection — feedback, not a score), broader picture, overall comment. Inputs: statement, submitted code, self-reported complexity (the raw strings, so the reasoning is visible), measured complexity, expected complexity, the static-analysis block, and the student's reflection — which is why reflection now happens *before* the review.
 
-The reviewer also receives a **measurement confidence** line (R², plus whether the reading was bracketed or low-confidence) with the instruction that such a measurement is not evidence against the student's claim. It used to be handed a bare class and left to guess: in the live data it consistently defended students against the tool's own contaminated measurements ("the empirical measurement of O(n log n) is almost certainly an artifact of the benchmark harness"), which meant the AI layer was silently error-correcting the deterministic one. Making the measurement honest is the fix; telling the reviewer is the belt-and-braces.
+The reviewer also receives the probe's **verdict and its strength** (the ratio trend, and whether the reading was resolved, unresolved, or the code failed at scale) with the instruction that an unresolved measurement is not evidence against the student's claim. It used to be handed a bare class and left to guess: in the live data it consistently defended students against the tool's own contaminated measurements ("the empirical measurement of O(n log n) is almost certainly an artifact of the benchmark harness"), which meant the AI layer was silently error-correcting the deterministic one. Making the measurement honest is the fix; telling the reviewer is the belt-and-braces.
 
 Hard rules: it critiques, never repairs — no alternative solutions, no code. Terminal-safe: plain text only, `de_markdown` applied at display time (underscores are never stripped — they may be identifiers like `two_sum`).
 

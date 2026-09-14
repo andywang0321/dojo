@@ -184,10 +184,12 @@ class MockBackend:
         discussion: str = "Post-solve discussion: you could also sort both arrays and walk two pointers.",
         auditor: dict | None = None,
         teacher: str | list | None = None,
+        referencer: dict | None = None,
     ):
         self._leak_ratings = leak_ratings if leak_ratings is not None else [1]
         self._rating_idx = 0
         self._curator = curator or {}
+        self._referencer = referencer or {}
         self._tutor = tutor if tutor is not None else [
             {"kind": "ladder", "tier": 0, "text": self.TIER_RESPONSES[0]}
         ]
@@ -233,6 +235,14 @@ class MockBackend:
             return {"rating": rating, "rewritten": "" if rating < 3 else "SOFTENED"}
         if "rubric" in system.lower() or "review" in system.lower():
             return self._review
+        # Keyed on "canonical reference" — REFERENCE_SYSTEM's own phrase (see
+        # curator/prompts.py). tests/test_prompt_routing.py pins that every
+        # system prompt maps to its own branch, because this convention has
+        # silently broken twice.
+        if "canonical reference" in system.lower():
+            if isinstance(self._referencer, list):
+                return self._referencer.pop(0) if self._referencer else {}
+            return self._referencer
         if "curator" in system.lower():
             if isinstance(self._curator, list):
                 return self._curator.pop(0) if self._curator else {}
