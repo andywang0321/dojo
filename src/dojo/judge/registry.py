@@ -1199,3 +1199,381 @@ def _top_k_freq_reference(nums: list[int], k: int) -> list[int]:
             if len(out) == k:
                 return out
     return out
+
+
+# --- canonical reference (binary_tree_diameter) ---
+@reference("binary_tree_diameter")
+def diameter(root: list | None) -> int:
+    best = 0
+
+    def visit(node: list | None) -> int:
+        nonlocal best
+        if node is None:
+            return 0
+        left = visit(node[1])
+        right = visit(node[2])
+        best = max(best, left + right)
+        return 1 + max(left, right)
+
+    visit(root)
+    return best
+
+
+# --- canonical reference (car_fleet) ---
+@reference("car_fleet")
+def car_fleet(target: int, position: list[int], speed: list[int]) -> int:
+    cars = sorted(zip(position, speed), reverse=True)
+    fleets = 0
+    slowest = -1.0
+    for pos, spd in cars:
+        arrival = (target - pos) / spd
+        if arrival > slowest:
+            fleets += 1
+            slowest = arrival
+    return fleets
+
+
+# --- canonical reference (container_with_most_water) ---
+@reference("container_with_most_water")
+def max_area(height: list[int]) -> int:
+    left, right = 0, len(height) - 1
+    best = 0
+    while left < right:
+        h = min(height[left], height[right])
+        area = h * (right - left)
+        if area > best:
+            best = area
+        if height[left] < height[right]:
+            left += 1
+        else:
+            right -= 1
+    return best
+
+
+# --- canonical reference (correlation) ---
+@reference("correlation")
+def correlation(X: list, Y: list) -> float:
+    n = len(X)
+    sx = sy = sxy = sxx = syy = 0.0
+    for x, y in zip(X, Y):
+        sx += x
+        sy += y
+        sxy += x * y
+        sxx += x * x
+        syy += y * y
+    ex = sx / n
+    ey = sy / n
+    exy = sxy / n
+    exx = sxx / n
+    eyy = syy / n
+    return round((exy - ex * ey) / (((exx - ex * ex) * (eyy - ey * ey)) ** 0.5), 4)
+
+
+# --- canonical reference (daily_temperatures) ---
+@reference("daily_temperatures")
+def daily_temperatures(temperatures: list[int]) -> list[int]:
+    n = len(temperatures)
+    result = [0] * n
+    stack: list[int] = []
+    for i, t in enumerate(temperatures):
+        while stack and temperatures[stack[-1]] < t:
+            j = stack.pop()
+            result[j] = i - j
+        stack.append(i)
+    return result
+
+
+# --- canonical reference (evaluate_reverse_polish_notation) ---
+@reference("evaluate_reverse_polish_notation")
+def eval_rpn(tokens: list[str]) -> int:
+    stack: list[int] = []
+    for tok in tokens:
+        if tok == "+":
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(a + b)
+        elif tok == "-":
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(a - b)
+        elif tok == "*":
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(a * b)
+        elif tok == "/":
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(int(a / b))
+        else:
+            stack.append(int(tok))
+    return stack[-1]
+
+
+# --- canonical reference (generate_parentheses) ---
+@reference("generate_parentheses")
+def generate_parentheses(n: int) -> list[str]:
+    out: list[str] = []
+    buf: list[str] = []
+
+    def build(opens: int, closes: int) -> None:
+        if opens == n and closes == n:
+            out.append("".join(buf))
+            return
+        if opens < n:
+            buf.append("(")
+            build(opens + 1, closes)
+            buf.pop()
+        if closes < opens:
+            buf.append(")")
+            build(opens, closes + 1)
+            buf.pop()
+
+    build(0, 0)
+    return out
+
+
+# --- canonical reference (group_anagrams) ---
+@reference("group_anagrams")
+def group_anagrams(strs: list[str]) -> list[list[str]]:
+    groups: dict[tuple[int, ...], list[str]] = {}
+    for s in strs:
+        counts = [0] * 26
+        for ch in s:
+            counts[ord(ch) - 97] += 1
+        key = tuple(counts)
+        groups.setdefault(key, []).append(s)
+    return [sorted(group) for _, group in sorted(groups.items())]
+
+
+# --- canonical reference (k_closest_points) ---
+@reference("k_closest_points")
+def k_closest(k: int, points: list[list[int]]) -> list[list[int]]:
+    ranked = sorted(points, key=lambda p: (p[0] * p[0] + p[1] * p[1], p[0], p[1]))
+    return ranked[:k]
+
+
+# --- canonical reference (k_smallest_elem_matrix) ---
+@reference("k_smallest_elem_matrix")
+def k_smallest(k: int, matrix: list[list[int]]) -> int:
+    import heapq
+    n = len(matrix)
+    heap = [(matrix[i][0], i, 0) for i in range(n)]
+    heapq.heapify(heap)
+    for _ in range(k - 1):
+        val, r, c = heapq.heappop(heap)
+        if c + 1 < n:
+            heapq.heappush(heap, (matrix[r][c + 1], r, c + 1))
+    return heap[0][0]
+
+
+# --- canonical reference (largest_rectangle_in_histogram) ---
+@reference("largest_rectangle_in_histogram")
+def largest_rectangle(heights: list[int]) -> int:
+    stack = []
+    best = 0
+    for i, h in enumerate(heights):
+        start = i
+        while stack and stack[-1][1] > h:
+            idx, height = stack.pop()
+            best = max(best, height * (i - idx))
+            start = idx
+        stack.append((start, h))
+    n = len(heights)
+    for idx, height in stack:
+        best = max(best, height * (n - idx))
+    return best
+
+
+# --- canonical reference (longest_consecutive_sequence) ---
+@reference("longest_consecutive_sequence")
+def longest_seqlen(nums: list[int]) -> int:
+    num_set = set(nums)
+    longest = 0
+    for num in num_set:
+        if num - 1 not in num_set:
+            length = 1
+            while num + length in num_set:
+                length += 1
+            if length > longest:
+                longest = length
+    return longest
+
+
+# --- canonical reference (max_prod_3_nums) ---
+@reference("max_prod_3_nums")
+def max_tri_prod(A: list[int]) -> int:
+    A.sort()
+    return max(A[-1] * A[-2] * A[-3], A[0] * A[1] * A[-1])
+
+
+# --- canonical reference (mirror_image_binary_tree) ---
+@reference("mirror_image_binary_tree")
+def is_mirror(root: list | None) -> bool:
+    if root is None:
+        return True
+
+    stack = [(root[1], root[2])]
+    while stack:
+        a, b = stack.pop()
+        if a is None or b is None:
+            if a is not b:
+                return False
+            continue
+        if a[0] != b[0]:
+            return False
+        stack.append((a[1], b[2]))
+        stack.append((a[2], b[1]))
+    return True
+
+
+# --- canonical reference (peak_elements) ---
+@reference("peak_elements")
+def find_a_peak(nums: list[int]) -> int:
+    lo, hi = 0, len(nums) - 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if nums[mid] < nums[mid + 1]:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+# --- canonical reference (sum_largest_contiguous_subarray) ---
+@reference("sum_largest_contiguous_subarray")
+def sum_largest_subarray(A: list[int]) -> int:
+    best = 0
+    current = 0
+    for x in A:
+        current += x
+        if current < 0:
+            current = 0
+        elif current > best:
+            best = current
+    return best
+
+
+# --- canonical reference (three_sum) ---
+@reference("three_sum")
+def three_sum(nums: list[int]) -> list[list[int]]:
+    nums.sort()
+    n = len(nums)
+    res = []
+    for i in range(n - 2):
+        if nums[i] > 0:
+            break
+        if i > 0 and nums[i] == nums[i - 1]:
+            continue
+        lo, hi = i + 1, n - 1
+        target = -nums[i]
+        while lo < hi:
+            s = nums[lo] + nums[hi]
+            if s < target:
+                lo += 1
+            elif s > target:
+                hi -= 1
+            else:
+                res.append([nums[i], nums[lo], nums[hi]])
+                lo += 1
+                hi -= 1
+                while lo < hi and nums[lo] == nums[lo - 1]:
+                    lo += 1
+                while lo < hi and nums[hi] == nums[hi + 1]:
+                    hi -= 1
+    return res
+
+
+# --- canonical reference (trapping_rain_water) ---
+@reference("trapping_rain_water")
+def trap(height: list[int]) -> int:
+    n = len(height)
+    if n == 0:
+        return 0
+    left_max = [0] * n
+    right_max = [0] * n
+    left_max[0] = height[0]
+    for i in range(1, n):
+        left_max[i] = max(left_max[i - 1], height[i])
+    right_max[n - 1] = height[n - 1]
+    for i in range(n - 2, -1, -1):
+        right_max[i] = max(right_max[i + 1], height[i])
+    total = 0
+    for i in range(n):
+        total += min(left_max[i], right_max[i]) - height[i]
+    return total
+
+
+# --- canonical reference (two_sum) ---
+@reference("two_sum")
+def twosum(nums: list[int], target: int) -> list[int]:
+    seen = {}
+    for i, x in enumerate(nums):
+        need = target - x
+        if need in seen:
+            return [seen[need], i]
+        seen[x] = i
+    return []
+
+
+# --- canonical reference (two_sum_2) ---
+@reference("two_sum_2")
+def two_sum_2(numbers: list[int], target: int) -> list[int]:
+    left, right = 0, len(numbers) - 1
+    while left < right:
+        s = numbers[left] + numbers[right]
+        if s == target:
+            return [left + 1, right + 1]
+        elif s < target:
+            left += 1
+        else:
+            right -= 1
+    return []
+
+
+# --- canonical reference (valid_anagram) ---
+@reference("valid_anagram")
+def valid_anagram(s: str, t: str) -> bool:
+    if len(s) != len(t):
+        return False
+    counts = [0] * 26
+    for ch in s:
+        counts[ord(ch) - 97] += 1
+    for ch in t:
+        counts[ord(ch) - 97] -= 1
+    return all(c == 0 for c in counts)
+
+
+# --- canonical reference (valid_palindrome) ---
+@reference("valid_palindrome")
+def is_palindrome(s: str) -> bool:
+    i, j = 0, len(s) - 1
+    while i < j:
+        while i < j and not s[i].isalnum():
+            i += 1
+        while i < j and not s[j].isalnum():
+            j -= 1
+        if s[i].lower() != s[j].lower():
+            return False
+        i += 1
+        j -= 1
+    return True
+
+
+# --- canonical reference (valid_sudoku) ---
+@reference("valid_sudoku")
+def valid_sudoku(board: list[list[str]]) -> bool:
+    rows = [set() for _ in range(9)]
+    cols = [set() for _ in range(9)]
+    boxes = [set() for _ in range(9)]
+    for i in range(9):
+        for j in range(9):
+            c = board[i][j]
+            if c == ".":
+                continue
+            b = (i // 3) * 3 + (j // 3)
+            if c in rows[i] or c in cols[j] or c in boxes[b]:
+                return False
+            rows[i].add(c)
+            cols[j].add(c)
+            boxes[b].add(c)
+    return True
