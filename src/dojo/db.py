@@ -9,6 +9,7 @@ complexity, measured complexity, review, reflection — on the attempt row.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +62,36 @@ CREATE TABLE IF NOT EXISTS attempts (
     polished             INTEGER NOT NULL DEFAULT 0,  -- post-solve re-submissions
     discussion           TEXT,   -- JSON: post-solve chat transcript
     recall_grade         INTEGER, -- v0.11: 1..4 on warm-ups, NULL on solves
-    measurement          TEXT    -- v0.12: JSON scale-probe record + verdicts
+    measurement          TEXT,   -- v0.12: JSON scale-probe record + verdicts
+    -- v0.13: which backend/model produced this row's AI-derived fields. A mock
+    -- row and a live row were indistinguishable, so any analysis of the learner
+    -- model had to filter by hand (and the reviewer's prompt changed between
+    -- stages, which the scores alone cannot show).
+    ai_provenance        TEXT
+);
+
+-- v0.13: every version the student submitted, with the artifacts its code
+-- produced. `attempts` stays the head (every existing query keeps working); this
+-- table is what makes "the original submission is lost" impossible — a submit or
+-- a polish used to overwrite the single `code` column, so the version the first
+-- review and the first measurement actually graded was gone.
+CREATE TABLE IF NOT EXISTS attempt_revisions (
+    id                 INTEGER PRIMARY KEY,
+    attempt_id         INTEGER NOT NULL REFERENCES attempts(id),
+    revision           INTEGER NOT NULL,   -- 1-based, per attempt
+    kind               TEXT NOT NULL,      -- 'submit' | 'polish'
+    code               TEXT NOT NULL,
+    status             TEXT NOT NULL,      -- the judge's verdict at this revision
+    judge              TEXT,               -- JSON: totals + per-case failures
+    hints              TEXT,               -- JSON: the hint transcript at this point
+    self_reported_time TEXT,
+    self_reported_space TEXT,
+    measurement        TEXT,               -- JSON: the probe record for THIS code
+    static_analysis    TEXT,
+    review             TEXT,               -- the review as of this revision
+    reflection         TEXT,
+    created_at         TEXT NOT NULL,
+    UNIQUE (attempt_id, revision)
 );
 
 CREATE TABLE IF NOT EXISTS pattern_cards (
@@ -95,6 +125,29 @@ CREATE TABLE IF NOT EXISTS learn_sessions (
 
 SCHEMA = SCHEMA + LEARN_SESSIONS_DDL
 
+#: Idempotent creation for existing DBs (v0.13) — the same statement the schema
+#: above carries, reused by `migrate` so an old DB gains the table on connect.
+ATTEMPT_REVISIONS_DDL = """
+CREATE TABLE IF NOT EXISTS attempt_revisions (
+    id                 INTEGER PRIMARY KEY,
+    attempt_id         INTEGER NOT NULL REFERENCES attempts(id),
+    revision           INTEGER NOT NULL,
+    kind               TEXT NOT NULL,
+    code               TEXT NOT NULL,
+    status             TEXT NOT NULL,
+    judge              TEXT,
+    hints              TEXT,
+    self_reported_time TEXT,
+    self_reported_space TEXT,
+    measurement        TEXT,
+    static_analysis    TEXT,
+    review             TEXT,
+    reflection         TEXT,
+    created_at         TEXT NOT NULL,
+    UNIQUE (attempt_id, revision)
+);
+"""
+
 
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,43 +158,64 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+_TABLE_DEF_RE = re.compile(
+    r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\((.*?)\n\);", re.DOTALL
+)
+
+
+def _table_bodies(schema: str) -> dict[str, str]:
+    return {m.group(1): m.group(2) for m in _TABLE_DEF_RE.finditer(schema)}
+
+
+def _addable_columns(body: str) -> dict[str, str]:
+    """The columns `ALTER TABLE ... ADD COLUMN` can add from a table definition.
+
+    Constraints and anything NOT NULL without a DEFAULT are skipped: SQLite
+    cannot add those to an existing table, and pretending otherwise would fail
+    at startup. What remains is exactly the shape every dojo migration has taken
+    (a nullable column or one with a default)."""
+    out: dict[str, str] = {}
+    for raw in body.splitlines():
+        line = raw.split("--", 1)[0].strip().rstrip(",")
+        if not line:
+            continue
+        upper = line.upper()
+        if upper.startswith(
+            ("UNIQUE", "PRIMARY KEY", "FOREIGN KEY", "CHECK", "CONSTRAINT")
+        ):
+            continue
+        if "UNIQUE" in upper or "PRIMARY KEY" in upper or "REFERENCES" in upper:
+            continue
+        if "NOT NULL" in upper and "DEFAULT" not in upper:
+            continue
+        out[line.split()[0]] = line
+    return out
+
+
 def migrate(conn: sqlite3.Connection) -> None:
-    """Additive migrations only (AGENTS.md rule 4: user data is real).
-    connect() owns the schema: a fresh DB gets the full SCHEMA here, and
-    existing DBs get any missing additive columns."""
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'attempts'"
-    ).fetchone():
-        conn.executescript(SCHEMA)  # fresh (or partial) DB: create everything
-        conn.commit()
-        return
-    attempts_cols = {r["name"] for r in conn.execute("PRAGMA table_info(attempts)")}
-    if "kind" not in attempts_cols:
-        conn.execute(
-            "ALTER TABLE attempts ADD COLUMN kind TEXT NOT NULL DEFAULT 'solve'"
-        )
-    if "static_analysis" not in attempts_cols:
-        conn.execute("ALTER TABLE attempts ADD COLUMN static_analysis TEXT")
-    if "polished" not in attempts_cols:
-        conn.execute(
-            "ALTER TABLE attempts ADD COLUMN polished INTEGER NOT NULL DEFAULT 0"
-        )
-    if "discussion" not in attempts_cols:
-        conn.execute("ALTER TABLE attempts ADD COLUMN discussion TEXT")
-    if "recall_grade" not in attempts_cols:
-        # v0.11: the recall grade is the event the retention model exists to
-        # capture; it used to be folded into card aggregates and thrown away.
-        conn.execute("ALTER TABLE attempts ADD COLUMN recall_grade INTEGER")
-    if "measurement" not in attempts_cols:
-        # v0.12: the full scale-probe record (paired points, verdicts, failures).
-        # measured_*_r2 stops being written — there is no fit to report any more.
-        conn.execute("ALTER TABLE attempts ADD COLUMN measurement TEXT")
-    problems_cols = {r["name"] for r in conn.execute("PRAGMA table_info(problems)")}
-    if "signature" not in problems_cols:
-        conn.execute("ALTER TABLE problems ADD COLUMN signature TEXT")
-    if "lc_number" not in problems_cols:
-        conn.execute("ALTER TABLE problems ADD COLUMN lc_number INTEGER")
-    conn.execute(LEARN_SESSIONS_DDL)  # v0.8: idempotent table creation
+    """Bring the database up to `SCHEMA`: create what is missing, add what is
+    new, and never remove or retype anything (AGENTS.md rule 4 — user data is
+    real).
+
+    **Reconciliation, not a hand-kept list (v0.13).** The old version added one
+    column per historical stage, which meant a DB that predated a column the list
+    forgot stayed permanently short of `SCHEMA` — and nothing could notice,
+    because no test compared a migrated DB with a fresh one. Now every missing
+    *addable* column is added from the schema itself, so `fresh == migrated` is
+    an invariant two DBs can be diffed on (`tests/test_db.py`). Still strictly
+    additive: no DROP, no type change, no constraint tightening.
+    """
+    # 1. Every statement in SCHEMA is `IF NOT EXISTS`, so this is idempotent and
+    #    it repairs a partially-created DB (the old guard only looked for the
+    #    `attempts` table, so a DB with `attempts` but no `problems` was never
+    #    fixed).
+    conn.executescript(SCHEMA)
+    # 2. Reconcile columns on the tables that already existed.
+    for table, body in _table_bodies(SCHEMA).items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, definition in _addable_columns(body).items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
     conn.commit()
 
 
@@ -208,14 +282,106 @@ def list_attempts(
 
 
 def get_attempt(conn: sqlite3.Connection, attempt_id: int) -> sqlite3.Row | None:
-    """One attempt joined with its problem, for `dojo show`."""
+    """One attempt joined with its problem, for `dojo show`.
+
+    The problem's `function_name` / `visible_tests` / `signature` ride along so
+    `dojo show --clean` can project the code through the same workbench view the
+    AI sees (v0.13) — that projection identifies dojo's scaffolding by comparing
+    it with what dojo would render."""
     return conn.execute(
         """
-        SELECT a.*, p.slug, p.title, p.difficulty, p.pattern, p.statement
+        SELECT a.*, p.slug, p.title, p.difficulty, p.pattern, p.statement,
+               p.function_name, p.visible_tests, p.signature
         FROM attempts a JOIN problems p ON p.id = a.problem_id
         WHERE a.id = ?
         """,
         (attempt_id,),
+    ).fetchone()
+
+
+def next_revision(conn: sqlite3.Connection, attempt_id: int) -> int:
+    """The 1-based number of the revision the next write will create."""
+    row = conn.execute(
+        "SELECT COALESCE(MAX(revision), 0) + 1 AS n FROM attempt_revisions "
+        "WHERE attempt_id = ?",
+        (attempt_id,),
+    ).fetchone()
+    return int(row["n"])
+
+
+def insert_revision(
+    conn: sqlite3.Connection,
+    attempt_id: int,
+    *,
+    kind: str,
+    code: str,
+    status: str,
+    hints: str | None = None,
+) -> int:
+    """Append a revision — one submitted version and the judge's verdict on it.
+
+    Called in the same transaction as the head update: an attempt and its
+    revisions describe one event, and a crash between two transactions used to
+    leave a graded attempt with no record of what produced it."""
+    revision = next_revision(conn, attempt_id)
+    conn.execute(
+        """
+        INSERT INTO attempt_revisions
+            (attempt_id, revision, kind, code, status, hints, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (attempt_id, revision, kind, code, status, hints, now()),
+    )
+    return revision
+
+
+#: Columns `update_revision` will write; a whitelist, so a caller cannot inject
+#: a column name into the statement.
+_REVISION_FIELDS = (
+    "status",
+    "judge",
+    "self_reported_time",
+    "self_reported_space",
+    "measurement",
+    "static_analysis",
+    "review",
+    "reflection",
+    "hints",
+)
+
+
+def update_revision(
+    conn: sqlite3.Connection, attempt_id: int, revision: int, **fields
+) -> None:
+    """Attach the artifacts a revision's own code produced (claims, measurement,
+    review, static analysis). Unknown field names are a programming error."""
+    unknown = set(fields) - set(_REVISION_FIELDS)
+    if unknown:
+        raise ValueError(f"unknown revision field(s): {sorted(unknown)}")
+    if not fields:
+        return
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    conn.execute(
+        f"UPDATE attempt_revisions SET {assignments} "
+        "WHERE attempt_id = ? AND revision = ?",
+        (*fields.values(), attempt_id, revision),
+    )
+
+
+def list_revisions(conn: sqlite3.Connection, attempt_id: int) -> list[sqlite3.Row]:
+    """Every revision of an attempt, oldest first (backing `dojo show`)."""
+    return conn.execute(
+        "SELECT * FROM attempt_revisions WHERE attempt_id = ? ORDER BY revision ASC",
+        (attempt_id,),
+    ).fetchall()
+
+
+def get_revision(
+    conn: sqlite3.Connection, attempt_id: int, revision: int
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM attempt_revisions WHERE attempt_id = ? AND revision = ?",
+        (attempt_id, revision),
     ).fetchone()
 
 
@@ -329,12 +495,17 @@ def trends_from_rows(rows) -> list[dict]:
 
 
 def review_trends(conn: sqlite3.Connection, user_id: int) -> list[dict]:
-    """Per-pattern review-score trends for `dojo progress`."""
+    """Per-pattern review-score trends for `dojo progress`.
+
+    Warm-ups are excluded (v0.13): they store a full review too, so the
+    recency-weighted trend was mixing first solves with hint-free recall
+    re-solves and calling the total "solves" (audit S2.14)."""
     rows = conn.execute(
         """
         SELECT p.pattern AS pattern, a.review AS review
         FROM attempts a JOIN problems p ON p.id = a.problem_id
-        WHERE a.user_id = ? AND a.status = 'correct' AND a.review IS NOT NULL
+        WHERE a.user_id = ? AND a.status = 'correct' AND a.kind = 'solve'
+          AND a.review IS NOT NULL
         ORDER BY a.id ASC
         """,
         (user_id,),

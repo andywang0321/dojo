@@ -239,19 +239,34 @@ def test_ladder_ends_where_it_is_asked_to():
 # ------------------------------------------- probe -> verdict, end to end
 
 
-def test_end_to_end_verdict_matches_for_the_same_algorithm(tmp_path):
+def test_end_to_end_verdict_matches_for_the_same_algorithm(tmp_path, synthetic_probe):
     """The same implementation on both sides is the cleanest possible control:
     any verdict other than 'matches' would be the measurement lying.
 
-    Measured stability of this control on an idle machine: the ratio trend lands
-    in 0.87-1.04 across repeated runs, against the 0.71-1.40 matching band — a
-    ~5x margin. Five repeats buys headroom without pretending the number is
-    exact."""
+    The *measurement* is injected (an exact cost model), never the verdict: this
+    pins pairing → ratio → naming without asserting anything about the machine
+    (rule 5 — the wall-clock version of this test failed 33% of the time under
+    6-way concurrency)."""
+    synthetic_probe(lambda label, n: n)  # identical cost curves on both sides
     student = Target("yours", _write(tmp_path, "s", LINEAR), "f")
     reference = Target("reference", _write(tmp_path, "r", LINEAR), "f")
-    result = run_probe(student, _ints, reference, sizes=[100, 200, 400, 800, 1600, 3200], repeats=5)
+    result = run_probe(student, _ints, reference, sizes=[100, 200, 400, 800], repeats=1)
     verdict = growth.verdict(result.time_ratios, declared_class="O(n)")
     assert verdict.kind == "matches", (verdict, result.time_ratios)
+    assert verdict.student_class == "O(n)"
+    assert all(ratio == 1.0 for _, ratio in result.time_ratios)
+
+
+def test_end_to_end_a_superlinear_student_is_named(tmp_path, synthetic_probe):
+    """One class slower than the reference is decidable *because* the two curves
+    are measured against each other — pinned here on an exact cost model
+    (linear student vs constant reference)."""
+    synthetic_probe(lambda label, n: n if label == "yours" else 1)
+    student = Target("yours", _write(tmp_path, "s", LINEAR), "f")
+    reference = Target("reference", _write(tmp_path, "r", CONSTANT), "f")
+    result = run_probe(student, _ints, reference, sizes=[100, 200, 400, 800], repeats=1)
+    verdict = growth.verdict(result.time_ratios, declared_class="O(1)")
+    assert verdict.kind == "worse", (verdict, result.time_ratios)
 
 
 def test_end_to_end_a_failure_outranks_the_growth_verdict(tmp_path):
@@ -335,3 +350,52 @@ def test_a_reference_that_disagrees_on_output_is_detected(tmp_path):
     )
     result = run_probe(student, _ints, reference, sizes=[100, 200], repeats=1)
     assert result.first_mismatch() is not None
+
+
+# ------------------------------------------------ bounded execution (v0.13)
+
+
+def test_a_runaway_print_in_measured_code_cannot_fill_dojos_memory(tmp_path):
+    """User prints are routed to stderr inside the probe harness, and the parent
+    used to read that stream whole: a hot print loop grew *dojo's* RSS from
+    21 MB to ~1.75 GB in two seconds (v0.13 audit). Stderr is now read capped."""
+    noisy = _write(
+        tmp_path,
+        "noisy",
+        "def f(a):\n    for _ in range(200_000):\n        print('x' * 200)\n    return len(a)\n",
+    )
+    result = run_one(Target("yours", noisy, "f"), [[1] * 100], timeout=10.0)
+    # It measured (or reported a failure) without taking the process down.
+    assert result.ok or result.error
+
+
+def test_the_measurement_subprocess_is_killed_as_a_group(tmp_path):
+    """A measurement that spawns work must not outlive its timeout."""
+    import os
+    import time
+
+    marker = tmp_path / "child.pid"
+    script = _write(
+        tmp_path,
+        "spawner",
+        "import subprocess, pathlib, time\n"
+        "def f(a):\n"
+        "    p = subprocess.Popen(['/bin/sleep', '60'])\n"
+        f"    pathlib.Path({str(marker)!r}).write_text(str(p.pid))\n"
+        "    time.sleep(60)\n",
+    )
+    result = run_one(Target("yours", script, "f"), [[1] * 10], timeout=2.0)
+    assert result.error and "timed out" in result.error
+    deadline = time.time() + 5
+    while not marker.exists() and time.time() < deadline:
+        time.sleep(0.05)
+    if marker.exists():
+        pid = int(marker.read_text())
+        for _ in range(40):
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                return
+            time.sleep(0.05)
+        os.kill(pid, 9)
+        pytest.fail("a grandchild outlived the timed-out measurement")

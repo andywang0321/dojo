@@ -28,8 +28,17 @@ from rich.text import Text
 
 from dojo import complexity, scheduler, static
 from dojo.config import VENV_PYTHON, WORKBENCH_DIR
-from dojo.db import dumps_json, get_or_create_user, iso_from_epoch, loads_json, now
+from dojo.db import (
+    dumps_json,
+    get_or_create_user,
+    insert_revision,
+    iso_from_epoch,
+    loads_json,
+    now,
+    update_revision,
+)
 from dojo.editor import ensure_ide_config, launch as launch_editor
+from dojo.guard import guard
 from dojo.judge import (
     JUDGE_CASES,
     ORACLES,
@@ -42,6 +51,7 @@ import dojo.profiler.probe as probe_mod
 
 from dojo.profiler import growth
 from dojo.render import render_ai, review_markdown
+from dojo.session import workbench
 from dojo.session.learn import resolve_pattern, run_learn
 from dojo.session.state import (
     WorkbenchState,
@@ -51,14 +61,20 @@ from dojo.session.state import (
 )
 from dojo.terminal import confirm_typo, make_prompt, patch_console
 from dojo.tutor import TIER_NAMES, ask_tutor, review
+from dojo.tutor.backend import Role
 from dojo.tutor.prompts import DISCUSSION_SYSTEM, build_discussion_prompt
 from dojo.ui import table as ui_table
 
 GENERATED_CASES = 30
 
+#: The session's commands, per phase (v0.13). One table, so "add a command"
+#: cannot forget a mode — which is exactly how `check` and `open` came to be
+#: missing after a submit, and how the words `check`/`open` ended up being sent
+#: to the AI as questions.
+SOLVE_COMMANDS = ("open", "check", "learn", "report", "submit", "quit")
+POST_COMMANDS = ("polish", "done")
 COMMANDS_HINT = "Ask a question, or: open · check · learn · submit · quit"
-
-POST_COMMANDS_HINT = "Ask a question, or: polish · done"
+POST_COMMANDS_HINT = "Ask a question, or: polish (back to solving, with the discussion tutor) · done"
 
 TEMPLATE_STUB_COMMENT = (
     "# Solve it. Use `dojo check` / `dojo hint` from a second terminal."
@@ -66,42 +82,10 @@ TEMPLATE_STUB_COMMENT = (
 
 
 def _render_template(problem: sqlite3.Row) -> str:
-    """The blank-template stub for a problem, per its stored signature JSON:
-    a plain string renders one function; {"functions": {...}} renders several;
-    {"methods": {...}} renders a class. The file opens with a shebang pointing
-    at dojo's venv — editors and debuggers read it to answer 'which Python'
-    (v0.10.6); it self-heals because every new session rewrites the file."""
-    shebang = f"#!{VENV_PYTHON}\n"
-    signature = loads_json(problem["signature"], None)
-    header = shebang + "\n" + f'"""{problem["statement"]}"""\n\n\n'
-    if isinstance(signature, dict) and "methods" in signature:
-        lines = [
-            f"class {problem['function_name']}:",
-            "    def __init__(self):",
-            f"        {TEMPLATE_STUB_COMMENT}",
-            "        raise NotImplementedError",
-        ]
-        for name, sig in signature["methods"].items():
-            lines += [
-                "",
-                f"    def {name}{sig}:",
-                f"        {TEMPLATE_STUB_COMMENT}",
-                "        raise NotImplementedError",
-            ]
-        return header + "\n".join(lines) + "\n"
-    if isinstance(signature, dict) and "functions" in signature:
-        parts = []
-        for name, sig in signature["functions"].items():
-            parts.append(
-                f"def {name}{sig}:\n    {TEMPLATE_STUB_COMMENT}\n"
-                "    raise NotImplementedError"
-            )
-        return header + "\n\n".join(parts) + "\n"
-    return (
-        header
-        + f"def {problem['function_name']}{signature or ''}:\n"
-        f"    {TEMPLATE_STUB_COMMENT}\n    raise NotImplementedError\n"
-    )
+    """The blank workbench file — a thin alias for `session.workbench`, which
+    owns the template, the fenced examples block, and the chrome-stripped view
+    every AI reader gets (v0.13)."""
+    return workbench.render_template(problem)
 
 
 def _get_problem(conn: sqlite3.Connection, slug: str) -> sqlite3.Row | None:
@@ -303,11 +287,13 @@ def _measurement_note(verdict: "growth.Verdict") -> str | None:
 
 
 def _write_template(problem: sqlite3.Row, force: bool = False) -> None:
+    """Write the blank template, refusing to write one that cannot compile."""
     WORKBENCH_DIR.mkdir(parents=True, exist_ok=True)
     path = WORKBENCH_DIR / f"{problem['slug']}.py"
     if path.exists() and not force:
         return
-    path.write_text(_render_template(problem))
+    source = workbench.template_for(problem)
+    path.write_text(source)
 
 
 def _show_printed(console: Console, report) -> None:
@@ -335,7 +321,9 @@ def _check(console: Console, problem: sqlite3.Row, code_path: Path) -> bool:
     _show_printed(console, report)
     # Advisory static analysis: findings here are live coaching, so the
     # student can fix them before the reviewer grades the final code.
-    analysis = static.analyze(code_path)
+    analysis = static.analyze(
+        code_path, source=workbench.student_view(code_path.read_text(), problem)
+    )
     if analysis.flags or analysis.notes:
         _show_static(console, analysis)
     return report.all_passed
@@ -473,13 +461,21 @@ def _measure_complexity(
                 "[dim]No canonical reference registered — measuring your code "
                 "alone (duration only).[/dim]"
             )
-        result = probe_mod.run_probe(
-            probe_mod.Target("yours", code_path, problem["function_name"]),
-            generator,
-            reference,
-            sizes=sizes,
-            compare=compare if compare != "none" else "strict",
-        )
+        with guard(
+            console, "the scale probe", "grading continues without a measurement"
+        ) as g:
+            g.value = probe_mod.run_probe(
+                probe_mod.Target("yours", code_path, problem["function_name"]),
+                generator,
+                reference,
+                sizes=sizes,
+                compare=compare if compare != "none" else "strict",
+            )
+        if not g.ok:
+            return _skipped_measurement(
+                slug, f"the probe could not run: {g.error}"
+            )
+        result = g.value
 
     failure_point = result.first_failure()
     failure = failure_point.student.error if failure_point else None
@@ -576,7 +572,11 @@ def _ask_complexity_claims(
         edit = prompt(
             "[dim]Enter to continue · `time` or `space` to edit: [/dim]"
         ).strip().lower()
-        if edit in ("", "ok", "y", "yes"):
+        # Any "I'm done" answer proceeds. "quit"/"done" used to fall through to
+        # the guidance line and ask again — an inescapable prompt loop for anyone
+        # who typed the command they use everywhere else in dojo (found while
+        # writing a test that ran out of canned answers).
+        if edit in ("", "ok", "y", "yes", "quit", "q", "done"):
             break
         if edit in ("time", "t"):
             claimed_time_raw = _ask_question(
@@ -600,20 +600,24 @@ def _record_submit(
     user_id: int,
     report,
 ) -> int:
-    """Create this session's attempt row on the first submit, update it on
-    every later one (v0.11: **an attempt exists iff the student submitted**).
+    """Write the attempt head **and append its revision**, in one transaction.
 
-    The judge's own verdict is the status, so a failed submit is a real
-    attempt and `status` carries information — instead of the placeholder
-    'unsolved' that merely starting a session used to write."""
+    The head row is created by this session's first submit and updated by every
+    later one (v0.11: an attempt exists iff the student submitted). The revision
+    is the immutable record of the version that was just judged — which is what
+    makes polish non-destructive (v0.13): only the head moves forward.
+    """
     code = state.code_path.read_text()
     submitted_at = now()
+    hints_json = dumps_json(state.hints)
+    duration = round(time.time() - state.started_epoch, 1)
     if state.attempt_id is None:
         cur = conn.execute(
             """
             INSERT INTO attempts
-                (user_id, problem_id, kind, status, code, started_at, submitted_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (user_id, problem_id, kind, status, code, started_at, submitted_at,
+                 duration_seconds, hint_count, hints)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -623,15 +627,58 @@ def _record_submit(
                 code,
                 iso_from_epoch(state.started_epoch),
                 submitted_at,
+                duration,
+                len(state.hints),
+                hints_json,
             ),
         )
-        conn.commit()
-        return cur.lastrowid
-    conn.execute(
-        "UPDATE attempts SET status = ?, code = ?, submitted_at = ? WHERE id = ?",
-        (report.status, code, submitted_at, state.attempt_id),
+        state.attempt_id = cur.lastrowid
+    else:
+        conn.execute(
+            "UPDATE attempts SET status = ?, code = ?, submitted_at = ?, "
+            "duration_seconds = ?, hint_count = ?, hints = ? WHERE id = ?",
+            (
+                report.status,
+                code,
+                submitted_at,
+                duration,
+                len(state.hints),
+                hints_json,
+                state.attempt_id,
+            ),
+        )
+    state.revision = insert_revision(
+        conn,
+        state.attempt_id,
+        kind="polish" if state.phase == "polish" else "submit",
+        code=code,
+        status=report.status,
+        hints=hints_json,
+    )
+    update_revision(
+        conn,
+        state.attempt_id,
+        state.revision,
+        judge=dumps_json(
+            {
+                "status": report.status,
+                "passed": report.passed,
+                "total": report.total,
+                "failures": [
+                    {
+                        "label": r.label,
+                        "expected": str(r.expected)[:200],
+                        "got": str(r.got)[:200],
+                        "error": r.error,
+                    }
+                    for r in report.results
+                    if not r.passed
+                ][:10],
+            }
+        ),
     )
     conn.commit()
+    save_state(state)
     return state.attempt_id
 
 
@@ -668,7 +715,9 @@ def _submit(
 
     console.print(f"[green]✓ All {report.total} cases passed[/green]")
 
-    analysis = static.analyze(code_path)
+    analysis = static.analyze(
+        code_path, source=workbench.student_view(code_path.read_text(), problem)
+    )
     if analysis.flags or analysis.notes:
         _show_static(console, analysis)
 
@@ -687,32 +736,55 @@ def _submit(
         measurement,
     )
 
-    # Reflect first, so the reviewer can comment on the reflection.
+    # Reflect first, so the reviewer can comment on the reflection. A polished
+    # re-submit does not re-ask: the reflection belongs to the first solve (the
+    # old `polish` never asked for one either), and the student is mid-edit.
     reflection = None
-    if not warmup:
+    if not warmup and state.phase != "polish":
         reflection = _ask_question(
             console,
             "Reflection — what was the key insight, and when would you reach "
             "for this again?",
         )
 
-    console.print("[bold]AI review[/bold] (post-submission; the reviewer critiques, it never repairs)...")
-    code = code_path.read_text()
-    review_json = review(
-        backend,
-        problem["statement"],
-        code,
-        claimed_time_raw,
-        claimed_space_raw,
-        measurement.time.label,
-        measurement.space.label,
-        problem["expected_time"],
-        problem["expected_space"],
-        static_analysis=analysis,
-        reflection=reflection,
-        measured_time_note=_measurement_note(measurement.time),
-        measured_space_note=_measurement_note(measurement.space),
-    )
+    # A polished re-submit asks before paying for a second review (the old
+    # `polish` did): re-grading without re-reviewing is a normal thing to want,
+    # and re-reviewing is the expensive half.
+    review_json: dict = {}
+    if state.phase == "polish" and state.attempt_id is not None:
+        previous = conn.execute(
+            "SELECT review FROM attempts WHERE id = ?", (state.attempt_id,)
+        ).fetchone()
+        review_json = loads_json(previous["review"], {}) if previous else {}
+        if make_prompt(console)("Review again? [y/N]: ").strip().lower() not in ("y", "yes"):
+            console.print("[dim]Review kept as-is.[/dim]")
+    if review_json:
+        _show_review(console, review_json)
+
+    if not review_json:
+        console.print(
+            "[bold]AI review[/bold] (post-submission; the reviewer critiques, "
+            "it never repairs)..."
+        )
+    code = workbench.student_view(code_path.read_text(), problem)
+    with guard(console, "the reviewer", "the attempt is still recorded") as g:
+        g.value = review(
+            backend,
+            problem["statement"],
+            code,
+            claimed_time_raw,
+            claimed_space_raw,
+            measurement.time.label,
+            measurement.space.label,
+            problem["expected_time"],
+            problem["expected_space"],
+            static_analysis=analysis,
+            reflection=reflection,
+            measured_time_note=_measurement_note(measurement.time),
+            measured_space_note=_measurement_note(measurement.space),
+        )
+    if not review_json:
+        review_json = g.value if g.ok else {}
     if "error" in review_json:
         console.print("[yellow]Reviewer unavailable (non-JSON response) — review skipped.[/yellow]")
         review_json = {}
@@ -728,11 +800,14 @@ def _submit(
             self_reported_time = ?, self_reported_space = ?,
             measured_time_class = ?, measured_time_r2 = NULL,
             measured_space_class = ?, measured_space_r2 = NULL,
-            measurement = ?, review = ?, reflection = ?, static_analysis = ?
+            measurement = ?, review = ?, reflection = ?, static_analysis = ?,
+            polished = polished + ?, ai_provenance = COALESCE(?, ai_provenance)
         WHERE id = ?
         """,
         (
-            code,
+            # The head keeps the *raw* artifact (what actually ran, chrome and
+            # all) — the stripped view goes to the AI, never to storage.
+            code_path.read_text(),
             now(),
             round(time.time() - state.started_epoch, 1),
             len(state.hints),
@@ -745,9 +820,28 @@ def _submit(
             dumps_json(review_json) if review_json else None,
             reflection,
             dumps_json(analysis.to_dict()),
+            1 if state.phase == "polish" else 0,
+            dumps_json(backend.identity()) if review_json else None,
             state.attempt_id,
         ),
     )
+    # The artifacts belong to the revision whose code produced them (v0.13):
+    # the claims, the measurement, the review and the static analysis all attach
+    # to *that* version, so a later polish cannot rewrite their history.
+    if state.revision is not None:
+        update_revision(
+            conn,
+            state.attempt_id,
+            state.revision,
+            status="correct",
+            self_reported_time=claimed_time_raw,
+            self_reported_space=claimed_space_raw,
+            measurement=dumps_json(measurement.to_json()),
+            static_analysis=dumps_json(analysis.to_dict()),
+            review=dumps_json(review_json) if review_json else None,
+            reflection=reflection,
+            hints=dumps_json(state.hints),
+        )
     conn.commit()
     console.print(
         Panel(
@@ -778,142 +872,41 @@ def _show_review(console: Console, review_json: dict) -> None:
     )
 
 
-def _polish(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
-    """Post-solve re-grade: re-judge, re-measure, re-analyze the edited code
-    and update the same attempt row (polished counter bumps). Complexity
-    claims are re-collected with the previous answers prefilled — the
-    edited code may be a different algorithm, and comparing a new
-    measurement against stale claims produced spurious flags (v0.9.3)."""
-    code_path = state.code_path
-    rng = random.Random(f"dojo-{problem['slug']}")
-    cases = _build_cases(problem, rng)
-    report = run_cases(code_path, problem["function_name"], cases)
-    if not report.all_passed:
-        console.print(f"[red]✗ {report.passed}/{report.total} passed[/red]")
-        _show_case_failures(console, report)
-        return
-    console.print(f"[green]✓ All {report.total} cases passed[/green]")
-
-    row = conn.execute(
-        "SELECT self_reported_time, self_reported_space, review FROM attempts WHERE id = ?",
-        (state.attempt_id,),
-    ).fetchone()
-    analysis = static.analyze(code_path)
-    if analysis.flags or analysis.notes:
-        _show_static(console, analysis)
-    # Re-collect the claims for the *edited* code (v0.9.3): comparing a new
-    # measurement against the original claims produced spurious flags. The
-    # previous answers prefill, so an unchanged polish costs three Enters.
-    claimed_time_raw, claimed_space_raw = _ask_complexity_claims(
-        console,
-        time_default=row["self_reported_time"],
-        space_default=row["self_reported_space"],
-    )
-    claimed_time = complexity.parse(claimed_time_raw)
-    claimed_space = complexity.parse(claimed_space_raw)
-    measurement = _measure_complexity(console, problem, code_path)
-    _show_measurement(console, measurement)
-    _show_complexity_table(
-        console,
-        problem["expected_time"],
-        problem["expected_space"],
-        claimed_time,
-        claimed_space,
-        measurement,
-    )
-
-    review_json = loads_json(row["review"], {})
-    if make_prompt(console)("Review again? [y/N]: ").strip().lower() in ("y", "yes"):
-        review_json = review(
-            backend,
-            problem["statement"],
-            code_path.read_text(),
-            claimed_time_raw,
-            claimed_space_raw,
-            measurement.time.label,
-            measurement.space.label,
-            problem["expected_time"],
-            problem["expected_space"],
-            static_analysis=analysis,
-            measured_time_note=_measurement_note(measurement.time),
-            measured_space_note=_measurement_note(measurement.space),
-        )
-        if "error" in review_json:
-            console.print("[yellow]Reviewer unavailable (non-JSON response) — review kept as-is.[/yellow]")
-            review_json = {}
-        else:
-            _show_review(console, review_json)
-
-    conn.execute(
-        """
-        UPDATE attempts SET
-            code = ?, submitted_at = ?,
-            self_reported_time = ?, self_reported_space = ?,
-            measured_time_class = ?, measured_time_r2 = NULL,
-            measured_space_class = ?, measured_space_r2 = NULL,
-            measurement = ?, static_analysis = ?, review = ?, polished = polished + 1
-        WHERE id = ?
-        """,
-        (
-            code_path.read_text(),
-            now(),
-            claimed_time_raw,
-            claimed_space_raw,
-            measurement.time.student_class,
-            measurement.space.student_class,
-            dumps_json(measurement.to_json()),
-            dumps_json(analysis.to_dict()),
-            dumps_json(review_json) if review_json else None,
-            state.attempt_id,
-        ),
-    )
-    conn.commit()
-    console.print("[green]Polished — attempt updated.[/green]")
-
-
 def _discuss(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState, question: str) -> None:
     """Post-solve chat: the never-solve boundary lifts, the transcript
     persists on the attempt row. The prompt carries the submitted code so
     the model grounds on what actually ran (v0.8.1)."""
-    history = loads_json(
-        conn.execute(
-            "SELECT discussion FROM attempts WHERE id = ?", (state.attempt_id,)
-        ).fetchone()["discussion"],
-        [],
-    )
+    row = conn.execute(
+        "SELECT discussion FROM attempts WHERE id = ?", (state.attempt_id,)
+    ).fetchone()
+    if row is None:
+        # A stale state file can outlive its attempt row; a subscript on None
+        # used to crash the post-solve loop (v0.13 audit, S2.9).
+        console.print(
+            "[yellow]This attempt is no longer in the database — the "
+            "conversation can't be saved. `done` to close the session.[/yellow]"
+        )
+        return
+    history = loads_json(row["discussion"], [])
     prompt = build_discussion_prompt(
-        problem["statement"], state.code_path.read_text(), history, question
+        problem["statement"],
+        workbench.student_view(state.code_path.read_text(), problem),
+        history,
+        question,
     )
-    answer = backend.chat(DISCUSSION_SYSTEM, prompt)  # raw markdown (v0.10.3)
+    with guard(console, "the discussion tutor", "ask again in a moment") as g:
+        g.value = backend.chat(
+            Role.DISCUSSION, DISCUSSION_SYSTEM, prompt
+        )  # raw markdown (v0.10.3)
+    if not g.ok:
+        return
+    answer = g.value
     render_ai(console, "tutor — post-solve discussion", answer, border_style="green")
     conn.execute(
         "UPDATE attempts SET discussion = ? WHERE id = ?",
         (dumps_json(history + [{"user": question, "tutor": answer}]), state.attempt_id),
     )
     conn.commit()
-
-
-def _post_solve_loop(conn: sqlite3.Connection, console: Console, backend, problem: sqlite3.Row, state: WorkbenchState) -> None:
-    """After review + reflection: polish (re-grade edits), done (retire) —
-    and any other input is a discussion question (v0.10.1: the `discuss`
-    command is gone; bare questions reach the tutor here too)."""
-    prompt = make_prompt(console)
-    while True:
-        raw = prompt(
-            "[bold cyan]dojo ›[/bold cyan] ",
-            hint=f"[dim]{POST_COMMANDS_HINT}[/dim]",
-        ).strip()
-        if not raw:
-            continue
-        fixed = confirm_typo(console, raw, ["polish", "p", "done", "quit", "q"])
-        if fixed is not None:
-            raw = fixed
-        if raw in ("done", "quit", "q"):
-            return
-        if raw in ("polish", "p"):
-            _polish(conn, console, backend, problem, state)
-        else:
-            _discuss(conn, console, backend, problem, state, raw)
 
 
 def _abandon(console: Console, state: WorkbenchState, message: str) -> None:
@@ -997,10 +990,15 @@ def run_day(
     if problem is None:
         console.print(f"[red]Unknown problem '{slug}'. Try `dojo list`.[/red]")
         return "error"
-    if not problem["function_name"] or not problem["visible_tests"]:
+    # Curated means "has a function name and at least one *parsed* visible test":
+    # the old guard tested the truthiness of the JSON string, so a stored "[]"
+    # passed it and the judge graded zero cases as a pass (v0.13 audit, S1.3).
+    if not problem["function_name"] or not (
+        loads_json(problem["visible_tests"], []) or []
+    ):
         console.print(
-            f"[red]'{slug}' is not curated yet (missing function name or visible "
-            "tests in data/problem_overrides.json).[/red]"
+            f"[red]'{slug}' is not curated yet (needs a function name and at "
+            "least one visible test in data/problem_overrides.json).[/red]"
         )
         return "error"
 
@@ -1023,7 +1021,11 @@ def run_day(
     # live on attempt rows (`dojo history` / `dojo show <id>`), not in the
     # workbench. A session that resumes existing state (crash recovery)
     # keeps whatever is in the file.
-    _write_template(problem, force=is_new_session)
+    try:
+        _write_template(problem, force=is_new_session)
+    except workbench.TemplateError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return "error"
     # The workbench carries its own IDE workspace (v0.10.6): a generated
     # .vscode/ + code-workspace pointing at dojo's venv, so opening the
     # folder in VSCode debugs user code without knowing the repo exists.
@@ -1052,19 +1054,34 @@ def run_day(
         console.print(launch_editor(state.code_path))
 
     def do_hint(question: str) -> None:
-        result = ask_tutor(
-            backend,
-            problem["statement"],
-            state.code_path.read_text(),
-            state.tier,
-            question,
-            state.hints,
-        )
-        if not result.delivered:
-            console.print(
-                "[yellow]Tutor couldn't answer without leaking the solution "
-                "— try rephrasing.[/yellow]"
+        with guard(console, "the tutor", "ask again in a moment") as g:
+            g.value = ask_tutor(
+                backend,
+                problem["statement"],
+                workbench.student_view(state.code_path.read_text(), problem),
+                state.tier,
+                question,
+                state.hints,
             )
+        if not g.ok:
+            # An API/transport failure is not a leak and not a session-ender:
+            # the tier does not advance, nothing is recorded, and the prompt
+            # comes back.
+            return
+        result = g.value
+        if not result.delivered:
+            if result.audit_failed:
+                # Distinct from a leak: the answer may be fine, but nothing
+                # verified it, and never-solve is not delivered on trust (v0.13).
+                console.print(
+                    "[yellow]The leak check couldn't be read, so that answer was "
+                    "discarded rather than shown. Ask again.[/yellow]"
+                )
+            else:
+                console.print(
+                    "[yellow]Tutor couldn't answer without leaking the solution "
+                    "— try rephrasing.[/yellow]"
+                )
             return
         state.hints.append(
             {
@@ -1091,21 +1108,76 @@ def run_day(
             render_ai(console, "tutor", result.text, border_style="blue")
 
     prompt = make_prompt(console)
+    # One loop, two phases (v0.13). `state.phase` decides which commands exist
+    # and which agent answers a question; `polish` moves back to solving with the
+    # discussion agent, so the phase is data rather than which `while` you are in.
     while True:
+        # `phase == "post_solve"`, not "!= solving": the polish phase *is* a
+        # solving phase (open/check/submit), with the discussion agent answering.
+        post_solve = state.phase == "post_solve"
+        hint = POST_COMMANDS_HINT if post_solve else COMMANDS_HINT
+        commands = POST_COMMANDS if post_solve else SOLVE_COMMANDS
         raw = prompt(
             "[bold cyan]dojo ›[/bold cyan] ",
-            hint=f"[dim]{COMMANDS_HINT}[/dim]",
+            hint=f"[dim]{hint}[/dim]",
         ).strip()
         if not raw:
             continue
         cmd, _, rest = raw.partition(" ")
-        fixed = confirm_typo(
-            console, cmd, ["open", "check", "learn", "submit", "quit", "q", "report"]
-        )
+        fixed = confirm_typo(console, cmd, list(commands) + ["q", "p", "c", "o", "s"])
         if fixed is not None:
             raw = fixed
             cmd, _, rest = fixed.partition(" ")
+
+        if post_solve:
+            if cmd in ("done", "quit", "q") and not rest:
+                retire_state(state.slug)
+                return "solved"
+            if cmd in ("polish", "p") and not rest:
+                # Back to solving, with the discussion agent still answering:
+                # `open`, `check`, `submit` are available again, and questions
+                # may show code because the boundary lifted at the first grade.
+                state.phase = "polish"
+                state.agent = "discussion"
+                save_state(state)
+                console.print(
+                    "[dim]Back to solving — `open` · `check` · `submit` are "
+                    "yours again, and questions go to the post-solve tutor "
+                    "(solutions allowed).[/dim]"
+                )
+                continue
+            if cmd in ("open", "check", "o", "c", "submit", "s", "learn", "l") and not rest:
+                # Solving-mode commands: say where they went instead of quietly
+                # sending the word to the model as a question (the exact failure
+                # the v0.13 audit reproduced by typing `check` after a submit).
+                console.print(
+                    f"[dim]`{cmd}` is a solving-mode command — `polish` takes you "
+                    "back there (with the post-solve tutor answering).[/dim]"
+                )
+                continue
+            _discuss(conn, console, backend, problem, state, raw)
+            continue
+
+        if cmd in ("polish", "p", "done") and not rest:
+            # Post-solve commands, before there is a solve: say where they live
+            # rather than sending the word to the tutor as a question.
+            console.print(
+                "[dim]`polish` and `done` come after a submit — `submit` when "
+                "your code passes, or `quit` to leave.[/dim]"
+            )
+            continue
         if cmd in ("q", "quit") and not rest:
+            if state.attempt_id is not None:
+                # Polishing: the attempt already exists, so there is nothing to
+                # abandon — the session simply ends and the record (with every
+                # version of it) stays. The outcome stays "quit": the vocabulary
+                # callers switch on does not change just because a row exists.
+                console.print(
+                    "[dim]Session ended. Your attempt and its versions are "
+                    "saved.[/dim]"
+                )
+                retire_state(state.slug)
+                return "quit"
             _abandon(
                 console,
                 state,
@@ -1123,6 +1195,12 @@ def run_day(
                     "[dim]Learn mode isn't available during a warm-up — a "
                     "warm-up is a graded recall, so leaving it records a "
                     "lapse. Finish or quit it, then `dojo learn`.[/dim]"
+                )
+                continue
+            if state.attempt_id is not None:
+                console.print(
+                    "[dim]You've already submitted — the post-solve tutor can "
+                    "show you a different approach directly. Ask away.[/dim]"
                 )
                 continue
             if rest.strip():
@@ -1184,13 +1262,22 @@ def run_day(
             if outcome == "solved":
                 if warmup and card is not None:
                     grade = _ask_grade(console, state.hints)
-                    summary = scheduler.record_grade(conn, card, grade)
-                    # The grade itself is the retention model's one input —
-                    # persist it instead of keeping only the card aggregates.
-                    conn.execute(
-                        "UPDATE attempts SET recall_grade = ? WHERE id = ?",
+                    # ... one transaction, and only if this attempt has not
+                    # graded the card already (v0.13: a crash between the two
+                    # writes used to apply the grade twice).
+                    claimed = conn.execute(
+                        "UPDATE attempts SET recall_grade = ? "
+                        "WHERE id = ? AND recall_grade IS NULL",
                         (grade, state.attempt_id),
-                    )
+                    ).rowcount
+                    if not claimed:
+                        console.print(
+                            "[dim]This attempt already updated the card — not "
+                            "grading it twice.[/dim]"
+                        )
+                        retire_state(state.slug)
+                        return "warmup_done"
+                    summary = scheduler.record_grade(conn, card, grade, commit=False)
                     conn.commit()
                     _show_card_update(console, card, summary, lapse=(grade == 1))
                     retire_state(state.slug)
@@ -1204,15 +1291,18 @@ def run_day(
                     reflection=reflection,
                     grade=suggested_grade(state.hints),
                 )
-                if not warmup:
-                    _post_solve_loop(conn, console, backend, problem, state)
-                retire_state(state.slug)
-                return "solved"
+                state.phase = "post_solve"
+                state.agent = "discussion"
+                save_state(state)
         else:
             # Bare questions — and command words with extra text ("check my
-            # solution...") — are hints, never "Unknown command" (v0.10.1:
-            # the `hint` command itself is gone; a leading "hint " prefix is
-            # still stripped for muscle memory).
+            # solution...") — are questions, never "Unknown command" (v0.10.1).
+            if state.agent == "discussion":
+                # Polishing (v0.13): the boundary lifted when the solve was
+                # graded, so questions go to the post-solve agent — which may
+                # show code and grounds on the file as it stands right now.
+                _discuss(conn, console, backend, problem, state, raw)
+                continue
             question = raw
             if raw.lower() in ("h", "hint"):
                 question = "I'm stuck"
@@ -1246,7 +1336,12 @@ def run_warmups(
             )
             scheduler.defer(conn, card, days=1.0)
             continue
-        _write_template(problem, force=True)
+        try:
+            _write_template(problem, force=True)
+        except workbench.TemplateError as exc:
+            console.print(f"[yellow]{exc} — skipping this warm-up.[/yellow]")
+            scheduler.defer(conn, card, days=1.0)
+            continue
         outcome = run_day(
             conn, console, backend, problem["slug"], user_name,
             open_editor=False, warmup=True, card=card,

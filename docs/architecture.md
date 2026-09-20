@@ -25,7 +25,12 @@ The never-solve rule is an *architectural* property, not a prompt detail. Refere
 src/dojo/
   cli.py            # argparse entry: init / list / day / warmup / check / profile /
                     # history / show / progress / curate / fetch
-  config.py         # paths, env, backend selection (DEEPSEEK_API_KEY, DOJO_AI_BACKEND)
+  config.py         # paths, env, the PROVIDERS table + role models (v0.13);
+                    # CONTENT_DIR = authored data, DATA_DIR = user state (DOJO_DATA_DIR)
+  guard.py          # the exception boundary: an AI/subprocess failure degrades the
+                    # session, it never ends it (v0.13)
+  proc.py           # bounded subprocess execution: capped output, child rlimits,
+                    # process-group kill on timeout (v0.13)
   editor.py         # $EDITOR launching: detached GUI, tmux/macOS windows for terminal editors
   db.py             # SQLite schema (users, problems, attempts, pattern_cards) +
                     # migrations + attempt-history and trends queries
@@ -36,7 +41,8 @@ src/dojo/
   scheduler.py      # FSRS-lite cards, due reviews, warm-up + new-problem picks
   judge/            # registry (oracles, generators, checkers) + subprocess runner
   profiler/         # probe (paired scale measurement) + growth (ratio verdict)
-  tutor/            # backend (mock | deepseek), prompts, hint ladder, reviewer
+  tutor/            # backend (mock | deepseek | openai | anthropic, keyed by
+                    # Role) + prompts, hint ladder, reviewer
   curator/          # AI curation pipeline (propose, validate, apply-with-rollback, dual-oracle)
   fetcher/          # LeetCode GraphQL intake: HTML -> text, snippet -> signature
   session/          # workbench state + the day flow (solve & warmup modes)
@@ -62,6 +68,62 @@ data/problem_overrides.json   # curated metadata: function_name + visible_tests 
 
 `solve in $EDITOR → check (visible tests + advisory static analysis) → hint ladder → submit → judge (visible + generated + oracle) → self-report complexity → scale probe (student vs reference) → three-way complexity table → reflection → AI review → post-solve loop (polish / discuss / done) → persist attempt`.
 
+Every AI and subprocess call on that path runs inside `dojo.guard.guard(...)`
+(v0.13): a transport failure prints one line ("the tutor unavailable — ask again
+in a moment"), records a `degraded` event in the debug log, and the session
+continues. Before that, eleven call sites re-raised and `cli.main` caught only
+`KeyboardInterrupt`, so one network blip ended a session with a traceback. The
+scale probe degrades to "no measurement" (with the reason), and the curator
+converts backend failures into `CuratorError` so its caller can roll back and
+report like any other refusal.
+
+### Session phases (v0.13)
+
+The solve loop is **one dispatcher over explicit state** — `phase` (`solving` |
+`post_solve`) and `agent` (`tutor` | `discussion`), both persisted in the
+workbench state so a crash resumes in the right mode:
+
+| | solving (agent = tutor) | solving (agent = discussion, after `polish`) | post_solve |
+|---|---|---|---|
+| `open` / `check` | ✓ | ✓ | — (pointer to `polish`) |
+| `submit` | judge; on pass → post_solve | re-grade, new revision, → post_solve | — (pointer) |
+| `polish` | — (pointer) | — | → solving, agent stays discussion |
+| `learn` / `report` | ✓ | `report` ✓; `learn` explains it is done | — |
+| `quit` | abandon (records nothing) | keep the attempt, end | — |
+| `done` | — | — | end the session |
+| anything else | question → tutor (leak-audited) | question → discussion | question → discussion |
+
+Why it looks like this: the old design had *two* loops with two command tables,
+and the post-solve copy had no `check`/`open` — so the words were sent to the
+model as questions (reproduced in the v0.12 audit). Here, a command that does not
+belong to the phase gets a pointer line instead. `polish` is a **mode switch**,
+not an alias for re-grading: the never-solve boundary lifts at the first passing
+submit and cannot be put back, so polishing is editing with the post-solve agent
+answering. A re-submit appends an immutable **revision** (`attempt_revisions`)
+carrying its own claims, measurement, static analysis and review, and asks before
+paying for a second review; the head row keeps the newest raw artifact, so every
+pre-existing query still works.
+
+### The workbench file and its views (v0.13)
+
+One file, six readers, and `session/workbench.py` owns the difference:
+
+- **the student** gets the statement, the stub, and a fenced
+  `if __name__ == "__main__"` block generated from the problem's **own visible
+  tests**, so Run/F5 exercises exactly what `check` runs. Neither the judge nor
+  the probe executes it: both load the module under a name that is not
+  `__main__` (pinned by a test).
+- **the AI agents and the static layer** get `student_view()`: the shebang, the
+  statement literal (only while it still equals the statement), and the fenced
+  block removed. The raw file produced shebang/docstring complaints in 15 of 18
+  live reviews — one citing a lint finding dojo's ruff configuration cannot emit.
+- **`dojo show`** keeps the raw artifact (what actually ran) and offers the clean
+  view with `--clean`.
+
+A template that does not compile is refused (`TemplateError`) rather than written
+out — a statement containing a triple quote, a trailing quote, or a backslash used
+to produce an unparseable file that the student met as a harness error.
+
 ### Tutor modes (v0.6)
 
 One `hint` command, two modes the model classifies: **ladder** (the student is stuck — respond at the current tier and advance, vague messages force tier 0) and **discussion** (the student is exploring — answer directly, no tier, no progression). The never-solve boundary holds in both; every response passes the leak audit, and a response still rated ≥ 3 after retries is discarded, never shown. History entries record the mode.
@@ -76,7 +138,7 @@ A third agent, the **teacher**, for topic education — the mode error "what is 
 
 The transcript persists to `learn_sessions` after every exchange (a crash loses at most one turn); `completed` marks graceful ends. `studied_patterns` (any learn session **or** any attempt) is the single notion feeding both the offer and the `dojo progress` markers. Warm-up sessions reject `learn`: a warm-up is a graded recall, and leaving one is a lapse, not a pause.
 
-The teacher's guard rails: `TEACHER_SYSTEM` avoids the words "tutor" and "discussion" (MockBackend keys its canned branches on system-prompt substrings — pinned by test), shows plain text only, and is instructed to say so when unsure — there is no oracle for pedagogy.
+The teacher's guard rails: its call site names `Role.TEACHER` (routing is by role, never by prompt text — v0.13), it teaches from the topic and the conversation only, and it is instructed to say so when unsure — there is no oracle for pedagogy.
 
 ### The progression (v0.10)
 

@@ -79,11 +79,11 @@ def test_review_retries_on_non_json():
         def __init__(self):
             self.json_calls = 0
 
-        def chat_json(self, system, user):
+        def chat_json(self, role, system, user):
             self.json_calls += 1
             return {"error": "model returned non-JSON"}
 
-        def chat(self, system, user):
+        def chat(self, role, system, user):
             return '{"correctness": {"score": 4, "comment": "ok"}}'
 
     backend = Flaky()
@@ -99,10 +99,10 @@ def test_review_parses_fenced_retry_text():
     extractor applies there too."""
 
     class Fenced:
-        def chat_json(self, system, user):
+        def chat_json(self, role, system, user):
             return {"error": "model returned non-JSON"}
 
-        def chat(self, system, user):
+        def chat(self, role, system, user):
             return '```json\n{"correctness": {"score": 3, "comment": "ok"}}\n```'
 
     out = review(
@@ -116,10 +116,10 @@ def test_review_gives_up_after_retry():
     the review gracefully (no crash, no half-review)."""
 
     class AlwaysFlaky:
-        def chat_json(self, system, user):
+        def chat_json(self, role, system, user):
             return {"error": "model returned non-JSON"}
 
-        def chat(self, system, user):
+        def chat(self, role, system, user):
             return "still not json at all"
 
     out = review(

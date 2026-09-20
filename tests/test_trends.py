@@ -99,3 +99,38 @@ def test_review_trends_query_runs(db):
     assert trends[0]["pattern"] == "stack"
     assert trends[0]["solves"] == 2
     assert trends[0]["dims"]["correctness"] == pytest.approx(round((3 + 5 * 2) / 3, 2))
+
+
+def test_warm_ups_are_not_solves(db):
+    """Warm-ups store a full review too, so the recency-weighted trend mixed
+    first solves with hint-free recall re-solves while calling the total
+    "solves" (v0.13 audit, S2.14)."""
+    from dojo.db import dumps_json, get_or_create_user, now, review_trends
+
+    uid = get_or_create_user(db, "andy")
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
+        "function_name, visible_tests, created_at) VALUES "
+        "('p','P','Easy','stack','s','f','[]',?)",
+        (now(),),
+    )
+    db.commit()
+    pid = db.execute("SELECT id FROM problems").fetchone()["id"]
+    review = {
+        dim: {"score": 5, "comment": ""}
+        for dim in (
+            "correctness", "approach_quality", "style_idiom", "naming",
+            "edge_cases", "complexity_claim_check", "complexity_reasoning",
+        )
+    }
+    for kind in ("solve", "warmup"):
+        db.execute(
+            "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, "
+            "submitted_at, review) VALUES (?, ?, ?, 'correct', ?, ?, ?)",
+            (uid, pid, kind, now(), now(), dumps_json(review)),
+        )
+    db.commit()
+
+    trends = review_trends(db, uid)
+    assert len(trends) == 1
+    assert trends[0]["solves"] == 1  # the solve, not the recall re-solve

@@ -491,3 +491,71 @@ def test_a_class_reference_is_wrapped_in_the_op_list_driver():
     # The wrapped reference answers the op list exactly as the oracle does.
     findings = reference_findings("counter", ns, [])
     assert findings == [], findings
+
+
+# ------------------------------- the rollback may not delete real data (v0.13)
+# `apply(overwrite=True)` is the only path `dojo report --fix` uses, and the
+# rollback's delete asserted "the slug is guaranteed fresh, so no attempts can
+# reference it" — false exactly there. With foreign keys on, the DELETE raised
+# IntegrityError and so *replaced* the intended "rolled back" message with a
+# foreign-key traceback; with foreign keys off it deleted the row out from under
+# real attempts, which then vanished from history and from the ladder.
+
+
+def _proposal():
+    return {
+        "slug": SLUG,
+        "title": "Sum List",
+        "difficulty": "Easy",
+        "pattern": "arrays_and_hashing",
+        "statement": "Sum List [Easy]\n\nSum it.\n\nYou should aim for O(n) time and O(1) space.",
+        "function_name": "sum_list",
+        "signature": "(values: list[int]) -> int",
+        # `validate` wants 3-10 cases; VISIBLE has 2 (it is the gate fixture).
+        "visible_tests": VISIBLE + [{"args": [[5, 5]], "expected": 10}],
+        "oracle_code": ORACLE,
+        "judge_case_code": GENERATOR,
+    }
+
+
+def test_a_failed_overwrite_rollback_keeps_a_referenced_row(sandbox, tmp_path):
+    from dojo.curator.curator import apply
+    from dojo.db import get_or_create_user
+
+    overrides_path, registry_path, db_path, namespace = sandbox
+    with connect(db_path) as conn:
+        uid = get_or_create_user(conn, "andy")
+        pid = conn.execute(
+            "SELECT id FROM problems WHERE slug = ?", (SLUG,)
+        ).fetchone()["id"]
+        conn.execute(
+            "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, "
+            "submitted_at) VALUES (?, ?, 'solve', 'correct', ?, ?)",
+            (uid, pid, now(), now()),
+        )
+        conn.commit()
+
+    problems_dir = tmp_path / "problems" / "arrays_and_hashing"
+    problems_dir.mkdir(parents=True)
+    (problems_dir / f"{SLUG}.py").write_text('"""Sum List [Easy]"""\n')
+
+    with pytest.raises(CuratorError) as exc:
+        apply(
+            _proposal(),
+            problems_dir=tmp_path / "problems",
+            overrides_path=overrides_path,
+            registry_path=registry_path,
+            registry_namespace=namespace,
+            db_path=db_path,
+            verify=lambda: (False, "gate failed on purpose"),
+            overwrite=True,
+        )
+    message = str(exc.value)
+    assert "rolled back" in message          # the intended message...
+    assert "FOREIGN KEY" not in message      # ...not a foreign-key traceback
+
+    with connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM problems WHERE slug = ?", (SLUG,)
+        ).fetchone() is not None
+        assert conn.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 1

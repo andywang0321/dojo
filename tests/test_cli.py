@@ -569,3 +569,204 @@ def test_show_omits_the_grade_for_a_solve(db, tmp_path, monkeypatch, capsys):
 
     assert _cmd_show(args) == 0
     assert "recall grade" not in " ".join(capsys.readouterr().out.split())
+
+
+# ------------------------------------- product-level smoke tests (v0.13)
+# The suite tested functions, not the product: 10 of 17 `_cmd_*` handlers had no
+# caller and `main()` appeared once, with help argv. These drive the real entry
+# point against a temp DB and workbench (the `cli_env` fixture), so argument
+# normalization, user resolution, seeding, and dispatch are exercised together.
+
+
+def _seed_user(db_path, name="andy"):
+    from dojo.db import connect, get_or_create_user
+
+    conn = connect(db_path)
+    uid = get_or_create_user(conn, name)
+    conn.close()
+    return uid
+
+
+def test_main_list_runs_end_to_end(cli_env):
+    """`dojo list` through main(): seeds the bank, resolves the sole user, and
+    renders the table — the whole dispatch chain the suite never touched."""
+    from dojo.cli import main
+
+    rec, db_path, _workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["list"]) == 0
+    assert "Problem bank" in rec.text
+    assert "valid_parentheses" in rec.text
+
+
+def test_main_history_and_show_run_end_to_end(cli_env):
+    from dojo.cli import main
+
+    rec, db_path, _workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["history"]) == 0
+    assert "Attempts" in rec.text
+    # No attempt 999: the command must fail loudly, not silently.
+    assert main(["show", "999"]) == 1
+    assert "No attempt with id 999" in rec.text
+
+
+def test_main_day_writes_a_template_and_quit_records_nothing(cli_env):
+    """The daily entry point, end to end, with the mock backend and a canned
+    `quit`: the template lands in the *temp* workbench, and the v0.11 lifecycle
+    rule holds through the real CLI (quit writes no attempt row)."""
+    from dojo.cli import main
+    from dojo.db import connect
+
+    rec, db_path, workbench, _problems = cli_env
+    _seed_user(db_path)
+    rec.answers = ["quit"]
+
+    assert main(["day", "valid_parentheses"]) == 0
+    assert (workbench / "valid_parentheses.py").exists()
+    assert "def is_valid" in (workbench / "valid_parentheses.py").read_text()
+
+    conn = connect(db_path)
+    rows = conn.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"]
+    conn.close()
+    assert rows == 0, "quit must record nothing (v0.11 lifecycle)"
+
+
+def test_main_unknown_slug_is_a_clean_failure(cli_env):
+    from dojo.cli import main
+
+    rec, db_path, _workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["day", "no_such_problem_xyz"]) == 1
+    assert "Unknown problem" in rec.text
+
+
+def test_main_check_without_a_session_points_at_day(cli_env):
+    from dojo.cli import main
+
+    rec, db_path, _workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["check"]) == 1
+    assert "No active session" in rec.text
+
+
+def test_active_state_slug_prefers_the_most_recent_session(tmp_path, monkeypatch):
+    """Two crashed sessions used to mean `dojo check` tested whichever slug
+    sorted first (which is how a session killed mid-solve could silently be
+    checked against the wrong problem). The most recently used one wins."""
+    import os
+    import time
+
+    from dojo.cli import _active_state_slug
+
+    workbench = tmp_path / "wb"
+    workbench.mkdir()
+    older = workbench / "aaa_old.state.json"
+    newer = workbench / "zzz_new.state.json"
+    older.write_text("{}")
+    newer.write_text("{}")
+    os.utime(older, (time.time() - 600, time.time() - 600))
+    monkeypatch.setattr("dojo.cli.WORKBENCH_DIR", workbench)
+
+    printed: list[str] = []
+
+    class C:
+        def print(self, *a, **k):
+            printed.append(" ".join(str(x) for x in a))
+
+    assert _active_state_slug(C()) == "zzz_new"
+    assert "zzz_new" in " ".join(printed)  # the guess is never invisible
+
+
+def test_show_clean_strips_dojos_scaffolding(db, tmp_path, monkeypatch, capsys):
+    """`dojo show --code` keeps the raw artifact (the truth of what ran);
+    `--clean` shows what the AI actually read (v0.13)."""
+    import argparse
+
+    from dojo.cli import _cmd_show
+    from dojo.db import now
+    from dojo.session import workbench as wb
+
+    pid = _seed_curated_problem(db)
+    uid = get_or_create_user(db, "andy")
+    problem = db.execute("SELECT * FROM problems WHERE id = ?", (pid,)).fetchone()
+    solved = wb.template_for(problem).replace(
+        "    raise NotImplementedError", "    return 1"
+    )
+    cur = db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at, code) "
+        "VALUES (?, ?, 'solve', 'correct', ?, ?, ?)",
+        (uid, pid, now(), now(), solved),
+    )
+    db.commit()
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+
+    assert _cmd_show(argparse.Namespace(attempt_id=cur.lastrowid, code=True, clean=False)) == 0
+    raw = capsys.readouterr().out
+    assert raw.startswith("#!")                      # the raw artifact
+
+    assert _cmd_show(argparse.Namespace(attempt_id=cur.lastrowid, code=False, clean=True)) == 0
+    clean = capsys.readouterr().out
+    assert not clean.startswith("#!")
+    assert wb.SENTINEL_OPEN not in clean
+    assert "return 1" in clean
+
+
+def test_show_revisions_and_diff_render(db, tmp_path, monkeypatch, capsys):
+    """The point of storing revisions is being able to *see* what changed —
+    `--revisions` lists them, `--diff` shows the delta."""
+    import argparse
+
+    from dojo.cli import _cmd_show
+    from dojo.db import insert_revision, now
+
+    pid = _seed_curated_problem(db)
+    uid = get_or_create_user(db, "andy")
+    cur = db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at, code) "
+        "VALUES (?, ?, 'solve', 'correct', ?, ?, ?)",
+        (uid, pid, now(), now(), "def solve_it(*args, **kwargs):\n    return 1\n"),
+    )
+    attempt_id = cur.lastrowid
+    insert_revision(db, attempt_id, kind="submit", code="a = 1\nb = 2\n", status="wrong_answer")
+    insert_revision(db, attempt_id, kind="polish", code="a = 1\nb = 3\n", status="correct")
+    db.commit()
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+
+    assert _cmd_show(argparse.Namespace(attempt_id=attempt_id, code=False, clean=False,
+                                        revisions=True, rev=None, diff=None)) == 0
+    listing = capsys.readouterr().out
+    assert "Revisions" in listing and "polish" in listing
+
+    assert _cmd_show(argparse.Namespace(attempt_id=attempt_id, code=False, clean=False,
+                                        revisions=False, rev=1, diff=None)) == 0
+    one = capsys.readouterr().out
+    assert "b = 2" in one and "revision 1 of" in one
+
+    assert _cmd_show(argparse.Namespace(attempt_id=attempt_id, code=False, clean=False,
+                                        revisions=False, rev=None, diff=[])) == 0
+    delta = capsys.readouterr().out
+    assert "-b = 2" in delta and "+b = 3" in delta
+
+
+def test_input_ending_at_a_prompt_stops_cleanly(cli_env, capsys):
+    """Ctrl-D (or a piped script running out of lines) used to surface as an
+    `EOFError` traceback out of `rich.Console.input`. The state file stays, so
+    the same command resumes the session."""
+    import unittest.mock as mock
+
+    from rich.console import Console
+
+    from dojo.cli import main
+
+    _rec, db_path, workbench, _problems = cli_env
+    _seed_user(db_path)
+
+    def eof_input(self, prompt="", **kwargs):  # noqa: ANN001
+        raise EOFError
+
+    with mock.patch.object(Console, "input", eof_input):
+        assert main(["day", "valid_parentheses"]) == 1
+
+    assert "Input ended" in capsys.readouterr().out
+    assert list(workbench.glob("*.state.json")), "the session must remain resumable"

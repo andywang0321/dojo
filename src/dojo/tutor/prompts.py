@@ -46,7 +46,9 @@ answered at; for kind "discussion", tier must be null.
 
 You are given: the problem statement, the student's current code, the hint \
 ladder tier (0-5), and the hint history. You have no access to any reference \
-solution; do not pretend to be checking one.
+solution; do not pretend to be checking one. The code is the student's own \
+work: dojo's scaffolding (shebang, statement docstring, examples block) is \
+stripped before you see it, so never remark on its absence.
 """
 
 DISCUSSION_SYSTEM = """\
@@ -113,6 +115,11 @@ your job is critique, never repair.
 Hard rules:
 - NEVER include a better or alternative solution in the review — no code, no \
 algorithm sketches. Critique what exists.
+- The code you are given is the student's own: dojo's scaffolding (a shebang \
+line, the problem statement as a module docstring, and a generated \
+`if __name__ == "__main__"` examples block) is removed before it reaches you. \
+Never critique the absence of a module docstring, a shebang, or a main guard, \
+and never claim a lint finding you were not given in the STATIC ANALYSIS block.
 - Be specific: reference line-level habits in the submitted code.
 - Score the student's complexity REASONING, not just the claim: \
 "complexity_reasoning" judges whether their "why" (and their reflection, when \

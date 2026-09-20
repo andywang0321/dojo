@@ -74,8 +74,11 @@ def test_wrong_solution_reports_failures(tmp_path):
 
 
 def test_crashing_solution_survives(tmp_path):
+    """A crash is its own verdict, not a wrong answer (v0.13): `status` carries
+    the judge's finding, and "my code raised" and "my logic is wrong" are
+    different coaching problems. `error` used to be unreachable here."""
     report = run_cases(_write(tmp_path, CRASHING), "is_valid", CASES)
-    assert report.status == "wrong_answer"
+    assert report.status == "error"
     assert all(r.error and "RuntimeError" in r.error for r in report.results)
 
 
@@ -90,7 +93,7 @@ def test_import_error_is_reported(tmp_path):
         "is_valid",
         CASES,
     )
-    assert report.status == "wrong_answer"
+    assert report.status == "error"
     assert report.results[0].error
 
 
@@ -98,5 +101,5 @@ def test_non_json_serializable_return_fails(tmp_path):
     """Strict JSON equality: a return value json.dumps can't serialize is a
     failed case with an error, never a lenient string-compare pass."""
     report = run_cases(_write(tmp_path, NON_SERIALIZABLE), "is_valid", CASES)
-    assert report.status == "wrong_answer"
+    assert report.status == "error"  # serialization is a harness-level failure
     assert all(not r.passed and r.error for r in report.results)

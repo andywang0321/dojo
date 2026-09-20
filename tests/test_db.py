@@ -128,3 +128,86 @@ def test_learn_sessions_migrates_existing_db(tmp_path):
 
     with connect(db_path) as migrated:
         assert migrated.execute("SELECT 1 FROM learn_sessions LIMIT 0").fetchall() == []
+
+
+# ---------------------------------------------- schema + migration (v0.13)
+
+
+def test_a_migrated_db_matches_a_fresh_one(tmp_path):
+    """`migrate()` is additive, which is only useful if an *existing* DB ends up
+    with the same columns a fresh one gets. Nothing asserted that before, so a
+    column added to the schema but not to `migrate` would exist only for new
+    users (v0.13 audit, S2.16)."""
+    import sqlite3
+
+    from dojo.db import connect, init_db
+
+    fresh = tmp_path / "fresh.db"
+    init_db(fresh)
+
+    # Build an old-shaped DB: the base tables, then let migrate() catch up.
+    legacy = tmp_path / "legacy.db"
+    old = sqlite3.connect(legacy)
+    old.executescript(
+        """
+        CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL,
+                            created_at TEXT NOT NULL);
+        CREATE TABLE problems (id INTEGER PRIMARY KEY, slug TEXT UNIQUE NOT NULL,
+                               title TEXT NOT NULL, difficulty TEXT, pattern TEXT,
+                               statement TEXT NOT NULL, function_name TEXT,
+                               expected_time TEXT, expected_space TEXT,
+                               source TEXT DEFAULT 'seed', visible_tests TEXT,
+                               created_at TEXT NOT NULL);
+        CREATE TABLE attempts (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL,
+                               problem_id INTEGER NOT NULL, code TEXT,
+                               status TEXT, started_at TEXT NOT NULL,
+                               submitted_at TEXT);
+        CREATE TABLE pattern_cards (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL,
+                                    pattern TEXT NOT NULL, stability REAL NOT NULL,
+                                    difficulty REAL NOT NULL,
+                                    reps INTEGER NOT NULL DEFAULT 0,
+                                    lapses INTEGER NOT NULL DEFAULT 0,
+                                    due_at TEXT NOT NULL, last_review_at TEXT,
+                                    last_reflection TEXT, created_at TEXT NOT NULL,
+                                    UNIQUE (user_id, pattern));
+        """
+    )
+    old.commit()
+    old.close()
+
+    connect(legacy).close()  # migrate() runs on connect
+
+    def columns(path, table):
+        conn = sqlite3.connect(path)
+        try:
+            return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        finally:
+            conn.close()
+
+    for table in ("attempts", "problems", "users", "pattern_cards"):
+        assert columns(fresh, table) == columns(legacy, table), table
+
+
+def test_the_attempt_row_records_which_backend_produced_its_review(db):
+    """`ai_provenance` keeps a mock row from ever again being mistaken for a
+    live one (v0.13 audit, S3.1)."""
+    import json
+
+    from dojo.db import dumps_json, get_or_create_user, now
+
+    uid = get_or_create_user(db, "andy")
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, created_at) "
+        "VALUES ('p', 'P', 'Easy', 'stack', 's', ?)",
+        (now(),),
+    )
+    db.commit()
+    pid = db.execute("SELECT id FROM problems").fetchone()["id"]
+    db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, ai_provenance) "
+        "VALUES (?, ?, 'solve', 'correct', ?, ?)",
+        (uid, pid, now(), dumps_json({"backend": "mock", "model": "mock"})),
+    )
+    db.commit()
+    row = db.execute("SELECT ai_provenance FROM attempts").fetchone()
+    assert json.loads(row["ai_provenance"])["backend"] == "mock"

@@ -204,10 +204,27 @@ def _parse_utc(iso: str) -> datetime:
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
-def record_grade(conn: sqlite3.Connection, card: sqlite3.Row, grade: int) -> dict:
+def record_grade(
+    conn: sqlite3.Connection, card: sqlite3.Row, grade: int, commit: bool = True
+) -> dict:
     """Grade a warm-up recall (1-4) and update the card. Returns a summary
-    dict with the new state and the humanized next-due."""
-    grade = max(1, min(4, int(grade)))
+    dict with the new state and the humanized next-due.
+
+    ``commit=False`` lets the caller pair this with the attempt's `recall_grade`
+    in one transaction — the two writes describe one event, and a crash between
+    them used to let a resumed warm-up grade the same card twice (v0.13 audit,
+    S1.7). The grade is validated rather than clamped: silently reading a 0 as
+    "forgot" (a lapse) or a 5 as "easy" (x2.61 on the whole grown stability) is
+    a landmine for the next caller."""
+    # Validate the *raw* grade, then normalize: clamping first is what made an
+    # out-of-range value silently meaningful.
+    try:
+        submitted = int(grade)
+    except (TypeError, ValueError):
+        raise ValueError(f"recall grade must be 1-4, got {grade!r}") from None
+    if not 1 <= submitted <= 4:
+        raise ValueError(f"recall grade must be 1-4, got {grade!r}")
+    grade = _grade(submitted)
     anchor = card["last_review_at"] or card["created_at"]
     t_days = max(
         0.0,
@@ -226,7 +243,8 @@ def record_grade(conn: sqlite3.Connection, card: sqlite3.Row, grade: int) -> dic
         """,
         (new_s, new_d, 1 if grade == 1 else 0, due, now(), card["id"]),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return {
         "stability": new_s,
         "difficulty": new_d,
@@ -245,10 +263,13 @@ def due_cards(
     # ISO form dojo writes, so a card would read as overdue by a day. SQLite
     # parses both shapes, so normalizing here makes the schedule robust to any
     # writer rather than to exactly one.
+    # The pattern tie-break matters: `backfill_cards` gives every card the same
+    # `due_at` (second resolution), so without it a limited fetch returned an
+    # arbitrary subset in unspecified order (v0.13 audit, S2.11).
     query = (
         "SELECT * FROM pattern_cards WHERE user_id = ? "
         "AND datetime(due_at) <= datetime(?) "
-        "ORDER BY datetime(due_at) ASC"
+        "ORDER BY datetime(due_at) ASC, pattern ASC"
     )
     params: list = [user_id, now()]
     if limit is not None:
@@ -269,15 +290,23 @@ def warmup_problem(
     earliest *ever* — a value that never ages, so the same problem came back
     every time (valid_parentheses was served five times while four other solved
     problems in that pattern were never revisited). Now practising a problem
-    pushes it to the back, which is the rotation the documentation claimed."""
+    pushes it to the back, which is the rotation the documentation claimed.
+
+    v0.13: `MAX(submitted_at)` goes through `datetime()` and NULL attempts are
+    excluded. A raw string max is the hazard `due_cards` already defends against
+    (a naive stamp sorts before the ISO form dojo writes), and NULL sorts *first*
+    in ASC — so a problem whose only correct attempt had no timestamp was pinned
+    as the warm-up forever, the exact v0.11 failure mode reintroduced for NULL
+    rows."""
     return conn.execute(
         """
         SELECT p.* FROM problems p
         JOIN attempts a ON a.problem_id = p.id
         WHERE a.user_id = ? AND a.status = 'correct' AND p.pattern = ?
+          AND a.submitted_at IS NOT NULL
           AND p.function_name IS NOT NULL AND p.visible_tests IS NOT NULL
         GROUP BY p.id
-        ORDER BY MAX(a.submitted_at) ASC, p.id ASC
+        ORDER BY MAX(datetime(a.submitted_at)) ASC, p.id ASC
         LIMIT 1
         """,
         (user_id, pattern),
@@ -430,19 +459,52 @@ def pick_practice_problem(
     ).fetchone()
 
 
-def backfill_cards(conn: sqlite3.Connection) -> int:
-    """Create a card for every (user, pattern) with a correct attempt,
-    due immediately — v0.1 solves deserve a first warm-up too."""
-    rows = conn.execute(
-        """
-        SELECT DISTINCT a.user_id, p.pattern
+def backfill_cards(conn: sqlite3.Connection, user_id: int | None = None) -> int:
+    """Create a card for every (user, pattern) with a correct attempt, due
+    immediately — v0.1 solves deserve a first warm-up too.
+
+    Returns the number of cards actually **created** (it used to return the
+    number of (user, pattern) pairs, so a second run reported "backfilled N
+    cards" after writing nothing), and seeds each card from the hint count of the
+    attempt that earned it rather than a flat "good".
+
+    One thing it cannot fix from here: `ensure_card` stamps `created_at` = now,
+    and `record_grade` anchors elapsed time at `created_at`, so the *first*
+    review of a backfilled card is information-free (R = 1 exactly, so the
+    retrievability term is 0 and grading good moves stability 2.4 -> 2.4). The
+    honest anchor is the solve that earned the card; that needs `created_at` to
+    be passed in, which is v0.13 §A work (attempt revisions carry the timing).
+    """
+    query = """
+        SELECT a.user_id, p.pattern,
+               MAX(datetime(a.submitted_at)) AS last_solved,
+               COUNT(*) AS solves,
+               SUM(a.hint_count) AS hints
         FROM attempts a JOIN problems p ON p.id = a.problem_id
         WHERE a.status = 'correct' AND p.pattern IS NOT NULL
-        """
-    ).fetchall()
-    for r in rows:
-        ensure_card(conn, r["user_id"], r["pattern"], due_immediately=True)
-    return len(rows)
+    """
+    params: list = []
+    if user_id is not None:
+        query += " AND a.user_id = ?"
+        params.append(user_id)
+    query += " GROUP BY a.user_id, p.pattern"
+    created = 0
+    for r in conn.execute(query, params).fetchall():
+        existing = conn.execute(
+            "SELECT 1 FROM pattern_cards WHERE user_id = ? AND pattern = ?",
+            (r["user_id"], r["pattern"]),
+        ).fetchone()
+        if existing:
+            continue
+        # A pattern solved with no hints at all is evidence *against* struggle,
+        # which is exactly what `suggested_grade` encodes for a live session.
+        hints = int(r["hints"] or 0)
+        grade = 3 if hints == 0 else (2 if hints <= 2 else 1)
+        ensure_card(
+            conn, r["user_id"], r["pattern"], due_immediately=True, grade=grade
+        )
+        created += 1
+    return created
 
 
 def defer(conn: sqlite3.Connection, card: sqlite3.Row, days: float = 1.0) -> str:

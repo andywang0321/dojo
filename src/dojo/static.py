@@ -10,7 +10,10 @@ import json
 import subprocess
 import sys
 from dataclasses import dataclass, field
+import tempfile
 from pathlib import Path
+
+from dojo.config import LOGS_DIR
 
 COMPLEXITY_THRESHOLD = 10  # the McCabe convention
 
@@ -44,17 +47,27 @@ class StaticReport:
         }
 
 
-def analyze(code_path: Path) -> StaticReport:
+def analyze(code_path: Path, source: str | None = None) -> StaticReport:
     """Cyclomatic complexity per function (radon) + lint findings (ruff).
-    Never raises: broken code or tool hiccups degrade into notes."""
+
+    Never raises — including when the file cannot be read at all: the read used
+    to sit outside both try blocks, so a missing file (FileNotFoundError) or a
+    non-UTF-8 one (UnicodeDecodeError) escaped `_check` and could lose a passing
+    submit (v0.13 audit, S2.25)."""
     report = StaticReport()
-    source = code_path.read_text()
+    lint_source = source
+    if lint_source is None:
+        try:
+            lint_source = code_path.read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            report.notes.append(f"static analysis skipped: {type(exc).__name__}: {exc}")
+            return report
 
     try:
         from radon.complexity import cc_visit
         from radon.visitors import Function
 
-        for block in cc_visit(source):
+        for block in cc_visit(lint_source):
             if isinstance(block, Function):
                 report.complexity.append(
                     {
@@ -68,10 +81,18 @@ def analyze(code_path: Path) -> StaticReport:
     except Exception as exc:  # noqa: BLE001 - evidence gathering must survive
         report.notes.append(f"radon skipped: {exc}")
 
+    lint_target = code_path
+    tmp_dir = None
+    if lint_source is not None:
+        # Lint the *student view* (v0.13): dojo's shebang, statement docstring
+        # and examples block are not the student's code, so a finding about them
+        # is noise the reviewer then repeats.
+        tmp_dir = tempfile.TemporaryDirectory(prefix="dojo_static_")
+        lint_target = Path(tmp_dir.name) / code_path.name
+        lint_target.write_text(lint_source)
     try:
-        # The shebang rules are silenced (v0.10.10): dojo writes the venv
-        # shebang into every template — it is dojo's chrome, not user code,
-        # and "file not executable" is pure noise for a workbench file.
+        # The shebang rules are silenced (v0.10.10): even in the rare case the
+        # raw file is linted, the venv shebang is dojo's chrome, not user code.
         proc = subprocess.run(
             [
                 sys.executable,
@@ -79,9 +100,14 @@ def analyze(code_path: Path) -> StaticReport:
                 "ruff",
                 "check",
                 "--output-format=json",
+                # The cache belongs to dojo, not to whatever directory the CLI
+                # happened to be started in: without this, `make test` created
+                # `.ruff_cache/` in the repo root (v0.13 audit, S2.25).
+                "--cache-dir",
+                str(LOGS_DIR / "ruff"),
                 "--ignore",
                 "EXE001,EXE002,EXE004",
-                str(code_path),
+                str(lint_target),
             ],
             capture_output=True,
             text=True,
@@ -101,5 +127,8 @@ def analyze(code_path: Path) -> StaticReport:
             report.notes.append(f"ruff: {proc.stderr.strip()[:200]}")
     except Exception as exc:  # noqa: BLE001
         report.notes.append(f"ruff skipped: {exc}")
+    finally:
+        if tmp_dir is not None:
+            tmp_dir.cleanup()
 
     return report

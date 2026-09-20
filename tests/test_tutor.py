@@ -1,7 +1,9 @@
 """Tutor: AI-classified ladder vs discussion, leak re-audit + discard,
 and Markdown stripping for terminal display."""
 
-from dojo.tutor.backend import MockBackend
+import pytest
+
+from dojo.tutor.backend import MockBackend, Role
 from dojo.tutor.prompts import build_tutor_prompt
 from dojo.tutor.tutor import ask_tutor, de_markdown
 
@@ -31,10 +33,10 @@ class RecordingBackend:
         self._rating_idx = 0
         self.prompts = []
 
-    def chat(self, system, user):
+    def chat(self, role, system, user):
         return ""
 
-    def chat_json(self, system, user):
+    def chat_json(self, role, system, user):
         self.prompts.append(user)
         if "auditor" in system.lower():
             rating = self._leak[min(self._rating_idx, len(self._leak) - 1)]
@@ -177,14 +179,19 @@ def test_parse_json_content_tolerates_api_shapes():
 
 def test_mock_backend_teacher_branch():
     """The teacher branch keys on 'teacher' in the system prompt (learning
-    mode, v0.8); a queue serves one canned reply per call and falls back to
-    a default when exhausted, so a long conversation never crashes."""
+    mode, v0.8); a queue serves one canned reply per call and, once exhausted,
+    repeats the last one. (It used to return `{}`, which surfaced in the
+    student's terminal as a literal `{}` during a long offline demo.)"""
     backend = MockBackend(teacher=["Primer about heaps.", "Because the root holds the min."])
     system = "You are a data structures teacher."
-    assert backend.chat(system, "TOPIC: heap") == "Primer about heaps."
-    assert backend.chat(system, "TOPIC: heap") == "Because the root holds the min."
-    fallback = backend.chat(system, "TOPIC: heap")
-    assert "heap" in fallback.lower() and len(fallback) > 0
+    assert backend.chat(Role.TEACHER, system, "TOPIC: heap") == "Primer about heaps."
+    assert backend.chat(Role.TEACHER, system, "TOPIC: heap") == "Because the root holds the min."
+    assert backend.chat(Role.TEACHER, system, "TOPIC: heap") == "Because the root holds the min."
+
+
+def test_mock_backend_without_a_queue_uses_its_default():
+    backend = MockBackend(teacher=[])
+    assert "heap" in backend.chat(Role.TEACHER, "You are a data structures teacher.", "TOPIC: heap").lower()
 
 
 def test_mock_backend_discussion_branch_matches_system_prompt():
@@ -195,7 +202,7 @@ def test_mock_backend_discussion_branch_matches_system_prompt():
     from dojo.tutor.prompts import DISCUSSION_SYSTEM
 
     backend = MockBackend(discussion="CANNED discussion reply")
-    assert backend.chat(DISCUSSION_SYSTEM, "STUDENT: why?") == "CANNED discussion reply"
+    assert backend.chat(Role.DISCUSSION, DISCUSSION_SYSTEM, "STUDENT: why?") == "CANNED discussion reply"
 
 
 def test_discussion_prompt_includes_submitted_code():
@@ -217,3 +224,103 @@ def test_discussion_prompt_includes_submitted_code():
     lowered = prompt.lower()
     for forbidden in ("oracles", "registry", "expected_time", "profiler"):
         assert forbidden not in lowered, f"'{forbidden}' leaked into the discussion prompt"
+
+
+# ------------------------------------------- the audit fails closed (v0.13)
+# The v0.11 audit listed this as its first finding and it was still open: every
+# failure mode of the *auditor* collapsed to rating 1 = "clean", so a response
+# containing a complete solution was delivered. Reproduced in 4/4 modes before
+# the fix; each mode is pinned separately here.
+
+
+LEAKY = (
+    "## Sure thing\n"
+    "```python\n"
+    "def two_sum(nums, target):\n"
+    "    seen = {}\n"
+    "    for i, n in enumerate(nums):\n"
+    "        if target - n in seen:\n"
+    "            return [seen[target - n], i]\n"
+    "        seen[n] = i\n"
+    "```\n"
+)
+
+
+class BrokenAuditor(MockBackend):
+    """A backend whose *auditor* reply is unreadable in exactly one way."""
+
+    def __init__(self, mode: str):
+        super().__init__(tutor={"kind": "ladder", "tier": 1, "text": LEAKY})
+        self.mode = mode
+
+    def chat_json(self, role, system, user):
+        if "auditor" in system.lower():
+            return {
+                "nonjson": {"error": "model returned non-JSON"},
+                "missing": {"verdict": "fine"},
+                "string": {"rating": "high"},
+                "none": {"rating": None},
+                "bool": {"rating": True},
+            }[self.mode]
+        return super().chat_json(role, system, user)
+
+
+@pytest.mark.parametrize("mode", ["nonjson", "missing", "string", "none", "bool"])
+def test_an_unreadable_audit_discards_the_hint(mode):
+    result = ask_tutor(BrokenAuditor(mode), "stmt", "code", 1, "help me", [])
+    assert result.delivered is False
+    assert result.audit_failed is True
+    assert result.leak_rating is None
+    assert "def two_sum" not in result.text  # the full solution never reaches the student
+
+
+def test_a_reader_error_is_distinct_from_a_leak():
+    """The student is told which failure this was: blaming the answer when the
+    auditor is the thing that broke is a wrong trail."""
+    leak = ask_tutor(RecordingBackend(leak_ratings=[5, 5, 5]), "s", "c", 1, "help me", [])
+    audit = ask_tutor(BrokenAuditor("nonjson"), "s", "c", 1, "help me", [])
+    assert (leak.delivered, leak.audit_failed) == (False, False)
+    assert (audit.delivered, audit.audit_failed) == (False, True)
+
+
+def test_the_audit_is_retried_before_refusing():
+    """One unreadable reply is a hiccup, not a refusal: the audit is retried, and
+    a good rating on the retry delivers the hint."""
+
+    class FlakyOnce(MockBackend):
+        def __init__(self):
+            super().__init__(leak_ratings=[1])
+            self.calls = 0
+
+        def chat_json(self, role, system, user):
+            if "auditor" in system.lower():
+                self.calls += 1
+                if self.calls == 1:
+                    return {"error": "model returned non-JSON"}
+            return super().chat_json(role, system, user)
+
+    backend = FlakyOnce()
+    result = ask_tutor(backend, "stmt", "code", 1, "help me", [])
+    assert result.delivered is True
+    assert result.leak_rating == 1
+    assert backend.calls == 2
+
+
+def test_a_leaking_response_with_an_unreadable_reaudit_is_still_refused():
+    """After a regeneration, an unreadable audit must not let the new text
+    through: unknown is not clean."""
+
+    class LeakThenBroken(MockBackend):
+        def __init__(self):
+            super().__init__(tutor=[{"kind": "ladder", "tier": 1, "text": LEAKY}] * 2)
+            self.calls = 0
+
+        def chat_json(self, role, system, user):
+            if "auditor" in system.lower():
+                self.calls += 1
+                return {"rating": 5} if self.calls == 1 else {"error": "boom"}
+            return super().chat_json(role, system, user)
+
+    result = ask_tutor(LeakThenBroken(), "stmt", "code", 1, "help me", [])
+    assert result.delivered is False
+    assert result.audit_failed is True

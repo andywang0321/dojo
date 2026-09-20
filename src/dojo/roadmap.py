@@ -11,10 +11,12 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from dojo.config import DATA_DIR
+from dojo.config import CONTENT_DIR
 from dojo.patterns import GROUP_SLUGS
 
-ROADMAP_PATH = DATA_DIR / "roadmap.toml"
+#: Authored content (CONTENT_DIR), not user state (DATA_DIR): the roadmap ships
+#: with the repo and must survive a test run that redirects `DOJO_DATA_DIR`.
+ROADMAP_PATH = CONTENT_DIR / "roadmap.toml"
 
 
 class RoadmapError(RuntimeError):

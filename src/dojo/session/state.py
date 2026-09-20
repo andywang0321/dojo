@@ -31,6 +31,17 @@ class WorkbenchState:
     #: yet. An attempt exists iff the student submitted, so this is None until
     #: the first submit — an abandoned session never has one.
     attempt_id: int | None = None
+    #: v0.13: the revision this session's current code produced. The pipeline
+    #: (claims, measurement, review) attaches its artifacts to *this* revision,
+    #: so the record of "what ran" and "what was said about it" never drift.
+    revision: int | None = None
+    #: v0.13: `solving` before the first passing submit, `post_solve` after.
+    #: Persisted so a crash mid-polish resumes in the mode the student was in.
+    phase: str = "solving"
+    #: v0.13: who answers a question. The tutor before the solve is graded, the
+    #: discussion agent afterwards — sticky, because grading lifts the
+    #: never-solve boundary and nothing can put it back.
+    agent: str = "tutor"
 
     @property
     def code_path(self) -> Path:

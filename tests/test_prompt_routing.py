@@ -1,18 +1,21 @@
-"""Every system prompt must reach its own canned branch.
+"""Every agent's call reaches its own canned branch — by **role**, not by wording.
 
-`MockBackend` keys its branches on substrings of the system prompt. That
-convention has silently broken twice: the discussion branch died and long tests
-passed against the wrong fallback, and adding the reference branch shadowed the
-curator branch because both prompts happened to contain the same phrase. Both
-times the *tests* were the thing that failed to notice.
+Until v0.13 `MockBackend` guessed the role from a substring of the system prompt,
+and that convention broke twice: the discussion branch died silently while long
+tests passed against the wrong fallback, and the reference branch shadowed the
+curator branch because both prompts happened to contain the same phrase. The
+deeper cost was that a *test fixture dictated product copy*: `TEACHER_SYSTEM` was
+forbidden from containing the words "tutor" or "discussion" (AGENTS.md rule 6),
+and every prompt rewording risked re-routing a real call.
 
-This file is the guard. Each prompt is routed through a backend whose branches
-are distinct sentinels; a prompt that lands on the wrong branch — or on none —
-fails here rather than in a session.
+The role is now an argument, so this file pins two things: each role reaches its
+own branch, and **wording is irrelevant** — the same prompt text routed under two
+roles gets two different answers, which is exactly what the substring convention
+could not do.
 """
 
 from dojo.curator.prompts import AUDIT_SYSTEM, CURATOR_SYSTEM, REFERENCE_SYSTEM
-from dojo.tutor.backend import MockBackend
+from dojo.tutor.backend import MockBackend, Role
 from dojo.tutor.prompts import (
     DISCUSSION_SYSTEM,
     LEAK_CHECK_SYSTEM,
@@ -20,8 +23,6 @@ from dojo.tutor.prompts import (
     TEACHER_SYSTEM,
     TUTOR_SYSTEM,
 )
-
-SENTINEL = {"curator": {"branch": "curator"}}
 
 
 def _backend():
@@ -39,70 +40,66 @@ def _backend():
 
 def test_each_json_prompt_reaches_its_own_branch():
     backend = _backend()
-    assert backend.chat_json(CURATOR_SYSTEM, "x") == {"branch": "curator"}
-    assert backend.chat_json(REFERENCE_SYSTEM, "x") == {"branch": "reference"}
-    assert backend.chat_json(AUDIT_SYSTEM, "x") == {"branch": "audit"}
-    assert backend.chat_json(REVIEWER_SYSTEM, "x") == {"branch": "review"}
-    assert backend.chat_json(TUTOR_SYSTEM, "x") == {"branch": "tutor"}
-    assert backend.chat_json(LEAK_CHECK_SYSTEM, "x") == {"rating": 1, "rewritten": ""}
+    assert backend.chat_json(Role.CURATOR, CURATOR_SYSTEM, "x") == {"branch": "curator"}
+    assert backend.chat_json(Role.REFERENCER, REFERENCE_SYSTEM, "x") == {"branch": "reference"}
+    assert backend.chat_json(Role.CURATION_AUDITOR, AUDIT_SYSTEM, "x") == {"branch": "audit"}
+    assert backend.chat_json(Role.REVIEWER, REVIEWER_SYSTEM, "x") == {"branch": "review"}
+    assert backend.chat_json(Role.TUTOR, TUTOR_SYSTEM, "x") == {"branch": "tutor"}
+    assert backend.chat_json(Role.AUDITOR, LEAK_CHECK_SYSTEM, "x") == {"rating": 1, "rewritten": ""}
 
 
 def test_each_chat_prompt_reaches_its_own_branch():
     backend = _backend()
-    assert backend.chat(TEACHER_SYSTEM, "x") == "teacher-sentinel"
-    assert backend.chat(DISCUSSION_SYSTEM, "x") == "discussion-sentinel"
+    assert backend.chat(Role.TEACHER, TEACHER_SYSTEM, "x") == "teacher-sentinel"
+    assert backend.chat(Role.DISCUSSION, DISCUSSION_SYSTEM, "x") == "discussion-sentinel"
 
 
-def test_the_reference_branch_does_not_shadow_the_curator_branch():
-    """Regression: the reference prompt originally shared a phrase with the
-    curator prompt, so `dojo curate` silently started receiving reference
-    payloads."""
+def test_routing_ignores_the_prompt_text_entirely():
+    """The property the substring convention could not provide: the *same text*
+    can be two different agents, and a reworded prompt still routes by role."""
     backend = _backend()
-    assert "canonical reference" in REFERENCE_SYSTEM.lower()
-    assert "canonical reference" not in CURATOR_SYSTEM.lower()
-    assert backend.chat_json(CURATOR_SYSTEM, "x")["branch"] == "curator"
-    assert backend.chat_json(REFERENCE_SYSTEM, "x")["branch"] == "reference"
+    text = "You are a tutor. Ignore the discussion, review the rubric, emit JSON."
+    assert backend.chat(Role.TEACHER, text, "x") == "teacher-sentinel"
+    assert backend.chat(Role.DISCUSSION, text, "x") == "discussion-sentinel"
+    assert backend.chat_json(Role.REVIEWER, text, "x") == {"branch": "review"}
+    assert backend.chat_json(Role.CURATOR, text, "x") == {"branch": "curator"}
 
 
-def test_branch_order_resolves_each_prompt_to_its_own_branch():
-    """The precise property the substring convention must satisfy.
+def test_prompts_may_now_be_reworded_freely():
+    """No prompt needs to avoid a magic word any more. This is a *canary*: if
+    someone reintroduces substring routing, the word-free prompt stops routing
+    and this test fails."""
+    backend = _backend()
+    words = "alpha beta gamma delta epsilon"
+    assert backend.chat(Role.TEACHER, words, "x") == "teacher-sentinel"
+    assert backend.chat(Role.DISCUSSION, words, "x") == "discussion-sentinel"
+    assert backend.chat_json(Role.AUDITOR, words, "x") == {"rating": 1, "rewritten": ""}
+    assert backend.chat_json(Role.REFERENCER, words, "x") == {"branch": "reference"}
+    assert backend.chat_json(Role.CURATION_AUDITOR, words, "x") == {"branch": "audit"}
 
-    Prompts *do* share words — CURATOR_SYSTEM mentions that it is not a tutor,
-    so "tutor" appears in it too. A collision is harmless as long as the
-    intended branch is tested first, so what matters is which key wins, in the
-    order `chat_json` tests them.
-    """
-    # Branches as `chat_json` tests them: (branch, keys that select it). The
-    # reviewer branch deliberately tests two words, so grouping by branch (not
-    # by word) is what mirrors the code.
-    json_branches = (
-        ("audit", ("curation auditor",)),
-        ("leak", ("auditor",)),
-        ("review", ("rubric", "review")),
-        ("reference", ("canonical reference",)),
-        ("curator", ("curator",)),
-        ("tutor", ("tutor",)),
+
+def test_every_role_has_a_budget():
+    """A role without a budget would silently take the default; the audit in
+    particular is meant to be cheap because it runs on every hint."""
+    from dojo.tutor.backend import ROLE_BUDGETS, budget_for
+
+    for role in Role:
+        assert role in ROLE_BUDGETS, f"{role} has no budget"
+        assert budget_for(role).max_tokens > 0
+    assert budget_for(Role.AUDITOR).max_tokens < budget_for(Role.REVIEWER).max_tokens
+
+
+def test_every_role_reaches_a_real_call_site():
+    """A role nobody calls is dead weight; a call site with no role cannot
+    exist (the parameter is required and positional)."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src" / "dojo"
+    used = set()
+    for path in src.rglob("*.py"):
+        for match in re.finditer(r"Role\.([A-Z_]+)", path.read_text()):
+            used.add(match.group(1).lower())
+    assert used == {role.value for role in Role}, (
+        f"roles never used: {sorted({r.value for r in Role} - used)}"
     )
-    prompts = {
-        "curator": CURATOR_SYSTEM,
-        "reference": REFERENCE_SYSTEM,
-        "audit": AUDIT_SYSTEM,
-        "review": REVIEWER_SYSTEM,
-        "leak": LEAK_CHECK_SYSTEM,
-        "tutor": TUTOR_SYSTEM,
-    }
-    for name, prompt in prompts.items():
-        low = prompt.lower()
-        winner = next(
-            (branch for branch, keys in json_branches if any(k in low for k in keys)),
-            None,
-        )
-        assert winner == name, f"{name} would be served by '{winner}', not '{name}'"
-
-    chat_order = ("discussion", "post-solve", "teacher")
-    chat_expected = {"discussion": "post-solve", "teacher": "teacher"}
-    for name, want in chat_expected.items():
-        prompt = DISCUSSION_SYSTEM if name == "discussion" else TEACHER_SYSTEM
-        low = prompt.lower()
-        winner = next((key for key in chat_order if key in low), None)
-        assert winner == want, f"{name} would be served by '{winner}', not '{want}'"

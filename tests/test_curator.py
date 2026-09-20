@@ -481,3 +481,20 @@ def test_apply_refuses_a_disagreeing_reference_before_writing(paths):
     assert not (problems_dir / "arrays_and_hashing" / "matrix_diagonal_sum.py").exists()
     assert "matrix_diagonal_sum" not in namespace["REFERENCES"]
     assert "matrix_diagonal_sum" not in namespace["ORACLES"]
+
+
+
+def test_the_curator_prompt_taxonomy_is_the_validated_taxonomy():
+    """The prompt used to enumerate the pre-v0.10 taxonomy (dynamic_programming,
+    math, graph — nine items) while `validate` enforced the 18 NeetCode slugs, so
+    `dojo curate` was broken for dp/math problems and could only *mis-bucket* the
+    rest. One source of truth, and this pins that it is used."""
+    from dojo.curator.prompts import CURATOR_SYSTEM
+    from dojo.patterns import PATTERNS
+
+    enum_line = CURATOR_SYSTEM.split('- "pattern": one of (the dojo taxonomy')[1]
+    enum_line = enum_line.split("\n")[0]
+    for pattern in PATTERNS:
+        assert pattern in enum_line, f"{pattern} missing from the curator prompt"
+    for stale in ("dynamic_programming", "math,", "graph,"):
+        assert stale not in enum_line.split("— pick")[0]

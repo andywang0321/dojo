@@ -14,7 +14,7 @@ Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by ha
 
 1. **Never-solve is architectural** — reference implementations must never enter tutor context; `tests/test_never_solve.py` pins the boundary.
 2. **Copyright — private use** (see docs/curation.md).
-3. **Secrets** — `DEEPSEEK_API_KEY` lives in the environment or a gitignored `.env`; never logged, never in prompts/tests/fixtures.
+3. **Secrets** — provider keys live in the environment or a gitignored `.env`; never logged, never in prompts/tests/fixtures.
 4. **User data is real** — `data/dojo.db` and `workbench/` are personal state; migrations are additive only.
 5. **Tests are offline and deterministic** — no network calls; always `MockBackend`; measurement tests target coarse outcomes (class, slope range), not exact timings.
 6. **Prompt changes require test updates** — leak-check behavior, tier gating, and mock canned responses are asserted in `tests/test_tutor.py` and `tests/test_flow.py`.

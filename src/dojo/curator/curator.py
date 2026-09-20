@@ -26,6 +26,7 @@ from dojo.config import DB_PATH, PROBLEMS_DIR, PROBLEM_OVERRIDES, REPO_ROOT
 from dojo.db import connect
 from dojo.judge.compare import check_equal
 from dojo.patterns import PATTERNS
+from dojo.tutor.backend import Role
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 DIFFICULTIES = ("Easy", "Medium", "Hard")
@@ -104,11 +105,27 @@ def propose(backend, statement: str, hints: dict | None = None) -> dict:
     the fetcher — the curator prefers it unless clearly wrong."""
     from dojo.curator.prompts import CURATOR_SYSTEM, build_curator_prompt
 
-    return _propose_with(backend, CURATOR_SYSTEM, build_curator_prompt(statement, hints))
+    return _propose_with(
+        backend, Role.CURATOR, CURATOR_SYSTEM, build_curator_prompt(statement, hints)
+    )
 
 
-def _propose_with(backend, system: str, user: str) -> dict:
-    raw = backend.chat_json(system, user)
+def _backend_json(backend, role, system: str, user: str, what: str) -> dict:
+    """One AI call, with the transport boundary applied (v0.13).
+
+    A network blip during curation used to propagate as a traceback out of the
+    CLI; the curator's contract is a `CuratorError`, so the caller can report it
+    and roll back like any other refusal."""
+    try:
+        return backend.chat_json(role, system, user)
+    except Exception as exc:  # noqa: BLE001 - the boundary is the point
+        raise CuratorError(
+            f"the AI backend failed while {what}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def _propose_with(backend, role, system: str, user: str) -> dict:
+    raw = _backend_json(backend, role, system, user, "proposing")
     if "error" in raw:
         raise CuratorError(f"curator returned non-JSON: {raw['error']}")
     validate(raw)
@@ -215,14 +232,14 @@ def curate_dual(backend, statement: str, hints: dict | None = None) -> dict:
     from dojo.curator.prompts import CURATOR_SYSTEM, build_curator_prompt
 
     user = build_curator_prompt(statement, hints)
-    first = _propose_with(backend, CURATOR_SYSTEM, user)
+    first = _propose_with(backend, Role.CURATOR, CURATOR_SYSTEM, user)
     second_system = (
         CURATOR_SYSTEM
         + "\n\nThis is an independent second pass. Implement the oracle using "
         "a different construction or algorithm than before; the two oracles "
         "will be cross-checked against each other."
     )
-    second = _propose_with(backend, second_system, user)
+    second = _propose_with(backend, Role.CURATOR, second_system, user)
     disagreements = differential_check(first, second)
     if disagreements:
         raise CuratorError(
@@ -270,10 +287,35 @@ def _restore_problem_file(path: Path, original: str | None) -> None:
         path.write_text(original)
 
 
-def _delete_problem_row(db_path: Path, slug: str) -> None:
-    """Remove a problem row the apply step just created (rollback only; the
-    slug is guaranteed fresh, so no attempts can reference it)."""
+def _problem_row_exists(db_path: Path, slug: str) -> bool:
     with connect(db_path) as conn:
+        return (
+            conn.execute("SELECT 1 FROM problems WHERE slug = ?", (slug,)).fetchone()
+            is not None
+        )
+
+
+def _delete_problem_row(db_path: Path, slug: str, *, created: bool) -> None:
+    """Remove a problem row **that this apply created** (rollback only).
+
+    The old version asserted "the slug is guaranteed fresh, so no attempts can
+    reference it" — which is false on the `overwrite=True` path, the only path
+    `dojo report --fix` uses. Deleting a referenced row raised IntegrityError and
+    so replaced the intended "verification gate failed; rolled back" message with
+    a foreign-key traceback; with foreign keys off it deleted the row out from
+    under real attempts, which then vanished from history and from the ladder
+    (v0.13 audit, S1.6). Both guards are kept: the row must be one we created,
+    and nothing may reference it."""
+    if not created:
+        return
+    with connect(db_path) as conn:
+        referenced = conn.execute(
+            "SELECT 1 FROM attempts WHERE problem_id = "
+            "(SELECT id FROM problems WHERE slug = ?)",
+            (slug,),
+        ).fetchone()
+        if referenced:
+            return
         conn.execute("DELETE FROM problems WHERE slug = ?", (slug,))
         conn.commit()
 
@@ -319,8 +361,12 @@ def audit_curation(
     except CuratorError:
         automated.append("fresh curator run failed — cannot cross-check")
 
-    audit = backend.chat_json(
-        AUDIT_SYSTEM, build_audit_prompt(statement, visible_tests, automated)
+    audit = _backend_json(
+        backend,
+        Role.CURATION_AUDITOR,
+        AUDIT_SYSTEM,
+        build_audit_prompt(statement, visible_tests, automated),
+        "auditing a curation",
     )
     if "error" in audit:
         raise CuratorError(f"auditor returned non-JSON: {audit['error']}")
@@ -550,7 +596,9 @@ def add_reference(
     overrides = json.loads(overrides_path.read_text())
     entry = overrides.get(slug) or {}
     visible_tests = entry.get("visible_tests", [])
-    raw = backend.chat_json(
+    raw = _backend_json(
+        backend,
+        Role.REFERENCER,
         REFERENCE_SYSTEM,
         build_reference_prompt(
             slug,
@@ -562,6 +610,7 @@ def add_reference(
             problem["expected_time"],
             problem["expected_space"],
         ),
+        "writing a reference",
     )
     if "error" in raw:
         raise CuratorError(f"the reference writer returned non-JSON: {raw['error']}")
@@ -647,6 +696,9 @@ def apply(
         raise CuratorError(f"'{slug}' is already curated — pick a new slug")
     problem_path = problems_dir / proposal["pattern"] / f"{slug}.py"
     existing_problem_text = problem_path.read_text() if problem_path.exists() else None
+    #: Whether the bank row predates this apply — the rollback may only remove a
+    #: row this call created (attempts may reference a pre-existing one).
+    row_created = not _problem_row_exists(db_path, slug)
     if problem_path.exists() and not overwrite:
         raise CuratorError(f"problem file already exists: {problem_path}")
 
@@ -723,7 +775,7 @@ def apply(
         overrides_path.write_text(json.dumps(original_overrides, indent=2) + "\n")
         registry_path.write_text(registry_text)
         _restore_problem_file(problem_path, existing_problem_text)
-        _delete_problem_row(db_path, slug)
+        _delete_problem_row(db_path, slug, created=row_created)
         raise CuratorError(f"apply failed: {exc}") from exc
 
     # 3. The acceptance gate.
@@ -734,7 +786,7 @@ def apply(
         registry_path.write_text(registry_text)
         _restore_problem_file(problem_path, existing_problem_text)
         bank.seed_problems(connect(db_path), problems_dir)
-        _delete_problem_row(db_path, slug)
+        _delete_problem_row(db_path, slug, created=row_created)
         raise CuratorError(f"verification gate failed; rolled back.\n{output}")
     return {
         "slug": slug,

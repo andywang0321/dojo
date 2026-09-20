@@ -15,8 +15,8 @@ Produce ONE JSON object with exactly these keys:
 - "slug": snake_case identifier matching [a-z][a-z0-9_]*.
 - "title": human-readable title.
 - "difficulty": "Easy" | "Medium" | "Hard".
-- "pattern": one of: arrays_and_hashing, stack, two_pointers, trees, heap, \
-binary_search, greedy, dynamic_programming, math.
+- "pattern": one of (the dojo taxonomy — pick the closest, never invent one): \
+{patterns}.
 - "statement": the problem statement in dojo seed format, WITHOUT the \
 surrounding quotes: first line "Title [Difficulty]", then the prompt, \
 examples, constraints, and a "You should aim for..." complexity line when a \
@@ -174,3 +174,15 @@ def build_reference_prompt(
         f"{oracle_block}\n\n"
         "Write the canonical solution as JSON per the system prompt."
     )
+
+
+# The pattern enum is generated from the taxonomy (v0.13). It used to be a
+# hardcoded nine-item list from the pre-v0.10 taxonomy while `curator.validate`
+# enforced the 18 NeetCode slugs — so `dojo curate` was *broken* for dp/math
+# (the model was told to answer `dynamic_programming`, which validation rejects)
+# and could only mis-bucket graph/linked-list/trie/backtracking/intervals/
+# bit-manipulation problems into one of the nine allowed values.
+from dojo.patterns import PATTERNS as _PATTERNS  # noqa: E402
+
+# `str.replace`, not `str.format`: the prompt is full of literal JSON braces.
+CURATOR_SYSTEM = CURATOR_SYSTEM.replace("{patterns}", ", ".join(_PATTERNS))

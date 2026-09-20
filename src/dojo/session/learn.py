@@ -21,6 +21,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from dojo import scheduler
+from dojo.guard import guard
 from dojo.db import (
     get_or_create_user,
     record_learn_session,
@@ -29,6 +30,7 @@ from dojo.db import (
 from dojo.patterns import PATTERNS
 from dojo.render import render_ai
 from dojo.terminal import confirm_typo, make_prompt, patch_console
+from dojo.tutor.backend import Role
 from dojo.tutor.prompts import TEACHER_SYSTEM, build_teacher_prompt
 
 LEARN_COMMANDS_HINT = "Ask a question, or: practice (hand off to a problem) · done"
@@ -74,15 +76,27 @@ def run_learn(
         )
     )
 
-    def teacher_says(message: str | None = None) -> str:
+    def teacher_says(message: str | None = None) -> str | None:
         if message is not None:
             transcript.append({"role": "student", "text": message})
-        answer = backend.chat(TEACHER_SYSTEM, build_teacher_prompt(pattern, transcript))
+        with guard(console, "the teacher", "the transcript is saved") as g:
+            g.value = backend.chat(
+                Role.TEACHER, TEACHER_SYSTEM, build_teacher_prompt(pattern, transcript)
+            )
+        if not g.ok:
+            return None
+        answer = g.value
         transcript.append({"role": "teacher", "text": answer})  # raw markdown
         update_learn_transcript(conn, session_id, transcript)
         return answer
 
     primer = teacher_says()
+    if primer is None:
+        console.print(
+            "[yellow]Learning mode could not start (the teacher is unavailable) "
+            "— nothing was recorded. Try again later.[/yellow]"
+        )
+        return {"practice": None}
     render_ai(console, f"teacher — {pattern}", primer, border_style="blue")
 
     while True:
@@ -116,7 +130,9 @@ def run_learn(
                 return {"practice": slug}
             console.print("[dim]Staying in learn mode.[/dim]")
             continue
-        render_ai(console, f"teacher — {pattern}", teacher_says(raw), border_style="blue")
+        answer = teacher_says(raw)
+        if answer is not None:
+            render_ai(console, f"teacher — {pattern}", answer, border_style="blue")
 
 
 def _pick_practice_slug(

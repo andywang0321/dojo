@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from dojo import debuglog
+from dojo.tutor.backend import Role
 
 
 def test_log_event_appends_jsonl(tmp_path, monkeypatch):
@@ -43,10 +44,13 @@ def test_maybe_clear_on_version_bump(tmp_path, monkeypatch):
 
 
 def _live_backend(monkeypatch, tmp_path):
-    from dojo.tutor.backend import DeepSeekBackend
+    from dojo.config import PROVIDERS
+    from dojo.tutor.backend import OpenAICompatBackend, Role
 
     monkeypatch.setattr(debuglog, "LOG_PATH", tmp_path / "logs" / "dojo.log")
-    return DeepSeekBackend(api_key="sk-test")  # no network at construction
+    # No network at construction: the provider is described by the table and
+    # the SDK client is never built for a live call in these tests.
+    return OpenAICompatBackend(PROVIDERS["deepseek"], api_key="sk-test")
 
 
 def _events(tmp_path):
@@ -63,7 +67,7 @@ def test_backend_logs_raw_chat_json(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(backend._client.chat.completions, "create", lambda **kw: fake)
 
-    assert backend.chat_json("SYS", "USER") == {"a": 1}
+    assert backend.chat_json(Role.TUTOR, "SYS", "USER") == {"a": 1}
 
     events = _events(tmp_path)
     assert len(events) == 1
@@ -86,7 +90,7 @@ def test_backend_logs_errors_and_reraises(monkeypatch, tmp_path):
     monkeypatch.setattr(backend._client.chat.completions, "create", boom)
 
     with pytest.raises(RuntimeError, match="boom"):
-        backend.chat("SYS", "USER")
+        backend.chat(Role.TUTOR, "SYS", "USER")
 
     events = _events(tmp_path)
     assert len(events) == 1

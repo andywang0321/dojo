@@ -16,4 +16,10 @@ Delivered and planned development stages. Each stage file records what shipped a
 | [v0.10](v0.10.md) — systemic pattern progression | ✅ delivered | 18 NeetCode groups, hard prereq gate, ladder picks, `dojo roadmap`; content batches follow (126 of 150 still to fetch). |
 | [v0.11](v0.11.md) — the correctness stage | ✅ delivered | Attempt lifecycle (`quit` records nothing), FSRS-4.5 with default weights, rotating warm-ups + persisted recall grades, and a profiler that separates its instruments and reports ranges instead of guesses. |
 | [v0.12](v0.12.md) — the measurement stage | ✅ delivered | The profiler becomes a paired scale probe: failures at scale are first-class findings, and growth is measured against a gated canonical reference instead of fitted absolutely. |
+| [v0.13](v0.13.md) — session continuity, the workbench file, providers | 🔜 planned | One loop with phases (`check`/`open` after submit; `polish` becomes a mode switch), attempt revisions so the original submission survives, a workbench view layer (no more shebang/docstring noise for the AI) with a runnable examples block, and OpenAI/Claude alongside DeepSeek. |
+| [v0.14](v0.14.md) — curricula (JAX, Rust) | 🔜 planned | Curriculum-as-data (units, prereq DAGs, per-curriculum runner/measurement policy), with JAX first (Python, so the judge holds) and Rust second (a crate artifact, `cargo test`, and compile-failure as a first-class verdict). |
 | [next](next.md) — backlog | 🔜 | Audit proposals (judge ground-truth anchor, warm-up rotation, streak + reminder, …), TUI polish, sync, warm-up variants. |
+
+The [v0.12 audit](../docs/audit-v0.12.md) is the current picture of what works
+and what does not; its §6 orders the work, and v0.13's Stage 0 is the subset that
+must land before anything else.

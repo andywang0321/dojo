@@ -14,21 +14,34 @@ from typing import Callable
 
 from dojo import scheduler
 from dojo.bank import ensure_seeded
-from dojo.config import save_conf
+from dojo.config import PROVIDERS, key_env_names, save_conf
 from dojo.db import connect, now
 
 
-def write_key(dotenv_path: Path, key: str) -> None:
-    """Append DEEPSEEK_API_KEY to a dotenv file, preserving existing lines."""
+#: The variable a pasted key is stored under when the provider is unknown — the
+#: default provider, so an unqualified key keeps working exactly as before.
+DEFAULT_KEY_ENV = "DEEPSEEK_API_KEY"
+
+
+def write_key(dotenv_path: Path, key: str, env_name: str = DEFAULT_KEY_ENV) -> None:
+    """Append a provider key to a dotenv file, preserving other lines."""
     lines = dotenv_path.read_text().splitlines() if dotenv_path.exists() else []
-    lines = [line for line in lines if not line.startswith("DEEPSEEK_API_KEY=")]
-    lines.append(f"DEEPSEEK_API_KEY={key}")
+    lines = [line for line in lines if not line.startswith(f"{env_name}=")]
+    lines.append(f"{env_name}={key}")
     dotenv_path.write_text("\n".join(lines) + "\n")
 
 
-def read_dotenv_key(dotenv_path: Path) -> str | None:
-    """The DEEPSEEK_API_KEY already saved in a dotenv file, if any
-    (same parsing as config._read_dotenv, against an injected path)."""
+def write_setting(dotenv_path: Path, name: str, value: str) -> None:
+    """Set a non-secret dotenv setting (e.g. `DOJO_PROVIDER`)."""
+    lines = dotenv_path.read_text().splitlines() if dotenv_path.exists() else []
+    lines = [line for line in lines if not line.startswith(f"{name}=")]
+    lines.append(f"{name}={value}")
+    dotenv_path.write_text("\n".join(lines) + "\n")
+
+
+def read_dotenv_key(dotenv_path: Path, env_name: str = DEFAULT_KEY_ENV) -> str | None:
+    """The key already saved in a dotenv file, if any (same parsing as
+    config._read_dotenv, against an injected path)."""
     if not dotenv_path.exists():
         return None
     for line in dotenv_path.read_text().splitlines():
@@ -36,8 +49,32 @@ def read_dotenv_key(dotenv_path: Path) -> str | None:
         if line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
-        if k.strip() == "DEEPSEEK_API_KEY":
+        if k.strip() == env_name:
             return v.strip().strip("'\"")
+    return None
+
+
+def detect_key(
+    dotenv_path: Path, provider_override: str | None = None
+) -> tuple[str, str] | None:
+    """(provider, key) from the environment or *this* dotenv file.
+
+    The wizard takes its dotenv as a parameter (tests run against tmp paths), so
+    detection has to look there too — `config.detect_provider_key` reads the
+    repo-root `.env`, which is the right thing for a live run and the wrong thing
+    for the wizard.
+    """
+    order = (
+        [provider_override]
+        if provider_override in PROVIDERS
+        else list(PROVIDERS)
+    )
+    for name in order:
+        provider = PROVIDERS[name]
+        for env_name in key_env_names(provider):
+            value = os.environ.get(env_name) or read_dotenv_key(dotenv_path, env_name)
+            if value:
+                return name, value
     return None
 
 
@@ -89,41 +126,51 @@ def run_wizard(
     key_getter: Callable[[], str] | None = None,
     path_install: Callable[[], bool] | None = None,
     detect_env_key: bool = True,
+    provider_override: str | None = None,
 ) -> dict:
     """The full first-run flow. Returns a summary dict; never raises on
     user-facing steps (a bad key prompt just skips the key).
 
-    Key resolution (v0.9): when detection is on, an existing
-    ``DEEPSEEK_API_KEY`` (environment or the dotenv file) is used without
-    prompting — an env-sourced key is also persisted to the dotenv so it
-    survives other shells. Only when nothing is detected does the injected
-    ``key_getter`` run."""
+    Key resolution (v0.9, provider-aware v0.13): when detection is on, a key for
+    any provider in the table (environment or the dotenv file) is used without
+    prompting, and the provider that owns it becomes the configured one
+    (``DOJO_PROVIDER`` is written to the dotenv) — an env-sourced key is also
+    persisted so it survives other shells. Only when nothing is detected does the
+    injected ``key_getter`` run, storing under the pinned provider's variable
+    when ``provider_override`` names one."""
     console.print("[bold]Welcome to dojo — one-time setup.[/bold]")
 
-    detected = None
+    # Key resolution (v0.13): every provider in the table is checked (env first,
+    # then the gitignored dotenv), and the provider that owns the key becomes the
+    # configured one. `dojo setup --provider X` pins the choice.
+    detected = detect_key(dotenv_path, provider_override) if detect_env_key else None
     key_written = False
-    if detect_env_key:
-        detected = (
-            os.environ.get("DEEPSEEK_API_KEY")
-            or os.environ.get("DOJO_DEEPSEEK_API_KEY")
-            or read_dotenv_key(dotenv_path)
-        )
     if detected:
-        if read_dotenv_key(dotenv_path) != detected:
-            write_key(dotenv_path, detected)
+        provider_name, key = detected
+        provider = PROVIDERS[provider_name]
+        if read_dotenv_key(dotenv_path, provider.key_env) != key:
+            write_key(dotenv_path, key, provider.key_env)
             key_written = True
+        write_setting(dotenv_path, "DOJO_PROVIDER", provider_name)
         console.print(
-            "[green]DEEPSEEK_API_KEY detected in your environment — using it, "
-            "no prompt needed.[/green]"
+            f"[green]{provider.key_env} detected — using {provider_name} "
+            f"({provider.model}), no prompt needed.[/green]"
             + (" Saved to .env (gitignored) so every shell sees it." if key_written else "")
         )
     elif key_getter is not None:
         key = key_getter().strip()
         if key:
-            write_key(dotenv_path, key)
+            env_name = (
+                PROVIDERS[provider_override].key_env
+                if provider_override in PROVIDERS
+                else DEFAULT_KEY_ENV
+            )
+            write_key(dotenv_path, key, env_name)
+            if provider_override in PROVIDERS:
+                write_setting(dotenv_path, "DOJO_PROVIDER", provider_override)
             key_written = True
             console.print(
-                f"[green]API key saved to {dotenv_path.name}[/green] "
+                f"[green]{env_name} saved to {dotenv_path.name}[/green] "
                 "(gitignored)."
             )
         else:
@@ -150,7 +197,9 @@ def run_wizard(
     seeded = ensure_seeded(db_path, problems_dir)
     with connect(db_path) as conn:
         user_id = conn.execute("SELECT id FROM users WHERE name = ?", (name,)).fetchone()["id"]
-        backfilled = scheduler.backfill_cards(conn) if user_id else 0
+        # Scoped to the user this wizard just registered: backfilling every user
+        # inflated the count and created due-immediately cards for someone else.
+        backfilled = scheduler.backfill_cards(conn, user_id) if user_id else 0
     save_conf({"user": name}, conf_path)
 
     installed = False

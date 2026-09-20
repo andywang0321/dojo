@@ -16,7 +16,7 @@ review (v0.8.1).
 from __future__ import annotations
 
 from dojo.db import REVIEW_DIMS
-from dojo.tutor.backend import AIBackend, parse_json_content
+from dojo.tutor.backend import AIBackend, Role, parse_json_content
 from dojo.tutor.prompts import REVIEWER_SYSTEM, build_review_prompt
 
 
@@ -73,7 +73,7 @@ def review(
         measured_time_note=measured_time_note,
         measured_space_note=measured_space_note,
     )
-    result = backend.chat_json(REVIEWER_SYSTEM, prompt)
+    result = backend.chat_json(Role.REVIEWER, REVIEWER_SYSTEM, prompt)
     if isinstance(result, dict) and result.get("error"):
         # Retry through the plain chat path instead of repeating the exact
         # request: different sampling (0.3), no json_object mode — a
@@ -81,6 +81,7 @@ def review(
         # text is parsed with the same tolerant extractor.
         retry = parse_json_content(
             backend.chat(
+                Role.REVIEWER,
                 REVIEWER_SYSTEM,
                 prompt
                 + "\n\n(The previous response was not valid JSON. Respond "

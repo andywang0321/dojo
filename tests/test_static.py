@@ -97,3 +97,38 @@ def test_analyze_ignores_shebang_executable_rules(tmp_path):
     codes = {f["code"] for f in report.ruff}
     assert not codes & {"EXE001", "EXE002", "EXE004"}, codes
     assert not report.ruff  # otherwise-clean code stays clean
+
+
+# ---------------------------------------------------- never raises (v0.13)
+# `analyze` promises it never raises, but the file read sat outside both try
+# blocks: a missing file or a non-UTF-8 one escaped into `_check` *after* a
+# successful judge run, which could lose a passing submit.
+
+
+def test_a_missing_file_is_a_note_not_a_crash(tmp_path):
+    report = analyze(tmp_path / "nope.py")
+    assert report.flags == []
+    assert any("skipped" in note for note in report.notes)
+
+
+def test_a_non_utf8_file_is_a_note_not_a_crash(tmp_path):
+    path = tmp_path / "binary.py"
+    path.write_bytes(b"def f():\n    return '\xff\xfe'\n")
+    report = analyze(path)
+    assert report.flags == []
+    assert any("skipped" in note for note in report.notes)
+
+
+def test_the_ruff_cache_stays_out_of_the_working_directory(tmp_path, monkeypatch):
+    """Without `--cache-dir`, `make test` (and any `dojo` run) created
+    `.ruff_cache/` in whatever directory it was started from — the repo root."""
+    from dojo.config import LOGS_DIR
+
+    path = tmp_path / "s.py"
+    path.write_text("def f(x):\n    return x\n")
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    analyze(path)
+    assert not (cwd / ".ruff_cache").exists()
+    assert (LOGS_DIR / "ruff").exists()

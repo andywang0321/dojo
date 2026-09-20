@@ -6,15 +6,20 @@ One command, two modes the model picks (v0.6):
 - "discussion": the student is exploring, not blocked — answer directly, no
   tier, no forced progression. The never-solve boundary holds in both modes.
 
-Every response passes the leak audit; a response that still scores >= 3
-after retries is discarded and never shown.
+Every response passes the leak audit; a response that still scores >= 3 after
+retries is discarded and never shown — and so is a response the audit could not
+read at all (v0.13). The audit used to fail **open**: a non-JSON reply, a missing
+`rating`, a string rating, or a `None` rating all collapsed to "clean", so a full
+solution was delivered in all four cases. The never-solve rule is enforced at
+this boundary, which makes an unreadable audit a gap in the guarantee rather
+than a pass.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dojo.tutor.backend import AIBackend
+from dojo.tutor.backend import AIBackend, Role
 from dojo.tutor.prompts import (
     LEAK_CHECK_SYSTEM,
     TUTOR_SYSTEM,
@@ -29,6 +34,10 @@ MAX_TIER = 5
 VAGUE_LENGTH = 6
 LEAK_THRESHOLD = 3
 LEAK_RETRIES = 2
+#: How many times an unreadable *audit* is retried before the response is
+#: refused. The hint itself is fine — a JSON hiccup in the auditor must not cost
+#: the student their answer — but it must never become a pass.
+AUDIT_ATTEMPTS = 2
 
 TIER_NAMES = {
     0: "articulate the blockage",
@@ -44,9 +53,12 @@ TIER_NAMES = {
 class HintResult:
     text: str
     tier: int | None
-    leak_rating: int
+    leak_rating: int | None
     kind: str  # "ladder" | "discussion"
     delivered: bool = True
+    #: True when the response was discarded because the *audit* failed, not
+    #: because it leaked: the caller says so rather than blaming the answer.
+    audit_failed: bool = False
 
 
 def _vague(message: str) -> bool:
@@ -84,7 +96,7 @@ def de_markdown(text: str) -> str:
 
 
 def _tutor_call(backend: AIBackend, prompt: str, default_tier: int) -> tuple[str, int | None, str]:
-    raw = backend.chat_json(TUTOR_SYSTEM, prompt)
+    raw = backend.chat_json(Role.TUTOR, TUTOR_SYSTEM, prompt)
     if not isinstance(raw, dict):
         return "ladder", default_tier, str(raw)
     kind = raw.get("kind")
@@ -100,12 +112,32 @@ def _tutor_call(backend: AIBackend, prompt: str, default_tier: int) -> tuple[str
     return kind, tier, text
 
 
-def _audit(backend: AIBackend, text: str) -> int:
-    leak = backend.chat_json(LEAK_CHECK_SYSTEM, build_leak_prompt(text, 0))
-    try:
-        return int(leak.get("rating", 1))
-    except (TypeError, ValueError):
-        return 1
+def _audit_once(backend: AIBackend, text: str) -> int | None:
+    """One leak-audit call: the rating, or None when it cannot be read.
+
+    None means *unknown*, never "clean". A bare-int rating is accepted; a bool is
+    not (it is an int in Python and would silently pass as a 1/0 score); a
+    string or a missing key is unknown. The old version returned 1 — "clean" —
+    for every one of those.
+    """
+    leak = backend.chat_json(Role.AUDITOR, LEAK_CHECK_SYSTEM, build_leak_prompt(text, 0))
+    if not isinstance(leak, dict):
+        return None
+    rating = leak.get("rating")
+    if isinstance(rating, bool) or not isinstance(rating, (int, float)):
+        return None
+    return int(rating)
+
+
+def _audit(backend: AIBackend, text: str) -> int | None:
+    """Audit with a retry: a transient JSON hiccup in the auditor must not cost
+    the student an answer, but a *persistent* one must not become a pass."""
+    rating = _audit_once(backend, text)
+    attempts = 1
+    while rating is None and attempts < AUDIT_ATTEMPTS:
+        rating = _audit_once(backend, text)
+        attempts += 1
+    return rating
 
 
 def ask_tutor(
@@ -116,8 +148,9 @@ def ask_tutor(
     user_message: str,
     history: list[dict],
 ) -> HintResult:
-    """Classify and answer, then leak-audit. A response still rated >= 3
-    after retries is discarded — never shown to the student."""
+    """Classify and answer, then leak-audit. A response still rated >= 3 after
+    retries is discarded — never shown to the student. A response whose audit
+    could not be read at all is discarded too, and says why (v0.13)."""
     vague = _vague(user_message)
     if vague:
         tier = 0
@@ -128,7 +161,7 @@ def ask_tutor(
 
     rating = _audit(backend, text)
     retries = 0
-    while rating >= LEAK_THRESHOLD and retries < LEAK_RETRIES:
+    while rating is not None and rating >= LEAK_THRESHOLD and retries < LEAK_RETRIES:
         flagged = (
             prompt
             + f"\n\nYour previous response was flagged as leaking too much of "
@@ -138,6 +171,18 @@ def ask_tutor(
         rating = _audit(backend, text)
         retries += 1
 
+    if rating is None:
+        # Fail closed, and say which failure this is: the answer may be
+        # perfectly good, but nothing verified that, and never-solve is the one
+        # guarantee that cannot be delivered on trust.
+        return HintResult(
+            text="",
+            tier=response_tier if kind == "ladder" else None,
+            leak_rating=None,
+            kind=kind,
+            delivered=False,
+            audit_failed=True,
+        )
     if rating >= LEAK_THRESHOLD:
         return HintResult(
             text="",

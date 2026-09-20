@@ -1,8 +1,22 @@
 """AI backends: a thin seam so tests and demos run without an API key.
 
-``DOJO_AI_BACKEND=mock`` gives canned, tier-driven responses. The default is
-``deepseek`` (OpenAI-compatible client pointed at api.deepseek.com), which
-requires ``DEEPSEEK_API_KEY`` in the environment or a gitignored ``.env``.
+**Roles, not prompt sniffing (v0.13).** Every call names the agent it belongs to
+(`chat(Role.TUTOR, ...)`), and that name decides the system prompt's *address* in
+the request, the output budget, the temperature, and — for `MockBackend` — which
+canned answer comes back. Before this, the mock guessed the role from a substring
+of the system prompt, which meant a *test fixture constrained product copy*:
+`TEACHER_SYSTEM` was forbidden from containing the words "tutor" or
+"discussion", and the discussion branch silently died once while the tests passed
+against the wrong fallback.
+
+**Providers, not a hardcoded host (v0.13).** `config.PROVIDERS` describes
+DeepSeek, OpenAI and Anthropic; `DOJO_AI_BACKEND` / `DOJO_PROVIDER` picks one,
+`DOJO_MODEL` overrides the model, and `DOJO_MODEL_<ROLE>` overrides it for one
+role (a cheap model for the leak audit that runs on every hint, the strong one
+for the review). Two wire formats are in play: OpenAI-compatible chat
+completions (DeepSeek and OpenAI differ only by base URL, model and key) and
+Anthropic's messages API, which takes the system prompt as a top-level field,
+has no `response_format`, and returns JSON best via a forced tool call.
 """
 
 from __future__ import annotations
@@ -10,18 +24,57 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 from dojo import debuglog
-from dojo.config import ai_backend, deepseek_api_key
-
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+from dojo.config import PROVIDERS, Provider, ai_backend, resolve_key, role_model
 
 #: Output cap for JSON responses — generous because the reviewer's rubric is
 #: the longest object the pipeline asks for, and a truncated (mid-object)
 #: response is exactly the "non-JSON" failure real sessions saw.
 JSON_MAX_TOKENS = 4096
+
+
+class Role(StrEnum):
+    """Who is talking. The role is the backend's routing key and the provenance
+    record stored on the attempt — never a substring of a prompt."""
+
+    TUTOR = "tutor"
+    DISCUSSION = "discussion"
+    TEACHER = "teacher"
+    REVIEWER = "reviewer"
+    AUDITOR = "auditor"  # the never-solve leak audit
+    CURATOR = "curator"
+    CURATION_AUDITOR = "curation_auditor"
+    REFERENCER = "referencer"
+
+
+@dataclass(frozen=True)
+class Budget:
+    """Per-role generation settings. The audit is a one-line JSON verdict and
+    does not need the reviewer's budget; the reviewer needs room for a rubric."""
+
+    max_tokens: int = 2048
+    temperature: float = 0.3
+
+
+#: A cheap, tight audit is the point: it runs on *every* hint.
+ROLE_BUDGETS: dict[Role, Budget] = {
+    Role.AUDITOR: Budget(max_tokens=128, temperature=0.0),
+    Role.REVIEWER: Budget(max_tokens=JSON_MAX_TOKENS, temperature=0.0),
+    Role.CURATOR: Budget(max_tokens=JSON_MAX_TOKENS, temperature=0.0),
+    Role.CURATION_AUDITOR: Budget(max_tokens=JSON_MAX_TOKENS, temperature=0.0),
+    Role.REFERENCER: Budget(max_tokens=JSON_MAX_TOKENS, temperature=0.0),
+    Role.TUTOR: Budget(),
+    Role.DISCUSSION: Budget(),
+    Role.TEACHER: Budget(),
+}
+
+
+def budget_for(role) -> Budget:
+    return ROLE_BUDGETS.get(Role(role), Budget())
 
 
 def parse_json_content(content: str) -> dict:
@@ -52,104 +105,251 @@ def parse_json_content(content: str) -> dict:
 
 
 class AIBackend(Protocol):
-    def chat(self, system: str, user: str) -> str: ...
+    """Every agent talks through this. `role` is required and positional, so a
+    new call site cannot silently inherit someone else's routing."""
 
-    def chat_json(self, system: str, user: str) -> dict: ...
+    def chat(self, role, system: str, user: str) -> str: ...
+
+    def chat_json(self, role, system: str, user: str) -> dict: ...
+
+    def identity(self) -> dict: ...
 
 
-class DeepSeekBackend:
-    def __init__(self, api_key: str | None = None):
-        self._api_key = api_key or deepseek_api_key()
-        if not self._api_key:
-            raise RuntimeError(
-                "DEEPSEEK_API_KEY is not set. Export it, put it in a gitignored "
-                ".env at the repo root, or run with DOJO_AI_BACKEND=mock."
-            )
-        from openai import OpenAI  # local import: heavy dependency, lazy load
+class _LiveBackend:
+    """Shared plumbing for the live backends: one call, one debug-log event that
+    names the role, the provider and the model, so a log line is
+    self-describing."""
 
-        self._client = OpenAI(api_key=self._api_key, base_url=DEEPSEEK_BASE_URL)
+    provider: Provider
 
-    def chat(self, system: str, user: str) -> str:
-        started = time.monotonic()
-        try:
-            response = self._client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                temperature=0.3,
-                max_tokens=2048,
-            )
-            content = response.choices[0].message.content or ""
-        except Exception as exc:  # noqa: BLE001 - logged, then re-raised
-            debuglog.log_event(
-                {
-                    "event": "backend_error",
-                    "kind": "chat",
-                    "system": system,
-                    "user": user,
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-            )
-            raise
+    def identity(self) -> dict:
+        return {
+            "backend": self.provider.name,
+            "model": role_model("reviewer", self.provider),
+        }
+
+    def _log(self, *, kind: str, role, system: str, user: str, **payload) -> None:
         debuglog.log_event(
             {
                 "event": "ai",
-                "kind": "chat",
+                "kind": kind,
+                "role": str(Role(role)),
+                "provider": self.provider.name,
                 "system": system,
                 "user": user,
-                "raw": content,
-                "latency_ms": round((time.monotonic() - started) * 1000, 1),
+                **payload,
             }
+        )
+
+    def _log_error(self, *, kind: str, role, system: str, user: str, exc: Exception) -> None:
+        debuglog.log_event(
+            {
+                "event": "backend_error",
+                "kind": kind,
+                "role": str(Role(role)),
+                "provider": self.provider.name,
+                "system": system,
+                "user": user,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+
+
+class OpenAICompatBackend(_LiveBackend):
+    """DeepSeek and OpenAI: the same chat-completions shape, different host, key
+    and model. `client` is injectable so tests never touch the network."""
+
+    def __init__(self, provider: Provider, api_key: str | None = None, client=None):
+        self.provider = provider
+        key = api_key or resolve_key(provider)
+        if not key:
+            raise RuntimeError(
+                f"{provider.key_env} is not set. Export it, put it in a gitignored "
+                ".env at the repo root, or run with DOJO_AI_BACKEND=mock."
+            )
+        if client is None:
+            from openai import OpenAI  # local import: heavy dependency, lazy load
+
+            client = OpenAI(api_key=key, base_url=provider.base_url)
+        self._client = client
+
+    def _create(self, role, system: str, user: str, *, as_json: bool):
+        budget = budget_for(role)
+        model = role_model(role, self.provider)
+        kwargs = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": budget.temperature,
+            "max_tokens": budget.max_tokens,
+        }
+        if as_json:
+            kwargs["response_format"] = {"type": "json_object"}
+        return self._client.chat.completions.create(**kwargs), model
+
+    def chat(self, role, system: str, user: str) -> str:
+        started = time.monotonic()
+        try:
+            response, model = self._create(role, system, user, as_json=False)
+            content = response.choices[0].message.content or ""
+        except Exception as exc:  # noqa: BLE001 - logged, then re-raised
+            self._log_error(kind="chat", role=role, system=system, user=user, exc=exc)
+            raise
+        self._log(
+            kind="chat",
+            role=role,
+            system=system,
+            user=user,
+            model=model,
+            raw=content,
+            latency_ms=round((time.monotonic() - started) * 1000, 1),
         )
         return content
 
-    def chat_json(self, system: str, user: str) -> dict:
+    def chat_json(self, role, system: str, user: str) -> dict:
         started = time.monotonic()
         try:
-            response = self._client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                temperature=0.0,
-                max_tokens=JSON_MAX_TOKENS,
-                response_format={"type": "json_object"},
-            )
+            response, model = self._create(role, system, user, as_json=True)
             content = response.choices[0].message.content or ""
         except Exception as exc:  # noqa: BLE001 - logged, then re-raised
-            debuglog.log_event(
-                {
-                    "event": "backend_error",
-                    "kind": "chat_json",
-                    "system": system,
-                    "user": user,
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-            )
+            self._log_error(kind="chat_json", role=role, system=system, user=user, exc=exc)
             raise
         parsed = parse_json_content(content)
-        debuglog.log_event(
-            {
-                "event": "ai",
-                "kind": "chat_json",
-                "system": system,
-                "user": user,
-                "raw": content,  # the response before parsing — the debugging gold
-                "parsed": parsed,
-                "latency_ms": round((time.monotonic() - started) * 1000, 1),
-            }
+        self._log(
+            kind="chat_json",
+            role=role,
+            system=system,
+            user=user,
+            model=model,
+            raw=content,  # the response before parsing — the debugging gold
+            parsed=parsed,
+            latency_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        return parsed
+
+
+#: The one tool Anthropic is asked to call when a JSON object is wanted. Its
+#: input schema is deliberately open — the roles ask for different shapes, and
+#: the shapes are validated downstream (`reviewer.normalize_review`,
+#: `curator.validate`).
+JSON_TOOL = {
+    "name": "emit_json",
+    "description": "Return the requested result as a single JSON object.",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": True,
+    },
+}
+
+
+class AnthropicBackend(_LiveBackend):
+    """Claude: system prompt top-level, `max_tokens` required, no
+    `response_format` — JSON comes back as a forced tool call, with the tolerant
+    text parser as the fallback (and the caller's retry behind that)."""
+
+    def __init__(self, provider: Provider, api_key: str | None = None, client=None):
+        self.provider = provider
+        key = api_key or resolve_key(provider)
+        if not key:
+            raise RuntimeError(
+                f"{provider.key_env} is not set. Export it, put it in a gitignored "
+                ".env at the repo root, or run with DOJO_AI_BACKEND=mock."
+            )
+        if client is None:
+            import anthropic  # local import: heavy dependency, lazy load
+
+            client = anthropic.Anthropic(api_key=key)
+        self._client = client
+
+    def _create(self, role, system: str, user: str, *, as_json: bool):
+        budget = budget_for(role)
+        model = role_model(role, self.provider)
+        kwargs = {
+            "model": model,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+            "temperature": budget.temperature,
+            "max_tokens": budget.max_tokens,
+        }
+        if as_json:
+            kwargs["tools"] = [JSON_TOOL]
+            kwargs["tool_choice"] = {"type": "tool", "name": JSON_TOOL["name"]}
+        return self._client.messages.create(**kwargs), model
+
+    @staticmethod
+    def _text_of(response) -> str:
+        parts = []
+        for block in getattr(response, "content", None) or []:
+            if getattr(block, "type", None) == "text":
+                parts.append(getattr(block, "text", "") or "")
+        return "".join(parts)
+
+    @staticmethod
+    def _tool_input_of(response):
+        for block in getattr(response, "content", None) or []:
+            if getattr(block, "type", None) == "tool_use":
+                value = getattr(block, "input", None)
+                if isinstance(value, dict):
+                    return value
+        return None
+
+    def chat(self, role, system: str, user: str) -> str:
+        started = time.monotonic()
+        try:
+            response, model = self._create(role, system, user, as_json=False)
+            content = self._text_of(response)
+        except Exception as exc:  # noqa: BLE001 - logged, then re-raised
+            self._log_error(kind="chat", role=role, system=system, user=user, exc=exc)
+            raise
+        self._log(
+            kind="chat",
+            role=role,
+            system=system,
+            user=user,
+            model=model,
+            raw=content,
+            latency_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        return content
+
+    def chat_json(self, role, system: str, user: str) -> dict:
+        started = time.monotonic()
+        try:
+            response, model = self._create(role, system, user, as_json=True)
+        except Exception as exc:  # noqa: BLE001 - logged, then re-raised
+            self._log_error(kind="chat_json", role=role, system=system, user=user, exc=exc)
+            raise
+        parsed = self._tool_input_of(response)
+        raw = ""
+        if parsed is None:
+            # The model answered in prose instead of using the tool: fall back to
+            # the same tolerant extractor every other backend uses.
+            raw = self._text_of(response)
+            parsed = parse_json_content(raw)
+        self._log(
+            kind="chat_json",
+            role=role,
+            system=system,
+            user=user,
+            model=model,
+            raw=raw or json.dumps(parsed),
+            parsed=parsed,
+            latency_ms=round((time.monotonic() - started) * 1000, 1),
         )
         return parsed
 
 
 class MockBackend:
-    """Deterministic canned backend. ``chat`` reads ``TIER=<n>`` from the
-    user prompt and returns the canned response for that tier; ``chat_json``
-    serves a leak-check rating queue, a fixed review dict, and a canned
-    curator proposal."""
+    """Deterministic canned backend, keyed on the **role** (v0.13).
+
+    ``chat`` returns the canned answer for the role; ``chat_json`` serves the
+    leak-check rating queue, a fixed review dict, and canned curator / reference
+    / audit proposals. A list is consumed one entry per call and then repeats its
+    last entry — a drained queue used to return `{}`, which surfaced in the
+    student's terminal as a literal `{}` during a long offline demo."""
 
     TIER_RESPONSES = {
         0: "Before I nudge you: can you say, in one sentence, where exactly "
@@ -174,6 +374,9 @@ class MockBackend:
         "whenever you need repeated 'smallest so far' queries — like a "
         "priority queue. Why do you think we can't just sort once?"
     )
+    DEFAULT_DISCUSSION = (
+        "Post-solve discussion: you could also sort both arrays and walk two pointers."
+    )
 
     def __init__(
         self,
@@ -181,7 +384,7 @@ class MockBackend:
         review: dict | None = None,
         curator: dict | None = None,
         tutor: dict | list | None = None,
-        discussion: str = "Post-solve discussion: you could also sort both arrays and walk two pointers.",
+        discussion: str = DEFAULT_DISCUSSION,
         auditor: dict | None = None,
         teacher: str | list | None = None,
         referencer: dict | None = None,
@@ -210,51 +413,80 @@ class MockBackend:
             "overall_comment": "Solid. One habit to build: state your loop invariant out loud.",
         }
 
-    def chat(self, system: str, user: str) -> str:
-        # DISCUSSION_SYSTEM contains "post-solve" but not the literal word
-        # "discussion" — key on both so the canned branch can't silently die
-        # (it did once, and long tests passed against the wrong fallback).
-        if "discussion" in system.lower() or "post-solve" in system.lower():
+    def identity(self) -> dict:
+        return {"backend": "mock", "model": "mock"}
+
+    @staticmethod
+    def _canned(value, default):
+        if not isinstance(value, list):
+            return value
+        if not value:
+            return default
+        return value.pop(0) if len(value) > 1 else value[0]
+
+    def chat(self, role, system: str, user: str) -> str:
+        role = Role(role)
+        if role is Role.DISCUSSION:
             return self._discussion
-        if "teacher" in system.lower():  # learning mode (v0.8)
-            if isinstance(self._teacher, list):
-                return self._teacher.pop(0) if self._teacher else self.DEFAULT_TEACHER
-            return self._teacher
+        if role is Role.TEACHER:
+            return self._canned(self._teacher, self.DEFAULT_TEACHER)
         for line in user.splitlines():
             if line.startswith("TIER="):
                 tier = int(line.split("=")[1])
                 return self.TIER_RESPONSES.get(tier, self.TIER_RESPONSES[1])
         return self.TIER_RESPONSES[1]
 
-    def chat_json(self, system: str, user: str) -> dict:
-        if "curation auditor" in system.lower():
-            return self._auditor
-        if "auditor" in system.lower():
+    def chat_json(self, role, system: str, user: str) -> dict:
+        role = Role(role)
+        if role is Role.AUDITOR:
             rating = self._leak_ratings[min(self._rating_idx, len(self._leak_ratings) - 1)]
             self._rating_idx += 1
             return {"rating": rating, "rewritten": "" if rating < 3 else "SOFTENED"}
-        if "rubric" in system.lower() or "review" in system.lower():
+        if role is Role.REVIEWER:
             return self._review
-        # Keyed on "canonical reference" — REFERENCE_SYSTEM's own phrase (see
-        # curator/prompts.py). tests/test_prompt_routing.py pins that every
-        # system prompt maps to its own branch, because this convention has
-        # silently broken twice.
-        if "canonical reference" in system.lower():
-            if isinstance(self._referencer, list):
-                return self._referencer.pop(0) if self._referencer else {}
-            return self._referencer
-        if "curator" in system.lower():
-            if isinstance(self._curator, list):
-                return self._curator.pop(0) if self._curator else {}
-            return self._curator
-        if "tutor" in system.lower():
-            if isinstance(self._tutor, list):
-                return self._tutor.pop(0) if self._tutor else {}
-            return self._tutor
+        if role is Role.REFERENCER:
+            return self._canned(self._referencer, {})
+        if role is Role.CURATION_AUDITOR:
+            return self._auditor
+        if role is Role.CURATOR:
+            return self._canned(self._curator, {})
+        if role is Role.TUTOR:
+            return self._canned(self._tutor, {})
         return {}
 
 
-def get_backend() -> AIBackend:
-    if ai_backend() == "mock":
+def build_backend(name: str | None = None) -> AIBackend:
+    """The backend for a provider name (default: the configured one)."""
+    name = (name or ai_backend()).lower()
+    if name == "mock":
         return MockBackend()
-    return DeepSeekBackend()
+    provider = PROVIDERS.get(name)
+    if provider is None:
+        raise RuntimeError(
+            f"unknown AI backend '{name}' — use one of "
+            f"{', '.join(sorted([*PROVIDERS, 'mock']))} (DOJO_AI_BACKEND / DOJO_PROVIDER)"
+        )
+    if provider.wire == "anthropic":
+        return AnthropicBackend(provider)
+    return OpenAICompatBackend(provider)
+
+
+def get_backend() -> AIBackend:
+    return build_backend()
+
+
+__all__ = [
+    "AIBackend",
+    "AnthropicBackend",
+    "Budget",
+    "JSON_MAX_TOKENS",
+    "JSON_TOOL",
+    "MockBackend",
+    "OpenAICompatBackend",
+    "ROLE_BUDGETS",
+    "Role",
+    "budget_for",
+    "build_backend",
+    "get_backend",
+    "parse_json_content",
+]

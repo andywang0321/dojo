@@ -32,10 +32,19 @@ from rich.table import Table
 
 from dojo import scheduler
 from dojo.bank import ensure_seeded
-from dojo.config import DB_PATH, PROBLEMS_DIR, REPO_ROOT, load_conf, save_conf
+from dojo.config import (
+    DB_PATH,
+    PROBLEMS_DIR,
+    REPO_ROOT,
+    WORKBENCH_DIR,
+    load_conf,
+    save_conf,
+)
 from dojo.db import (
     connect,
     get_attempt,
+    get_revision,
+    list_revisions,
     get_or_create_user,
     list_attempts,
     loads_json,
@@ -198,6 +207,7 @@ def _cmd_setup(args) -> int:
         else (lambda: getpass.getpass("DeepSeek API key (Enter to skip): ")),
         detect_env_key=not args.skip_key,
         path_install=None if args.no_path else _make_path_installer(console),
+        provider_override=getattr(args, "provider", None),
     )
     return 0
 
@@ -589,17 +599,39 @@ def _cmd_learn(args) -> int:
     return 0
 
 
+def _active_state_slug(console: Console) -> str | None:
+    """The slug of the most recently touched live session, or None.
+
+    Choosing the alphabetically first state file (the v0.10 behaviour) meant
+    `dojo check` could silently test a file the student is not looking at as soon
+    as a second crashed session existed — and crash recovery is the *only* resume
+    path by design (v0.11). Also prints which session was chosen, so the guess is
+    never invisible."""
+    if not WORKBENCH_DIR.exists():
+        return None
+    files = sorted(
+        WORKBENCH_DIR.glob("*.state.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not files:
+        return None
+    slug = files[0].stem.removesuffix(".state")
+    if len(files) > 1:
+        console.print(
+            f"[dim]Active session: {slug} (of {len(files)} live sessions — "
+            "most recently used).[/dim]"
+        )
+    return slug
+
+
 def _cmd_check(args) -> int:
     from dojo.session import run_check
 
     console = Console()
     slug = args.slug
     if slug is None:
-        from dojo.config import WORKBENCH_DIR
-
-        state_files = sorted(WORKBENCH_DIR.glob("*.state.json")) if WORKBENCH_DIR.exists() else []
-        if state_files:
-            slug = state_files[0].stem.removesuffix(".state")
+        slug = _active_state_slug(console)
         if slug is None:
             console.print("[red]No active session. Start with `dojo day <slug>`.[/red]")
             return 1
@@ -665,6 +697,115 @@ def _measured_cell(row, axis: str) -> str:
     return f"{cls} (×{trend:.2f} vs reference)" if trend else cls
 
 
+def _revision_table(conn, attempt_id: int) -> int:
+    """`dojo show <id> --revisions`: one row per submitted version."""
+    rows = list_revisions(conn, attempt_id)
+    if not rows:
+        print(
+            f"No revisions recorded for attempt {attempt_id} — it predates v0.13 "
+            "or was never submitted."
+        )
+        return 0
+    table = ui_table(f"Revisions — attempt {attempt_id}")
+    for col in ("#", "kind", "status", "claimed", "measured", "review", "when", "lines"):
+        table.add_column(col)
+    for row in rows:
+        review = loads_json(row["review"], {}) or {}
+        overall = review.get("overall_comment")
+        scores = [
+            v.get("score")
+            for v in review.values()
+            if isinstance(v, dict) and isinstance(v.get("score"), (int, float))
+        ]
+        mean = f"{sum(scores) / len(scores):.1f}/5" if scores else "—"
+        del overall
+        claimed = " / ".join(
+            x for x in (row["self_reported_time"], row["self_reported_space"]) if x
+        )
+        measured = _measured_from_json(row["measurement"], "time")
+        table.add_row(
+            str(row["revision"]),
+            row["kind"],
+            row["status"],
+            (claimed or "—")[:28],
+            measured,
+            mean,
+            (row["created_at"] or "")[:19],
+            str(len(row["code"].splitlines())),
+        )
+    console = Console()
+    console.print(table)
+    console.print(
+        "[dim]`dojo show <id> --rev N` for one version, `--diff` for what changed.[/dim]"
+    )
+    return 0
+
+
+def _measured_from_json(measurement_json: str | None, axis: str) -> str:
+    """One axis of a revision's stored measurement (same vocabulary as
+    `_measured_cell`, but reading the revision row's own record)."""
+    record = loads_json(measurement_json, None) or {}
+    verdict = record.get(axis) or {}
+    cls = verdict.get("student_class")
+    trend = verdict.get("trend")
+    if cls:
+        return f"{cls} (x{trend:.2f})" if trend else str(cls)
+    if verdict.get("kind") == "failed":
+        return verdict.get("note", "failed at scale")[:24]
+    return "—"
+
+
+def _revision_diff(conn, attempt_id: int, wanted: list[int] | None) -> int:
+    """`dojo show <id> --diff [A [B]]`: what changed between two versions."""
+    import difflib
+
+    rows = list_revisions(conn, attempt_id)
+    if len(rows) < 1:
+        print(f"Attempt {attempt_id} has no revisions to compare.")
+        return 1
+    if wanted and len(wanted) >= 2:
+        left, right = wanted[0], wanted[1]
+    elif wanted:
+        left, right = rows[max(0, rows.index(rows[-1]) - 1)]["revision"], wanted[0]
+    else:
+        if len(rows) < 2:
+            print("Only one revision — nothing to diff yet (polish, then look again).")
+            return 0
+        left, right = rows[-2]["revision"], rows[-1]["revision"]
+    by_number = {r["revision"]: r for r in rows}
+    if left not in by_number or right not in by_number:
+        print(f"No such revision(s): {left}, {right}. `--revisions` lists them.")
+        return 1
+    before = by_number[left]["code"].splitlines(keepends=True)
+    after = by_number[right]["code"].splitlines(keepends=True)
+    diff = list(
+        difflib.unified_diff(
+            before,
+            after,
+            fromfile=f"attempt {attempt_id} revision {left}",
+            tofile=f"attempt {attempt_id} revision {right}",
+            n=3,
+        )
+    )
+    if not diff:
+        print(f"Revisions {left} and {right} are identical.")
+        return 0
+    console = Console()
+    for line in diff:
+        stripped = line.rstrip("\n")
+        style = ""
+        if stripped.startswith("+++") or stripped.startswith("---"):
+            style = "bold"
+        elif stripped.startswith("+"):
+            style = "green"
+        elif stripped.startswith("-"):
+            style = "red"
+        elif stripped.startswith("@@"):
+            style = "cyan"
+        console.print(f"[{style}]{stripped}[/{style}]" if style else stripped)
+    return 0
+
+
 def _cmd_show(args) -> int:
     from dojo.render import md_plain, render_ai
 
@@ -676,8 +817,37 @@ def _cmd_show(args) -> int:
             f"[red]No attempt with id {args.attempt_id}. Try `dojo history`.[/red]"
         )
         return 1
-    if args.code:
-        console.print(row["code"] or "(no code recorded)")
+    with connect(DB_PATH) as conn:
+        if getattr(args, "revisions", False):
+            return _revision_table(conn, args.attempt_id)
+        if getattr(args, "diff", None) is not None:
+            return _revision_diff(conn, args.attempt_id, args.diff)
+        if getattr(args, "rev", None) is not None:
+            revision = get_revision(conn, args.attempt_id, args.rev)
+            if revision is None:
+                console.print(
+                    f"[red]Attempt {args.attempt_id} has no revision {args.rev}.[/red]"
+                )
+                return 1
+            code = revision["code"]
+            if getattr(args, "clean", False):
+                from dojo.session.workbench import student_view
+
+                code = student_view(code, row) or "(nothing left after dojo's scaffolding)"
+            console.print(code)
+            console.print(
+                f"[dim]revision {revision['revision']} of {args.attempt_id} · "
+                f"{revision['kind']} · {revision['status']} · "
+                f"{revision['created_at'][:19]}[/dim]"
+            )
+            return 0
+    if args.code or getattr(args, "clean", False):
+        code = row["code"] or "(no code recorded)"
+        if getattr(args, "clean", False) and row["code"]:
+            from dojo.session.workbench import student_view
+
+            code = student_view(code, row) or "(no code after removing scaffolding)"
+        console.print(code)
         return 0
 
     console.print(
@@ -731,6 +901,14 @@ def _cmd_show(args) -> int:
                 "[dim]scale probe: no reference registered for this problem, so "
                 "growth was not compared.[/dim]"
             )
+
+    with connect(DB_PATH) as conn:
+        revisions = list_revisions(conn, args.attempt_id)
+    if len(revisions) > 1:
+        console.print(
+            f"[dim]{len(revisions)} revisions — `dojo show {args.attempt_id} "
+            "--revisions` lists them, `--diff` shows what changed.[/dim]"
+        )
 
     hints = loads_json(row["hints"], [])
     if hints:
@@ -1071,7 +1249,6 @@ def _cmd_reference(args) -> int:
 def _cmd_report(args) -> int:
     import json
 
-    from dojo.config import REPO_ROOT, WORKBENCH_DIR
     from dojo.curator import CuratorError, apply, audit_curation, curate_dual
     from dojo.judge import JUDGE_CASES, ORACLES
     from dojo.tutor import get_backend
@@ -1085,12 +1262,7 @@ def _cmd_report(args) -> int:
     slug = args.slug
     with connect(DB_PATH) as conn:
         if slug is None:
-            state_files = (
-                sorted(WORKBENCH_DIR.glob("*.state.json"))
-                if WORKBENCH_DIR.exists()
-                else []
-            )
-            slug = state_files[0].stem.removesuffix(".state") if state_files else None
+            slug = _active_state_slug(console)
         if slug is None:
             console.print(
                 "[red]No problem to report — pass a slug or start a session.[/red]"
@@ -1281,6 +1453,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument(
         "--code", action="store_true", help="print only the submitted code"
     )
+    p_show.add_argument(
+        "--clean",
+        action="store_true",
+        help="print the code as the AI reads it (dojo's scaffolding removed)",
+    )
+    p_show.add_argument(
+        "--revisions",
+        action="store_true",
+        help="list every version of this attempt (v0.13)",
+    )
+    p_show.add_argument(
+        "--rev", type=int, metavar="N", help="print version N's code instead of the latest"
+    )
+    p_show.add_argument(
+        "--diff",
+        nargs="*",
+        type=int,
+        metavar="N",
+        help="unified diff between versions (default: the last two)",
+    )
     p_show.set_defaults(func=_cmd_show)
 
     p_progress = sub.add_parser("progress", help="per-pattern proficiency + retention schedule")
@@ -1313,6 +1505,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_setup.add_argument("--user", help="register this user without prompting")
     p_setup.add_argument("--skip-key", action="store_true", help="don't prompt for an API key")
     p_setup.add_argument("--no-path", action="store_true", help="don't offer the PATH install")
+    p_setup.add_argument(
+        "--provider",
+        choices=["deepseek", "openai", "anthropic"],
+        help="use this provider's key variable (default: detect, else deepseek)",
+    )
     p_setup.set_defaults(func=_cmd_setup)
 
     p_curate = sub.add_parser("curate", help="AI-curate a new problem from a statement")
@@ -1477,6 +1674,15 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\ninterrupted")
         return 130
+    except EOFError:
+        # Ctrl-D (or a piped script running out of lines) at a prompt. It used
+        # to surface as a traceback out of `rich.Console.input`; the session's
+        # state file is left in place, so the same command resumes it (v0.13).
+        print(
+            "[dim]Input ended — stopping here. Your session is saved: run the "
+            "same command to resume it.[/dim]"
+        )
+        return 1
 
 
 if __name__ == "__main__":

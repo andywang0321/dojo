@@ -5,4 +5,4 @@ real run clears data/logs/ (see dojo/debuglog.py) so the debug log can
 never grow unbounded.
 """
 
-MAJOR_VERSION = "0.10"
+MAJOR_VERSION = "0.13"

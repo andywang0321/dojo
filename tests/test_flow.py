@@ -256,6 +256,7 @@ def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
             "O(n) for the stack",
             "",
             "The key insight: the stack mirrors the opening order.",
+            "done",  # close the post-solve loop (FakeConsole now refuses to guess)
         ],
         actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
     )
@@ -277,14 +278,18 @@ def _fast_probe(monkeypatch):
 
     The real probe still runs — the point of these tests is the pipeline, and a
     stubbed probe would stop exercising the pairing, the failure reporting, and
-    the verdict wiring."""
+    the verdict wiring. The sizes are *forced*, not `setdefault`: the flow passes
+    `sizes=` explicitly, so the old wrapper was silently ineffective and every
+    flow test ran the full 7-size ladder with 3 repeats (42 subprocess launches
+    per submit, which is also what made a timing-based assertion look attractive).
+    """
     from dojo.profiler import probe as probe_mod
 
     real = probe_mod.run_probe
 
     def small(student, generator, reference=None, **kwargs):
-        kwargs.setdefault("sizes", [100, 200, 400, 800])
-        kwargs.setdefault("repeats", 1)
+        kwargs["sizes"] = [100, 200, 400, 800]
+        kwargs["repeats"] = 1
         return real(student, generator, reference, **kwargs)
 
     monkeypatch.setattr("dojo.profiler.probe.run_probe", small)
@@ -406,7 +411,10 @@ def test_repeated_solves_create_distinct_attempts(db, fake_console, monkeypatch,
     workbench = tmp_path / "workbench"
     workbench.mkdir(parents=True)
 
-    answers = ["submit", "O(n) one pass", "O(n) stack", "", "The key insight: the stack."]
+    answers = [
+        "submit", "O(n) one pass", "O(n) stack", "",
+        "The key insight: the stack.", "done",
+    ]
     write_solution = lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)
     assert run_day(db, fake_console(answers, actions={"submit": write_solution}), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
     assert run_day(db, fake_console(answers, actions={"submit": write_solution}), MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
@@ -627,8 +635,13 @@ def test_new_session_starts_from_blank_template(db, fake_console, monkeypatch, t
 
 
 def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_path):
-    """After the review: `polish` re-grades and updates the same attempt row,
-    `discuss` persists a post-solve conversation, `done` retires the state."""
+    """After the review: `polish` returns to solving (with the discussion agent
+    answering), a second `submit` re-grades and updates the same attempt row, a
+    question persists a post-solve conversation, `done` retires the state.
+
+    v0.13 changed the shape: `polish` used to *be* the re-grade, which is why
+    `check` and `open` disappeared after a submit (and why typing them sent the
+    words to the model as questions)."""
     _seed_problem(db)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
@@ -645,6 +658,8 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
             "",
             "The key insight: the stack.",
             "polish",
+            "check",           # available again after polish (v0.13)
+            "submit",          # the re-grade
             "O(n) one pass",
             "O(n) stack",
             "",
@@ -660,6 +675,7 @@ def test_post_solve_loop_polish_discuss_done(db, fake_console, monkeypatch, tmp_
     row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert row["polished"] == 1
     assert row["recall_grade"] is None  # only warm-ups carry a recall grade
+    assert "Visible cases" in console.text or "visible cases" in console.text
     discussion = json.loads(row["discussion"])
     assert len(discussion) == 1
     assert discussion[0]["user"] == "how else could I solve this?"
@@ -821,9 +837,9 @@ def test_discuss_sees_submitted_code(db, fake_console, monkeypatch, tmp_path):
             super().__init__()
             self.chat_prompts = []
 
-        def chat(self, system, user):
+        def chat(self, role, system, user):
             self.chat_prompts.append((system, user))
-            return super().chat(system, user)
+            return super().chat(role, system, user)
 
     backend = CapturingBackend()
     console = fake_console(
@@ -1030,6 +1046,7 @@ def test_polish_reasks_complexity_and_updates_claims(db, fake_console, monkeypat
             "",
             "The key insight: the stack.",
             "polish",
+            "submit",  # v0.13: polish switches phase; submit re-grades
             "O(n) one pass, now with an early exit",
             "O(n) stack",
             "",
@@ -1158,14 +1175,21 @@ def test_a_failure_at_scale_is_reported_and_recorded(db, fake_console, monkeypat
     assert record["time"]["kind"] == growth.FAILED
 
 
-def test_a_registered_reference_yields_a_growth_verdict(db, fake_console, monkeypatch, tmp_path):
+def test_a_registered_reference_yields_a_growth_verdict(
+    db, fake_console, monkeypatch, tmp_path, synthetic_probe
+):
     """With a reference available the probe compares growth against it; identical
-    algorithms must come back as matching."""
+    algorithms must come back as matching.
+
+    The measurement is injected (an exact cost model) and the verdict is not: the
+    wall-clock version of this test failed 33% of the time at 6-way concurrency,
+    which is exactly what AGENTS.md rule 5 forbids."""
     import dojo.judge
     from dojo.judge import REFERENCES
 
     _seed_problem(db)
     _fast_probe(monkeypatch)
+    synthetic_probe(lambda label, n: n)  # identical cost curves on both sides
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setitem(REFERENCES, "valid_parentheses", _reference_is_valid)
@@ -1219,3 +1243,488 @@ def test_an_output_mismatch_at_scale_is_reported(db, fake_console, monkeypatch, 
     assert record["mismatch_confirmed"] is False
     assert "differs from the reference" in console.text.replace("\n", " ")
     assert "dojo report" in console.text.replace("\n", " ")
+
+
+# ------------------------------------- transient failures degrade (v0.13)
+# `cli.main` catches only KeyboardInterrupt, so an API blip used to end a session
+# with a traceback. Every AI call site now runs behind `dojo.guard`.
+
+
+class FlakyBackend(MockBackend):
+    """The mock, but one role raises the way a transport failure would."""
+
+    def __init__(self, fail: str, **kwargs):
+        super().__init__(**kwargs)
+        self.fail = fail
+        self.calls = 0
+
+    def chat(self, role, system, user):
+        self.calls += 1
+        if self.fail == "chat":
+            raise ConnectionError("connection reset by peer")
+        return super().chat(role, system, user)
+
+    def chat_json(self, role, system, user):
+        self.calls += 1
+        if self.fail == "chat_json":
+            raise TimeoutError("the request timed out")
+        return super().chat_json(role, system, user)
+
+
+def test_a_failing_tutor_does_not_end_the_session(db, fake_console, monkeypatch, tmp_path):
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        [
+            "why does this fail?",                        # the tutor raises
+            "submit",
+            "O(n) one pass",
+            "O(n) stack",
+            "",
+            "The stack mirrors openings.",
+            "done",
+        ],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    outcome = run_day(
+        db, console, FlakyBackend("chat_json"), "valid_parentheses", "andy", open_editor=False
+    )
+    assert outcome == "solved"          # the session carried on
+    assert "tutor unavailable" in console.text
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert json.loads(row["hints"]) == []   # nothing recorded for a failed call
+    assert row["status"] == "correct"
+
+
+def test_a_failing_reviewer_still_records_the_attempt(db, fake_console, monkeypatch, tmp_path):
+    """The review is evidence, not the grade: a reviewer outage must not cost
+    the student a graded solve."""
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "", "The stack mirrors openings.", "done"],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(
+        db, console, FlakyBackend("chat_json"), "valid_parentheses", "andy", open_editor=False
+    ) == "solved"
+    assert "reviewer unavailable" in console.text
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["status"] == "correct"
+    assert row["review"] is None
+
+
+def test_a_failing_discussion_tutor_does_not_end_the_session(db, fake_console, monkeypatch, tmp_path):
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        [
+            "submit", "O(n) one pass", "O(n) stack", "", "The stack mirrors openings.",
+            "how else could I solve this?",     # the discussion agent raises
+            "done",
+        ],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(
+        db, console, FlakyBackend("chat"), "valid_parentheses", "andy", open_editor=False
+    ) == "solved"
+    assert "discussion tutor unavailable" in console.text
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["discussion"] is None
+
+
+def test_a_failed_re_review_keeps_the_previous_review(db, fake_console, monkeypatch, tmp_path):
+    """A polish-time re-review that fails used to write the review back as NULL —
+    destroying the only review the attempt had (audit S2.4)."""
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    class ReviewThenFail(MockBackend):
+        def __init__(self):
+            super().__init__()
+            self.reviews = 0
+
+        def chat_json(self, role, system, user):
+            if "rubric" in system.lower() or "review" in system.lower():
+                self.reviews += 1
+                if self.reviews > 1:
+                    raise ConnectionError("connection reset by peer")
+            return super().chat_json(role, system, user)
+
+    console = fake_console(
+        [
+            "submit", "O(n) one pass", "O(n) stack", "", "The stack mirrors openings.",
+            "polish", "submit", "O(n) one pass", "O(n) stack", "y", "done", "done",
+        ],
+        actions={
+            "submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION),
+            "polish": lambda: (workbench / "valid_parentheses.py").write_text(
+                SOLUTION + "\n# polished\n"
+            ),
+        },
+    )
+    assert run_day(
+        db, console, ReviewThenFail(), "valid_parentheses", "andy", open_editor=False
+    ) == "solved"
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["polished"] == 1
+    assert row["review"] is not None          # the first review survived
+    assert json.loads(row["review"])["correctness"]["score"] == 4
+
+
+def test_a_failed_submit_records_the_sessions_hints_and_duration(db, fake_console, monkeypatch, tmp_path):
+    """A failed submit used to store code but hint_count=0, hints=NULL and
+    duration=NULL, because only the successful path wrote them — exactly the row
+    the learner model needs when it asks what struggle looks like (audit S2.3)."""
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        [
+            "I'm stuck",                       # a hint (tier 0, ladder)
+            "submit",                          # fails: the stub raises
+            "quit",
+        ],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(
+            "def is_valid(s: str) -> bool:\n    raise NotImplementedError\n"
+        )},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["status"] == "error"           # a crash is not a wrong answer
+    assert row["hint_count"] == 1
+    assert json.loads(row["hints"])[0]["tier"] == 0
+    assert row["duration_seconds"] is not None
+
+
+def test_a_resumed_warmup_does_not_grade_the_card_twice(db, fake_console, monkeypatch, tmp_path):
+    """The card update and `attempts.recall_grade` are one event. They used to be
+    two commits with nothing linking them, so a crash between them let a resumed
+    warm-up apply the same grade again (reps and lapses both +2) — audit S1.7."""
+    from dojo import scheduler
+    from dojo.db import get_or_create_user
+
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+
+    answers = ["submit", "O(n) one pass", "O(n) stack", "", "reflection", "3"]
+    console = fake_console(
+        answers,
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(
+        db, console, MockBackend(), "valid_parentheses", "andy",
+        open_editor=False, warmup=True, card=card,
+    ) == "warmup_done"
+    after_first = db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"]
+    attempt_id = db.execute("SELECT id FROM attempts ORDER BY id DESC LIMIT 1").fetchone()["id"]
+
+    # Simulate the crash window: the state file survived, the grade is on the
+    # row, and the same warm-up is resumed.
+    from dojo.session.state import WorkbenchState, save_state
+
+    save_state(
+        WorkbenchState(
+            slug="valid_parentheses", user_id=uid, kind="warmup", attempt_id=attempt_id
+        )
+    )
+    # The resumed path re-runs the full submit pipeline, so it re-asks the
+    # complexity claims (submitting again is a fresh measurement).
+    console2 = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "", "done"], actions={}
+    )
+    outcome = run_day(
+        db, console2, MockBackend(), "valid_parentheses", "andy",
+        open_editor=False, warmup=True, card=card,
+    )
+    assert outcome == "warmup_done"
+    assert "not grading it twice" in console2.text
+    assert db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"] == after_first
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 1
+
+
+# ------------------------------------------- template rendering (v0.13)
+
+
+def test_a_hostile_statement_still_renders_a_parsing_template(db):
+    """A statement containing a triple quote, ending in a quote, or containing a
+    backslash used to produce a workbench file that did not compile — reported to
+    the student as a harness error on their first `check` (audit S2.7)."""
+    import ast
+
+    from dojo.db import dumps_json, now
+    from dojo.session.flow import _render_template
+
+    hostile = [
+        'Return the "sum" — e.g. print("""x""") here',
+        'Given x, return "y"',
+        r"Match \d+ and \sum the results",
+        "print('''x''')",
+    ]
+    for i, statement in enumerate(hostile):
+        db.execute(
+            "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
+            "function_name, visible_tests, signature, created_at) "
+            "VALUES (?, 'T', 'Easy', 'stack', ?, 'solve_it', ?, ?, ?)",
+            (f"hostile_{i}", statement, dumps_json([{"args": [[1]], "expected": 1}]),
+             dumps_json("(nums: list[int]) -> int"), now()),
+        )
+        db.commit()
+        row = db.execute("SELECT * FROM problems WHERE slug = ?", (f"hostile_{i}",)).fetchone()
+        source = _render_template(row)
+        ast.parse(source)                       # must parse
+        assert statement.splitlines()[0][:20] in source.replace("\\\\", "\\")
+
+
+def test_a_broken_template_is_a_curation_problem_not_a_crash(db, fake_console, monkeypatch, tmp_path):
+    """`_write_template` validates before writing, and `run_day` reports the
+    problem rather than handing the student an unparseable file."""
+    from dojo.db import dumps_json, now
+    from dojo.session import flow
+
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
+        "function_name, visible_tests, signature, created_at) "
+        "VALUES ('broken_sig', 'T', 'Easy', 'stack', 's', 'f', ?, ?, ?)",
+        (dumps_json([{"args": [[1]], "expected": 1}]),
+         dumps_json({"methods": {"go": "not-a-signature"}}), now()),
+    )
+    db.commit()
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    console = fake_console(["quit"])
+    assert run_day(db, console, MockBackend(), "broken_sig", "andy", open_editor=False) == "error"
+    assert "does not compile" in console.text
+    assert not (tmp_path / "workbench" / "broken_sig.py").exists()
+
+
+# -------------------------------------- attempt revisions (v0.13, report #1)
+# One `code` column, overwritten by every submit and every polish: the version
+# the first review and the first measurement actually graded was gone. The head
+# row still moves forward; the revisions do not.
+
+
+def _run_revising_session(db, fake_console, monkeypatch, tmp_path):
+    """Fail once, pass, then polish — the exact sequence that used to lose the
+    original submission."""
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    path = workbench / "valid_parentheses.py"
+
+    stub = "def is_valid(s: str) -> bool:\n    return False\n"
+    book = {"submits": 0, "polished": False}
+
+    def prepare_submit():
+        # The first submit is the failing stub, the second the real solution, and
+        # the third (after polish) the polished version.
+        book["submits"] += 1
+        if book["submits"] == 1:
+            path.write_text(stub)
+        else:
+            path.write_text(SOLUTION + ("\n# polished\n" if book["polished"] else ""))
+
+    def prepare_polish():
+        book["polished"] = True
+        path.write_text(SOLUTION + "\n# polished\n")
+
+    console = fake_console(
+        [
+            "submit",                                     # revision 1: fails
+            "submit", "O(n) one pass", "O(n) stack", "", "first insight",  # revision 2
+            "polish", "submit", "O(n) one pass", "O(n) stack", "", "n",    # revision 3
+            "done",
+        ],
+        actions={"submit": prepare_submit, "polish": prepare_polish},
+    )
+    return (
+        run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False),
+        path,
+    )
+
+
+def test_a_polished_attempt_keeps_every_version(db, fake_console, monkeypatch, tmp_path):
+    from dojo.db import list_revisions
+
+    outcome, path = _run_revising_session(db, fake_console, monkeypatch, tmp_path)
+    assert outcome == "solved"
+
+    attempt = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    revisions = list_revisions(db, attempt["id"])
+    assert len(revisions) == 3
+    assert [r["revision"] for r in revisions] == [1, 2, 3]
+    assert revisions[0]["status"] == "wrong_answer"      # the original submission
+    assert revisions[1]["status"] == "correct"
+    assert revisions[2]["kind"] == "polish"
+    assert "return False" in revisions[0]["code"]        # revision 1 is intact
+    assert revisions[1]["code"] != revisions[2]["code"]  # polish appended its own
+    # The head still points at the newest version, so old queries keep working —
+    # and it holds the *raw* artifact, because that is what the judge ran and
+    # what `dojo show --code` promises.
+    assert attempt["code"] == revisions[2]["code"]
+    assert attempt["code"] == path.read_text()  # exactly what the judge ran
+    # Artifacts attach to the revision that produced them.
+    assert revisions[0]["review"] is None
+    assert revisions[1]["review"] is not None
+    assert revisions[1]["measurement"] is not None
+
+
+def test_the_revision_judge_record_names_the_failures(db, fake_console, monkeypatch, tmp_path):
+    import json as _json
+
+    from dojo.db import list_revisions
+
+    _run_revising_session(db, fake_console, monkeypatch, tmp_path)
+    attempt = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    first = list_revisions(db, attempt["id"])[0]
+    judge = _json.loads(first["judge"])
+    assert judge["status"] == "wrong_answer"
+    assert judge["passed"] < judge["total"]
+    assert judge["failures"] and judge["failures"][0]["label"]
+
+
+def test_a_polish_does_not_touch_the_original_review(db, fake_console, monkeypatch, tmp_path):
+    """The review of revision 2 stays revision 2's, even after a later polish
+    re-reviews the code (audit S2.4 is the same bug from the other direction)."""
+    import json as _json
+
+    from dojo.db import list_revisions
+
+    _run_revising_session(db, fake_console, monkeypatch, tmp_path)
+    attempt = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    revisions = list_revisions(db, attempt["id"])
+    assert _json.loads(revisions[1]["review"])["correctness"]["score"] == 4
+    assert revisions[2]["review"] is not None      # the polish was re-reviewed
+
+
+# ------------------------------------------- the phase model (v0.13, report #2)
+# Two loops became one: a `phase` decides which commands exist and which agent
+# answers a question. `polish` is a *mode switch* back to solving, not an alias
+# for re-grading — and `check`/`open` are never silently sent to the model as
+# questions again.
+
+
+def _solved_session(db, fake_console, monkeypatch, tmp_path, post_answers):
+    """A session that passes the first submit, then runs `post_answers` in the
+    post-solve phase. Returns (console, workbench path)."""
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    path = workbench / "valid_parentheses.py"
+    console = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "", "the stack", *post_answers],
+        actions={"submit": lambda: path.write_text(SOLUTION)},
+    )
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+    return outcome, console, path
+
+
+def test_a_solving_command_in_the_post_solve_phase_is_explained_not_asked(
+    db, fake_console, monkeypatch, tmp_path
+):
+    """Typing `check` after a submit used to send the literal word to the
+    discussion model and run nothing. It still is not a post-solve command — the
+    fix is that dojo now says so, and `polish` is the way back."""
+    outcome, console, path = _solved_session(
+        db, fake_console, monkeypatch, tmp_path, ["check", "done"]
+    )
+    assert outcome == "solved"
+    assert "solving-mode command" in console.text
+    # The word never reached the model as a question.
+    assert "STUDENT: check" not in console.text
+
+
+def test_polish_returns_to_solving_with_the_discussion_agent(
+    db, fake_console, monkeypatch, tmp_path
+):
+    """The user's reading of `polish`: take me back to solving, but keep the
+    post-solve tutor answering (the boundary lifted at the first grade)."""
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+    path = workbench / "valid_parentheses.py"
+
+    class Recording(MockBackend):
+        def __init__(self):
+            super().__init__()
+            self.prompts: list[str] = []
+
+        def chat(self, role, system, user):
+            self.prompts.append(system)
+            return super().chat(role, system, user)
+
+    backend = Recording()
+    console = fake_console(
+        [
+            "submit", "O(n) one pass", "O(n) stack", "", "the stack",
+            "polish",
+            "check",                                   # available again
+            "is a hash map faster here?",              # a question, post-polish
+            "quit",                                    # keeps the attempt
+        ],
+        actions={"submit": lambda: path.write_text(SOLUTION)},
+    )
+    outcome = run_day(db, console, backend, "valid_parentheses", "andy", open_editor=False)
+
+    assert outcome == "quit"
+    assert "Back to solving" in console.text
+    assert "visible cases" in console.text          # `check` ran for real
+    assert any("post-solve" in system.lower() for system in backend.prompts), (
+        "the question during polish must reach the discussion agent"
+    )
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["status"] == "correct"               # the attempt survived the quit
+    assert row["discussion"] is not None
+    assert not (workbench / "valid_parentheses.state.json").exists()
+
+
+def test_quit_before_submitting_still_records_nothing(db, fake_console, monkeypatch, tmp_path):
+    """The v0.11 rule is unchanged, and the message has to stay true: with no
+    attempt, `quit` abandons; with one, it only ends the session."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    (tmp_path / "workbench").mkdir(parents=True)
+    console = fake_console(["quit"])
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
+    assert "nothing recorded" in console.text
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0

@@ -5,10 +5,26 @@ lifecycle, warm-up, retention) and the [v0.12](v0.12.md) measurement stage have
 shipped. The profiler is now a paired scale probe against a canonical reference,
 and its failures are findings rather than blanks.
 
+**2026-09-19 — a full audit of the v0.12 codebase landed in
+[docs/audit-v0.12.md](../docs/audit-v0.12.md).** It re-checked every finding
+below, added ~40 more (with reproduced evidence), and ordered the work in its §6.
+Two stages are planned from it: [v0.13](v0.13.md) (session continuity, the
+workbench file, providers — its Stage 0 is the trust subset) and
+[v0.14](v0.14.md) (curricula: JAX, then Rust). **Fuzzing with shrinking**,
+deferred from v0.12 to "v0.13", is deliberately *not* on that path: it stays
+here, below the stages, rather than blocking the curriculum work.
+
 ## v0.11 audit findings (from the handoff code audit)
 
 Ordered roughly by how much trust they cost. Items marked **→ v0.11** are
 being fixed in the current stage rather than deferred.
+
+*Status after the v0.12 audit, updated when v0.13 Stage 0 shipped: items **1, 3,
+4, 5 and 7 are closed**, item 11 is **half-closed** (the CLI smoke tests exist;
+`_cmd_curate`/`_cmd_report`/`_cmd_reference`/`_cmd_update`/`_cmd_user` still have
+no direct test), and items 2 (the never-solve guard is still a five-string grep),
+6, 8, 9, 10, 12 and 13 remain open — 8/12/13 are content and provenance, handled
+in [v0.14](v0.14.md) Increment 1.*
 
 1. **The leak audit is fail-open.** `tutor._audit` returns `1` ("clean") when
    the auditor returns non-JSON, omits `rating`, or returns a non-int — so a
@@ -73,6 +89,22 @@ being fixed in the current stage rather than deferred.
     curate."
 13. **`problems.source` is a dead column** — always `'seed'`, even for the 155
     fetched/lc-numbered rows, so provenance is unrecoverable.
+
+## v0.13 Stage 0 — shipped (the trust subset)
+
+See [v0.13](v0.13.md) for the full record. In one line each: the leak audit fails
+**closed** (an unreadable rating discards the hint and says so); the judge
+captures file descriptor 1 and never raises (a malformed protocol is a verdict,
+not a traceback); output is bounded and process groups are killed
+(`dojo/proc.py`); a case that raised is `status="error"`, not `wrong_answer`; an
+empty case list is refused; every AI call runs behind `dojo.guard`; `dojo report
+--fix` can no longer delete a row attempts reference; the warm-up grade is one
+transaction and cannot be applied twice; `dojo curate`'s prompt enum comes from
+the taxonomy it is validated against; `static.analyze` cannot raise and keeps its
+ruff cache out of the repo; the trend table counts solves as solves; templates
+that would not compile are refused loudly; the timing flake is gone (the probe's
+measurement is injected in tests, never its verdict); and the suite now drives
+`cli.main` end to end against a sandboxed DB and workbench.
 
 ## v0.11 work — shipped
 

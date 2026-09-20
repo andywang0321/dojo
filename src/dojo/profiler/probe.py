@@ -27,12 +27,13 @@ from __future__ import annotations
 
 import json
 import random
-import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from dojo.proc import run_capped
 
 #: ~6 doublings: enough for a one-class difference (n vs n log n) to show as a
 #: ~1.9x ratio trend, without running an O(n^2) solution into the timeout.
@@ -53,6 +54,13 @@ import random
 import sys
 import time
 import tracemalloc
+
+# Hard limits on this process before any user code is imported: the measurement
+# subprocess runs the student's module, and a runaway loop must be contained by
+# more than a wall clock (v0.13).
+from dojo.proc import apply_child_limits
+
+apply_child_limits()
 
 
 def _identity_decorator(*args, **kwargs):
@@ -252,36 +260,37 @@ def run_one(
     timeout: float = DEFAULT_TIMEOUT,
     compare: str = "strict",
 ) -> Run:
-    """Measure one target on one input, in its own subprocess."""
+    """Measure one target on one input, in its own subprocess.
+
+    Output is bounded on the parent's side too: user prints are routed to stderr
+    inside the harness, and reading that stream with ``capture_output=True`` used
+    to let a hot print loop grow *dojo's own* memory to ~1.75 GB (v0.13)."""
     with tempfile.TemporaryDirectory(prefix="dojo_probe_") as tmp:
         tmp_path = Path(tmp)
         harness = tmp_path / "harness.py"
         harness.write_text(PROBE_HARNESS)
         args_path = tmp_path / "args.json"
         args_path.write_text(json.dumps(args))
-        try:
-            proc = subprocess.run(
-                [
-                    sys.executable,
-                    str(harness),
-                    str(target.path),
-                    target.function_name,
-                    str(args_path),
-                    compare,
-                ],
-                cwd=tmp_path,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
+        result = run_capped(
+            [
+                sys.executable,
+                str(harness),
+                str(target.path),
+                target.function_name,
+                str(args_path),
+                compare,
+            ],
+            cwd=tmp_path,
+            timeout=timeout,
+        )
+        if result.timed_out:
             return Run(error=f"timed out after {timeout:g}s")
-        if not proc.stdout.strip():
-            detail = (proc.stderr or "").strip().splitlines()
+        if not result.stdout.strip():
+            detail = [line for line in result.stderr.strip().splitlines() if line.strip()]
             tail = detail[-1][:200] if detail else "no output"
             return Run(error=f"the measurement process died ({tail})")
         try:
-            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+            payload = json.loads(result.stdout.strip().splitlines()[-1])
         except (json.JSONDecodeError, IndexError):
             return Run(error="the measurement process produced unreadable output")
         return Run(

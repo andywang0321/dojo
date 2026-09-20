@@ -132,7 +132,8 @@ def test_run_wizard_detects_env_key(tmp_path, fake_console, monkeypatch):
 
 
 def test_run_wizard_detects_existing_dotenv_key(tmp_path, fake_console):
-    """A key already in the dotenv skips the prompt and is left untouched."""
+    """A key already in the dotenv skips the prompt, is left untouched, and now
+    also names its provider (v0.13: the dotenv records DOJO_PROVIDER)."""
     (tmp_path / ".env").write_text("DEEPSEEK_API_KEY=sk-existing\n")
     console = fake_console([""])
     summary = run_wizard(
@@ -145,7 +146,9 @@ def test_run_wizard_detects_existing_dotenv_key(tmp_path, fake_console):
         key_getter=lambda: (_ for _ in ()).throw(AssertionError("prompted")),
     )
     assert summary["key_detected"] is True
-    assert (tmp_path / ".env").read_text().strip() == "DEEPSEEK_API_KEY=sk-existing"
+    content = (tmp_path / ".env").read_text()
+    assert "DEEPSEEK_API_KEY=sk-existing" in content
+    assert "DOJO_PROVIDER=deepseek" in content
 
 
 def test_run_wizard_skip_detection_respects_flag(tmp_path, fake_console, monkeypatch):
@@ -166,3 +169,49 @@ def test_run_wizard_skip_detection_respects_flag(tmp_path, fake_console, monkeyp
     )
     assert summary["key_detected"] is False
     assert not (tmp_path / ".env").exists()
+
+
+def test_the_wizard_can_be_pinned_to_a_provider(tmp_path, fake_console):
+    """`dojo setup --provider anthropic` stores the key under Anthropic's
+    variable and records the choice, so `dojo` starts on Claude."""
+    console = fake_console([""])  # Enter accepts the default name
+    summary = run_wizard(
+        console,
+        dotenv_path=tmp_path / ".env",
+        conf_path=tmp_path / "dojo.conf",
+        db_path=tmp_path / "dojo.db",
+        problems_dir=tmp_path / "problems",
+        default_name="andy",
+        key_getter=lambda: "sk-ant-test",
+        detect_env_key=False,
+        provider_override="anthropic",
+    )
+    content = (tmp_path / ".env").read_text()
+    assert "ANTHROPIC_API_KEY=sk-ant-test" in content
+    assert "DOJO_PROVIDER=anthropic" in content
+    assert summary["key_detected"] is False
+
+
+def test_the_wizard_detects_a_non_default_provider_key(tmp_path, fake_console, monkeypatch):
+    """An OPENAI_API_KEY in the environment selects OpenAI — the wizard used to
+    look for DeepSeek's variable only, so an OpenAI user was prompted for a key
+    they had already exported."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-env")
+    for name in ("DEEPSEEK_API_KEY", "DOJO_DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+                 "DOJO_OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    console = fake_console([""])  # the name prompt; the key must not be asked for
+    summary = run_wizard(
+        console,
+        dotenv_path=tmp_path / ".env",
+        conf_path=tmp_path / "dojo.conf",
+        db_path=tmp_path / "dojo.db",
+        problems_dir=tmp_path / "problems",
+        default_name="andy",
+        key_getter=lambda: (_ for _ in ()).throw(AssertionError("prompted")),
+    )
+    assert summary["key_detected"] is True
+    content = (tmp_path / ".env").read_text()
+    assert "OPENAI_API_KEY=sk-openai-env" in content
+    assert "DOJO_PROVIDER=openai" in content
+    assert "openai" in console.text

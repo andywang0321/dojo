@@ -138,3 +138,35 @@ After review + reflection, the session continues with `polish` (re-judge + re-me
 ## Per-pattern score trends (v0.4)
 
 `db.review_trends` aggregates the reviewer's rubric per pattern with recency-linear weighting (the oldest of n attempts weighs 1, the newest n). Rendered as the "Score trends per pattern" table in `dojo progress`. Missing or malformed reviews are skipped.
+
+## Verdicts and containment (v0.13)
+
+`run_cases` returns one of four statuses, and they mean different things:
+
+| Status | Meaning |
+|---|---|
+| `correct` | every case passed |
+| `wrong_answer` | every case *ran*; at least one value disagreed |
+| `error` | at least one case raised (or the harness itself could not run) — a crash is not a wrong answer, and the two need different coaching |
+| `timed_out` | the wall clock expired; per-case results are unavailable |
+
+An **empty case list is refused** (`status="error"`, label `no cases`): `all_passed`
+is true for zero cases, so a problem with neither visible tests nor a generator
+used to be a free solve. A problem is curated only when its `visible_tests`
+*parses* to a non-empty list — the old guard tested the truthiness of the JSON
+string, so `"[]"` slipped through.
+
+Containment, in the parent's hands (`dojo/proc.py`): user output is collected
+into temp files and read back capped (a print loop used to reach ~1.9 GB of RAM
+in three seconds, and the *probe* could grow dojo's own memory to 1.75 GB by
+capturing the stderr it routes prints to); the child runs in its own session and
+its whole process group is killed on timeout (a spawned grandchild once outlived
+a `timed_out` run); the harness sets address-space, file-size and CPU limits on
+itself; and the result is read as the last parseable line, so a late print from a
+thread or an `atexit` handler cannot corrupt the protocol.
+
+The student's code still executes in the same process as the harness, so it can
+in principle patch the comparators and rewrite its own verdict. That is a
+deliberate trade — dojo is a private two-person tool and the judge is not a
+security boundary — but it is worth knowing that `import dojo` from a solution
+also exposes the oracles. Do not describe the subprocess as a sandbox.

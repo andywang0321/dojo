@@ -361,3 +361,102 @@ def test_due_comparisons_survive_a_naive_timestamp(db):
     assert scheduler.due_now_count(db, uid) == 0
     assert scheduler.due_next_day_count(db, uid) == 1
     assert scheduler.due_cards(db, uid) == []
+
+
+# ------------------------------------- idempotency + SQL hygiene (v0.13)
+
+
+def test_record_grade_refuses_an_out_of_range_grade(db):
+    """`max(1, min(4, …))` silently read 0 as a lapse and 5+ as "easy" (x2.61 on
+    the whole grown stability) — a landmine for the next caller."""
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_card(db, uid, "stack")
+    for bad in (0, 5, -1, 99):
+        with pytest.raises(ValueError):
+            scheduler.record_grade(db, card, bad)
+    assert db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"] == 0
+
+
+def test_record_grade_can_defer_its_commit(db):
+    """The card update and `attempts.recall_grade` describe one event; the caller
+    pairs them in a single transaction so a crash cannot apply the grade twice."""
+    from dojo.db import get_or_create_user, connect
+
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_card(db, uid, "stack")
+    scheduler.record_grade(db, card, 2, commit=False)
+    assert db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"] == 1
+    db.rollback()
+    assert db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"] == 0
+
+
+def test_due_cards_has_a_deterministic_tie_break(db):
+    """Backfill gives every card the same `due_at`, so without a tie-break a
+    limited fetch returned an arbitrary subset in unspecified order."""
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    for pattern in ("trees", "stack", "heap"):
+        scheduler.ensure_card(db, uid, pattern, due_immediately=True)
+    order = [r["pattern"] for r in scheduler.due_cards(db, uid)]
+    assert order == ["heap", "stack", "trees"]
+
+
+def test_backfill_counts_cards_created_and_skips_existing(db):
+    from dojo.db import dumps_json, get_or_create_user, now
+
+    uid = get_or_create_user(db, "andy")
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
+        "function_name, visible_tests, created_at) VALUES "
+        "('p1','P','Easy','stack','s','f',?,?)",
+        (dumps_json([{"args": [[1]], "expected": 1}]), now()),
+    )
+    db.commit()
+    pid = db.execute("SELECT id FROM problems").fetchone()["id"]
+    db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, "
+        "submitted_at, hint_count) VALUES (?, ?, 'solve', 'correct', ?, ?, 1)",
+        (uid, pid, now(), now()),
+    )
+    db.commit()
+
+    assert scheduler.backfill_cards(db, uid) == 1
+    assert scheduler.backfill_cards(db, uid) == 0  # idempotent, and it says so
+    card = db.execute("SELECT * FROM pattern_cards").fetchone()
+    # One hint means "hard" (grade 2), which raises initial difficulty above the
+    # flat "good" default: the card is seeded from the solve's own evidence.
+    assert card["stability"] == scheduler.initial_stability(2)
+    assert card["difficulty"] > scheduler.initial_difficulty(3)
+
+
+def test_warmup_problem_ignores_untimestamped_attempts(db):
+    """NULL sorts first in ASC, so a correct attempt with no `submitted_at`
+    pinned the same problem as the warm-up forever — the v0.11 failure mode,
+    reintroduced for NULL rows."""
+    from dojo.db import dumps_json, get_or_create_user, now
+
+    uid = get_or_create_user(db, "andy")
+    for slug in ("a", "b"):
+        db.execute(
+            "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
+            "function_name, visible_tests, created_at) VALUES (?,?, 'Easy','stack','s','f',?,?)",
+            (slug, slug.upper(), dumps_json([{"args": [[1]], "expected": 1}]), now()),
+        )
+    db.commit()
+    ids = {r["slug"]: r["id"] for r in db.execute("SELECT id, slug FROM problems")}
+    db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
+        "VALUES (?, ?, 'solve', 'correct', ?, NULL)",
+        (uid, ids["a"], now()),
+    )
+    db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
+        "VALUES (?, ?, 'solve', 'correct', ?, ?)",
+        (uid, ids["b"], now(), now()),
+    )
+    db.commit()
+    picked = scheduler.warmup_problem(db, uid, "stack")
+    assert picked["slug"] == "b"  # the one with a real timestamp
