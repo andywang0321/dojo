@@ -958,7 +958,7 @@ def _show_card_update(
             f"pattern: [bold]{card['pattern']}[/bold]\n"
             f"stability: {card['stability']:.2f} → {summary['stability']:.2f} days\n"
             f"difficulty: {card['difficulty']:.1f} → {summary['difficulty']:.1f}\n"
-            f"next warm-up: [bold]{scheduler.humanize_due(summary['due_at'])}[/bold]",
+            f"next warm-up: [bold]{scheduler.due_phrase(summary['due_at'])}[/bold]",
             title="Card updated — lapse" if lapse else "Card updated",
             border_style="red" if lapse else "green",
         )
@@ -1323,7 +1323,10 @@ def run_warmups(
     user_id = get_or_create_user(conn, user_name)
     cards = scheduler.due_cards(conn, user_id, limit=limit)
     if not cards:
-        console.print("[green]No warm-ups due — the scheduler says you're fresh.[/green]")
+        console.print(
+            "[green]No warm-ups due[/green] — "
+            f"[dim]next warm-up {scheduler.due_hint(conn, user_id)}.[/dim]"
+        )
         return []
     console.print(f"[bold]Warm-up: {len(cards)} pattern card(s) due.[/bold]")
     outcomes = []

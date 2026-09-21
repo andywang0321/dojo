@@ -90,6 +90,34 @@ in [v0.14](v0.14.md) Increment 1.*
 13. **`problems.source` is a dead column** — always `'seed'`, even for the 155
     fetched/lc-numbered rows, so provenance is unrecoverable.
 
+## Reported: "no warm-up for days" (2026-09-21)
+
+A live session reported "tomorrow: 1 card(s) due" and then got no warm-up the next
+morning. Diagnosis: the card was created at 23:48 and due at 23:48 *the next
+evening* — the footer counted a rolling 24 h and called it "tomorrow", and a
+morning session never sees a card that comes due at night. Fixed: the status
+line, the footer and `dojo warmup` now name the actual next due moment
+(`scheduler.due_phrase` / `due_summary` / `due_hint`), and `dojo progress`'s "due
+now" column normalizes with `datetime()` like the scheduler does.
+
+**Decision (2026-09-21): keep exact instants, keep per-pattern cards.** The
+deeper mechanism is real — due instants inherit the *time of day* you practised,
+so a 23:48 session schedules a 23:48 warm-up and a morning session sees nothing —
+but the two candidate fixes were both declined in favour of the honest report:
+- *day-granular due dates* (Anki-style: due on day D means due from the start of
+  day D, with a "day starts at" hour) — declined; continuous-time FSRS stays.
+- *per-problem cards* (or several problems per due card) — declined; the pattern
+  stays the card unit (v0.11).
+
+What this means in practice: a warm-up can land in the evening when you practise
+in the morning, and the status line now tells you exactly when it will land
+instead of calling it "tomorrow". Two levers remain, both cheap if wanted later:
+an explicit opt-in to serve a card that is due later today (`dojo warmup --any`,
+which is *correct* FSRS — an early review simply grows stability less, because
+`(1 - R)` shrinks as R rises), and the recall grade, since grade 4 multiplies the
+grown stability by 2.61 — three of the four warm-ups in the live DB were graded
+"easy", which is most of why the intervals now read 23/34/50 days.
+
 ## v0.13 Stage 0 — shipped (the trust subset)
 
 See [v0.13](v0.13.md) for the full record. In one line each: the leak audit fails

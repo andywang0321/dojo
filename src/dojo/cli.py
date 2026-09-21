@@ -450,7 +450,10 @@ def _cmd_roadmap(args) -> int:
 
 
 def _print_footer(console: Console, conn, user_id: int) -> None:
-    parts = [f"tomorrow: {scheduler.due_next_day_count(conn, user_id)} card(s) due"]
+    # "next warm-up: later today at 23:48", not "tomorrow: 1 card(s) due" — the
+    # old line counted a rolling 24 hours and called it tomorrow, so a card due
+    # tonight was announced as tomorrow's (v0.13 follow-up).
+    parts = [scheduler.due_summary(conn, user_id)]
     trends = review_trends(conn, user_id)
     if trends:
         best = max(trends, key=lambda t: t["overall"])
@@ -486,8 +489,7 @@ def _cmd_day(args) -> int:
             console.print(f"[red]{exc}[/red]")
             return 1
         user_id = get_or_create_user(conn, user)
-        due = scheduler.due_now_count(conn, user_id)
-        console.print(f"[dim]Status: {due} warm-up card(s) due.[/dim]")
+        console.print(f"[dim]Status: {scheduler.due_summary(conn, user_id)}.[/dim]")
         if not args.skip_warmup:
             run_warmups(conn, console, backend, user, limit=2)
         slug = args.slug
@@ -1347,7 +1349,10 @@ def _cmd_progress(args) -> int:
                 """
                 SELECT pattern,
                        COUNT(*) AS cards,
-                       SUM(CASE WHEN due_at <= ? THEN 1 ELSE 0 END) AS due,
+                       -- `datetime()` on both sides: a raw string compare
+                       -- disagreed with `due_cards` for any writer that used
+                       -- SQLite's own naive `datetime('now')` form (v0.13).
+                       SUM(CASE WHEN datetime(due_at) <= datetime(?) THEN 1 ELSE 0 END) AS due,
                        ROUND(AVG(stability), 2) AS avg_stability,
                        ROUND(AVG(difficulty), 1) AS avg_difficulty
                 FROM pattern_cards WHERE user_id = ? GROUP BY pattern

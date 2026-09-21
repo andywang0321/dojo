@@ -770,3 +770,62 @@ def test_input_ending_at_a_prompt_stops_cleanly(cli_env, capsys):
 
     assert "Input ended" in capsys.readouterr().out
     assert list(workbench.glob("*.state.json")), "the session must remain resumable"
+
+
+def test_the_footer_names_when_the_next_warm_up_arrives(cli_env):
+    """End to end: a card due in 13 hours makes the footer say so — the old line
+    ("tomorrow: 1 card(s) due") sent a real user looking for a warm-up that was
+    not due until late that night."""
+    from datetime import datetime, timedelta, timezone
+
+    from dojo.cli import main
+    from dojo.db import connect, now
+
+    rec, db_path, _workbench, _problems = cli_env
+    uid = _seed_user(db_path)
+    conn = connect(db_path)
+    conn.execute(
+        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, reps, "
+        "lapses, due_at, created_at) VALUES (?, 'stack', 1.0, 5.0, 0, 0, ?, ?)",
+        (uid, (datetime.now(timezone.utc) + timedelta(hours=13)).isoformat(timespec="seconds"), now()),
+    )
+    conn.commit()
+    conn.close()
+
+    assert main(["list"]) == 0  # a non-session command, so no session runs
+    rec.out.clear()
+    assert main(["day", "valid_parentheses"]) == 0  # then a full session, all `quit`
+    assert "next warm-up" in rec.text
+    assert "tomorrow:" not in rec.text
+
+
+def test_progress_counts_due_cards_the_way_the_scheduler_does(db, tmp_path, monkeypatch, capsys):
+    """`dojo progress` compared `due_at <= now()` as *strings* while the
+    scheduler normalized with `datetime()`. A row written by SQLite's own naive
+    `datetime('now')` form sorts before the ISO form, so the table said "due now"
+    for a card the scheduler would not serve (v0.13 audit, S2.15)."""
+    from datetime import datetime, timedelta, timezone
+
+    from dojo.cli import _cmd_progress
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    naive_future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S")
+    db.execute(
+        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, reps, "
+        "lapses, due_at, created_at) VALUES (?, 'stack', 1.0, 5.0, 0, 0, ?, ?)",
+        (uid, naive_future, naive_future),
+    )
+    db.commit()
+
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.cli.load_conf", lambda *a, **k: {"user": "andy"})
+    import argparse
+
+    assert _cmd_progress(argparse.Namespace(_user="andy")) == 0
+    out = " ".join(capsys.readouterr().out.split())
+    assert "stack" in out
+    # The card is five days out, so the "due now" column must read 0 — the raw
+    # string compare read it as due.
+    row = out[out.index("stack"):]
+    assert " 0 " in row[:40], row[:80]

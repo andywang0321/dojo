@@ -327,17 +327,6 @@ def test_backfill_creates_due_cards(db):
     assert len(cards) == 1 and cards[0]["pattern"] == "arrays_and_hashing"
 
 
-def test_humanize_due():
-    from datetime import datetime, timedelta, timezone
-
-    soon = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(timespec="seconds")
-    later = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(timespec="seconds")
-    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(timespec="seconds")
-    assert "30 minutes" in scheduler.humanize_due(soon)
-    assert "3.0 days" in scheduler.humanize_due(later)
-    assert scheduler.humanize_due(past) == "overdue"
-
-
 def test_due_comparisons_survive_a_naive_timestamp(db):
     """Regression: due_at is TEXT, and a naive stamp ("2026-01-01 09:00:00")
     sorts *before* the ISO form dojo writes ("2026-01-01T09:00:00+00:00") because
@@ -460,3 +449,68 @@ def test_warmup_problem_ignores_untimestamped_attempts(db):
     db.commit()
     picked = scheduler.warmup_problem(db, uid, "stack")
     assert picked["slug"] == "b"  # the one with a real timestamp
+
+
+# ---------------------------------- honest due reporting (v0.13 follow-up)
+# A real session reported "tomorrow: 1 card(s) due" and then got no warm-up the
+# next morning. The card was due at 23:48 the same evening: the footer counted a
+# *rolling 24 hours* and called it "tomorrow", and a morning session never sees a
+# card that only comes due at night.
+
+
+def _card_due_in(conn, user_id, *, hours=None, days=None, pattern="stack"):
+    from datetime import datetime, timedelta, timezone
+
+    delta = timedelta(hours=hours or 0, days=days or 0)
+    due = (datetime.now(timezone.utc) + delta).isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, "
+        "reps, lapses, due_at, created_at) VALUES (?, ?, 1.0, 5.0, 0, 0, ?, ?)",
+        (user_id, pattern, due, now()),
+    )
+    conn.commit()
+
+
+def test_the_footer_no_longer_calls_tonight_tomorrow(db):
+    """The reported symptom, pinned: a card due later *today* (in the student's
+    own timezone) must not be announced as tomorrow's warm-up.
+
+    "Now" is injected and the instants are built in local terms, because "later
+    today" depends on where the clock is — the first version of this test passed
+    or failed by the hour it ran at."""
+    from datetime import datetime, timedelta, timezone
+
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    now_utc = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    local = now_utc.astimezone()
+    tonight = local.replace(hour=23, minute=30).astimezone(timezone.utc)
+    _card_due_in(db, uid, hours=(tonight - now_utc).total_seconds() / 3600)
+
+    summary = scheduler.due_summary(db, uid)
+    assert summary.startswith("next warm-up"), summary
+    assert "later today at 23:30" in scheduler.due_phrase(tonight.isoformat(), now_utc)
+    assert "tomorrow" not in scheduler.due_phrase(tonight.isoformat(), now_utc)
+    assert "due now" not in summary
+
+
+def test_due_summary_distinguishes_due_now_from_coming_up(db):
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    _card_due_in(db, uid, hours=-1)  # overdue
+    assert "1 card(s) due now" in scheduler.due_summary(db, uid)
+    _card_due_in(db, uid, days=20, pattern="heap")  # far in the future
+    assert "1 card(s) due now" in scheduler.due_summary(db, uid)
+    _card_due_in(db, uid, hours=-2, pattern="trees")  # a second overdue card
+    assert "2 card(s) due now" in scheduler.due_summary(db, uid)
+
+
+def test_next_due_returns_the_earliest_card(db):
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    _card_due_in(db, uid, days=30, pattern="stack")
+    _card_due_in(db, uid, days=2, pattern="heap")
+    assert scheduler.next_due(db, uid)["pattern"] == "heap"

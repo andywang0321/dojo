@@ -517,18 +517,74 @@ def defer(conn: sqlite3.Connection, card: sqlite3.Row, days: float = 1.0) -> str
     return due
 
 
-def humanize_due(due_iso: str) -> str:
-    delta = _parse_utc(due_iso) - datetime.now(timezone.utc)
-    minutes = delta.total_seconds() / 60
-    if minutes < 0:
-        return "overdue"
-    if minutes < 60:
-        return f"in {max(1, round(minutes))} minutes"
-    hours = minutes / 60
-    if hours < 24:
-        return f"in {round(hours)} hours"
-    days = hours / 24
-    return f"in {round(days, 1)} days"
+def due_phrase(due_iso: str, now_utc: datetime | None = None) -> str:
+    """When a due moment lands, in the student's own terms.
+
+    "later today at 23:48" / "tomorrow at 04:00" / "in 18 days (Oct 10)". This
+    exists because the session footer used to say **"tomorrow: N card(s) due"**
+    for anything inside a *rolling 24 hours* — so a card due at 23:48 tonight was
+    announced as tomorrow's warm-up. A real session then reported exactly the
+    confusing result: the same card read as "due tomorrow" for a full day, and
+    the morning session that followed was given no warm-up at all (v0.13
+    follow-up; see roadmap/next.md).
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    due = _parse_utc(due_iso)
+    now_local = now_utc.astimezone()
+    due_local = due.astimezone()
+    delta = due - now_utc
+    days = delta.total_seconds() / 86400
+    clock = due_local.strftime("%H:%M")
+    if delta.total_seconds() < 0:
+        overdue_days = -days
+        if overdue_days < 1:
+            return f"overdue since {clock}"
+        return f"overdue by {round(overdue_days, 1)} days"
+    if due_local.date() == now_local.date():
+        return f"later today at {clock}"
+    if due_local.date() == (now_local.date() + timedelta(days=1)):
+        return f"tomorrow at {clock}"
+    if days < 1:
+        return f"in {max(1, round(days * 24))} hours ({due_local.strftime('%a')} {clock})"
+    if days < 30:
+        return f"in {round(days)} days ({due_local.strftime('%b %d')})"
+    months = max(1, round(days / 30))
+    return f"in {months} month{'s' if months != 1 else ''} ({due_local.strftime('%b %d')})"
+
+
+def next_due(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row | None:
+    """The card that comes due next — or the most overdue one, when any is.
+
+    The daily loop's status line and footer use this so a student who is shown
+    *no* warm-up is also told when the next one arrives, instead of having to
+    infer it from a count over a rolling day."""
+    return conn.execute(
+        "SELECT * FROM pattern_cards WHERE user_id = ? "
+        "ORDER BY datetime(due_at) ASC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+
+
+def due_hint(conn: sqlite3.Connection, user_id: int) -> str:
+    """When the next warm-up lands, as a bare phrase ("later today at 23:48"),
+    or a note that no card exists yet."""
+    card = next_due(conn, user_id)
+    if card is None:
+        return "no pattern cards yet"
+    return due_phrase(card["due_at"])
+
+
+def due_summary(conn: sqlite3.Connection, user_id: int) -> str:
+    """One honest clause about the warm-up schedule — the status line and the
+    session footer, both of which used to say "tomorrow" for anything inside a
+    rolling 24 hours."""
+    due = due_now_count(conn, user_id)
+    if due:
+        return f"{due} card(s) due now"
+    card = next_due(conn, user_id)
+    if card is None:
+        return "no pattern cards yet — your first solved problem creates one"
+    return f"next warm-up {due_phrase(card['due_at'])}"
 
 
 def due_now_count(conn: sqlite3.Connection, user_id: int) -> int:
