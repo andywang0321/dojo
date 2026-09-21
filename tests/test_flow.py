@@ -12,7 +12,7 @@ import textwrap
 import dojo.judge
 
 from dojo import complexity
-from dojo.session.flow import run_day
+from dojo.session.flow import run_day, run_warmups
 from dojo.tutor.backend import MockBackend
 
 SOLUTION = textwrap.dedent(
@@ -266,7 +266,7 @@ def test_solve_creates_pattern_card(db, fake_console, monkeypatch, tmp_path):
     attempt = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert attempt["kind"] == "solve"
     card = db.execute(
-        "SELECT * FROM pattern_cards WHERE pattern = 'stack'"
+        "SELECT * FROM item_cards WHERE pattern = 'stack'"
     ).fetchone()
     assert card is not None
     assert "stack" in card["last_reflection"]
@@ -301,14 +301,14 @@ def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path)
 
     _seed_problem(db)
     uid = get_or_create_user(db, "andy")
-    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack", due_immediately=True)
     # Age the card a day so the review has a real R < 1 and stability moves.
     db.execute(
-        "UPDATE pattern_cards SET stability = 1.0, last_review_at = datetime('now', '-1 day') WHERE id = ?",
+        "UPDATE item_cards SET stability = 1.0, last_review_at = datetime('now', '-1 day') WHERE id = ?",
         (card["id"],),
     )
     db.commit()
-    card = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    card = db.execute("SELECT * FROM item_cards WHERE id = ?", (card["id"],)).fetchone()
 
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
@@ -334,7 +334,7 @@ def test_warmup_flow_records_card_grade(db, fake_console, monkeypatch, tmp_path)
     # is persisted on the attempt, not just folded into the card aggregates.
     assert attempt["recall_grade"] == 3
 
-    updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    updated = db.execute("SELECT * FROM item_cards WHERE id = ?", (card["id"],)).fetchone()
     assert updated["reps"] == 1
     assert updated["stability"] > 1.0
     assert updated["due_at"] > card["due_at"]
@@ -378,8 +378,8 @@ def test_warmup_quit_records_nothing(db, fake_console, monkeypatch, tmp_path):
 
     _seed_problem(db)
     uid = get_or_create_user(db, "andy")
-    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
-    db.execute("UPDATE pattern_cards SET stability = 1.0 WHERE id = ?", (card["id"],))
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack", due_immediately=True)
+    db.execute("UPDATE item_cards SET stability = 1.0 WHERE id = ?", (card["id"],))
     db.commit()
 
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
@@ -393,7 +393,7 @@ def test_warmup_quit_records_nothing(db, fake_console, monkeypatch, tmp_path):
     assert outcome == "quit"
 
     assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
-    updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    updated = db.execute("SELECT * FROM item_cards WHERE id = ?", (card["id"],)).fetchone()
     assert updated["lapses"] == 0
     assert updated["reps"] == 0
     assert updated["stability"] == 1.0
@@ -434,7 +434,7 @@ def test_repeated_warmups_create_distinct_attempts(db, fake_console, monkeypatch
 
     _seed_problem(db)
     uid = get_or_create_user(db, "andy")
-    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack", due_immediately=True)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
     _fast_probe(monkeypatch)
@@ -448,7 +448,7 @@ def test_repeated_warmups_create_distinct_attempts(db, fake_console, monkeypatch
         MockBackend(), "valid_parentheses", "andy", warmup=True, card=card,
     )
     assert first == "warmup_done"
-    card = db.execute("SELECT * FROM pattern_cards WHERE pattern = 'stack'").fetchone()
+    card = db.execute("SELECT * FROM item_cards WHERE pattern = 'stack'").fetchone()
     second = run_day(
         db, fake_console(["submit", "O(n) one pass", "O(n) stack", "", "4"], actions={"submit": write_solution}),
         MockBackend(), "valid_parentheses", "andy", warmup=True, card=card,
@@ -805,7 +805,7 @@ def test_warmup_rejects_learn(db, fake_console, monkeypatch, tmp_path):
 
     _seed_problem(db)
     uid = get_or_create_user(db, "andy")
-    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack", due_immediately=True)
     monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
     monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
 
@@ -816,7 +816,7 @@ def test_warmup_rejects_learn(db, fake_console, monkeypatch, tmp_path):
     ) == "quit"
     assert "isn't available" in console.text
     assert db.execute("SELECT COUNT(*) AS n FROM learn_sessions").fetchone()["n"] == 0
-    updated = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    updated = db.execute("SELECT * FROM item_cards WHERE id = ?", (card["id"],)).fetchone()
     assert updated["lapses"] == 0
 
 
@@ -1435,7 +1435,7 @@ def test_a_resumed_warmup_does_not_grade_the_card_twice(db, fake_console, monkey
     workbench.mkdir(parents=True)
 
     uid = get_or_create_user(db, "andy")
-    card = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack", due_immediately=True)
 
     answers = ["submit", "O(n) one pass", "O(n) stack", "", "reflection", "3"]
     console = fake_console(
@@ -1446,7 +1446,7 @@ def test_a_resumed_warmup_does_not_grade_the_card_twice(db, fake_console, monkey
         db, console, MockBackend(), "valid_parentheses", "andy",
         open_editor=False, warmup=True, card=card,
     ) == "warmup_done"
-    after_first = db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"]
+    after_first = db.execute("SELECT reps FROM item_cards").fetchone()["reps"]
     attempt_id = db.execute("SELECT id FROM attempts ORDER BY id DESC LIMIT 1").fetchone()["id"]
 
     # Simulate the crash window: the state file survived, the grade is on the
@@ -1469,7 +1469,7 @@ def test_a_resumed_warmup_does_not_grade_the_card_twice(db, fake_console, monkey
     )
     assert outcome == "warmup_done"
     assert "not grading it twice" in console2.text
-    assert db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"] == after_first
+    assert db.execute("SELECT reps FROM item_cards").fetchone()["reps"] == after_first
     assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 1
 
 
@@ -1728,3 +1728,115 @@ def test_quit_before_submitting_still_records_nothing(db, fake_console, monkeypa
     assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "quit"
     assert "nothing recorded" in console.text
     assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0
+
+
+# ------------------------------------- per-problem cards (v0.13 follow-up)
+# The unit became the solved problem, not the pattern: a pattern card reported
+# one stability for problems with wildly different ones, and in the live DB that
+# hid ten solved problems which had never been recalled once.
+
+
+def _seed_extra_problem(db, slug, pattern="stack", fn="solve_it"):
+    from dojo.db import dumps_json, now
+
+    db.execute(
+        """
+        INSERT INTO problems (slug, title, difficulty, pattern, statement,
+            function_name, expected_time, expected_space, visible_tests, signature, created_at)
+        VALUES (?, ?, 'Easy', ?, 's', ?, 'O(n)', 'O(n)', ?, ?, ?)
+        """,
+        (
+            slug,
+            f"T {slug}",
+            pattern,
+            fn,
+            dumps_json([{"args": [[1]], "expected": 1}]),
+            dumps_json("(nums: list[int]) -> int"),
+            now(),
+        ),
+    )
+    db.commit()
+    return db.execute("SELECT * FROM problems WHERE slug = ?", (slug,)).fetchone()
+
+
+def test_a_warm_up_serves_the_cards_own_problem(db, fake_console, monkeypatch, tmp_path):
+    """Two cards in one pattern are two memories: the warm-up serves *that*
+    problem, not whichever one represented the pattern."""
+    from dojo import scheduler
+    from dojo.db import get_or_create_user
+
+    _seed_problem(db)  # valid_parentheses (stack)
+    # A slug with no registry entry, so only its one visible test runs (a real
+    # slug would drag in the live problem's generated cases).
+    _seed_extra_problem(db, "extra_stack_problem")
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_item_card(
+        db, uid, "extra_stack_problem", "stack", due_immediately=True
+    )
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+
+    console = fake_console(
+        ["submit", "O(n)", "O(n)", "", "3"],
+        actions={
+            "submit": lambda: (workbench / "extra_stack_problem.py").write_text(
+                "def solve_it(nums: list[int]) -> int:\n    return 1\n"
+            )
+        },
+    )
+    outcomes = run_warmups(db, console, MockBackend(), "andy", limit=1)
+
+    assert outcomes == ["warmup_done"]
+    assert (workbench / "extra_stack_problem.py").exists()  # the card's problem
+    assert not (workbench / "valid_parentheses.py").exists()
+    row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["kind"] == "warmup"
+    assert row["problem_id"] == db.execute(
+        "SELECT id FROM problems WHERE slug = 'extra_stack_problem'"
+    ).fetchone()["id"]
+    assert card["slug"] == "extra_stack_problem"
+
+
+def test_solving_creates_a_card_for_that_problem(db, fake_console, monkeypatch, tmp_path):
+    """The first solve creates the memory card for the *problem* (its own slug),
+    carrying the pattern as the rollup key."""
+    from dojo.db import get_or_create_user
+
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        ["submit", "O(n) one pass", "O(n) stack", "", "the stack", "done"],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+
+    cards = db.execute("SELECT * FROM item_cards").fetchall()
+    assert len(cards) == 1
+    assert cards[0]["slug"] == "valid_parentheses"
+    assert cards[0]["pattern"] == "stack"
+    assert cards[0]["last_reflection"] == "the stack"
+
+
+def test_a_warm_up_card_that_cannot_be_served_says_why(db, fake_console, monkeypatch, tmp_path):
+    """A card whose problem is no longer curated must name the problem and the
+    audit command, instead of deferring in silence (v0.13 audit, S2.11)."""
+    from dojo import scheduler
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_item_card(db, uid, "ghost_problem", "stack", due_immediately=True)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+
+    console = fake_console([])
+    assert run_warmups(db, console, MockBackend(), "andy", limit=1) == []
+    assert "can no longer be re-solved" in console.text
+    assert "dojo report ghost_problem" in console.text
+    # Deferred a day rather than looping on the same card forever.
+    assert scheduler.due_cards(db, uid) == []

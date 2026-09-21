@@ -184,7 +184,7 @@ def test_a_migrated_db_matches_a_fresh_one(tmp_path):
         finally:
             conn.close()
 
-    for table in ("attempts", "problems", "users", "pattern_cards"):
+    for table in ("attempts", "problems", "users", "pattern_cards", "item_cards"):
         assert columns(fresh, table) == columns(legacy, table), table
 
 

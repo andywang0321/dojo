@@ -1,5 +1,31 @@
 # Retention: the scheduler and warm-ups
 
+## What a card is (v0.13 follow-up)
+
+**One card per solved problem.** A warm-up re-solves that specific problem from a
+blank template, and its grade updates that problem's stability and difficulty.
+
+The unit used to be the *pattern*, and the live data shows why that failed:
+`arrays_and_hashing` held one card reporting 34 days of stability while eight of
+its ten solved problems had never been recalled once; `valid_parentheses` alone
+earned 91 days, which the `stack` card diluted to 50. A single memory cannot
+describe problems that decay at different rates, and the schedule it produced was
+an average nobody had actually demonstrated.
+
+`pattern` survives as the rollup key: `dojo progress` shows per-pattern counts,
+mean stability and — the honest signal — the **weakest** card in the pattern,
+while `dojo progress --problems` lists every card, coldest due first.
+
+**Migration.** Existing pattern cards were replaced by a replay of the attempt
+log: each solved problem's own state is reconstructed from its submit rows
+(`kind`, `recall_grade`, `submitted_at`). Grades persisted before v0.11 were
+folded into card aggregates and are gone — those eight recalls replay as "good",
+the same assumption the old aggregates encoded. Problems that were solved but
+never recalled are genuinely overdue (FSRS's initial stability is under a day), so
+the rebuild *spreads* that backlog over a week: one card a day, driest first. That
+is a capacity decision, not a memory claim, and `dojo rebuild-cards --spread N`
+redoes it with a different window.
+
 ## FSRS-4.5
 
 Each (user, pattern) card carries **stability S** (days to 90% recall) and

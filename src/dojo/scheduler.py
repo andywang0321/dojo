@@ -144,57 +144,68 @@ def _due_iso(days: float) -> str:
     )
 
 
-def ensure_card(
+def ensure_item_card(
     conn: sqlite3.Connection,
     user_id: int,
-    pattern: str,
+    slug: str,
+    pattern: str | None = None,
     reflection: str | None = None,
     due_immediately: bool = False,
     grade: int | None = None,
+    due_at: str | None = None,
 ) -> sqlite3.Row:
-    """Create the card for (user, pattern) if missing; optionally store the
-    latest reflection. Returns the card row.
+    """Create the memory card for one solved **problem** if it is missing;
+    optionally store that problem's reflection. Returns the card row.
 
-    ``grade`` seeds the card's initial stability and difficulty. A first solve
-    carries real evidence about the pattern in its hint count, so the caller
-    passes the grade that implies; without one the card is seeded "good"."""
+    The unit is the problem (v0.13 follow-up), not the pattern: a pattern card
+    reported one stability for problems with wildly different ones, and in the
+    live data that hid ten solved problems which had never been recalled once.
+    ``pattern`` rides along as the rollup key. ``due_at`` lets a caller place the
+    first review deliberately (the migration spreads a backlog with it)."""
     row = conn.execute(
-        "SELECT * FROM pattern_cards WHERE user_id = ? AND pattern = ?",
-        (user_id, pattern),
+        "SELECT * FROM item_cards WHERE user_id = ? AND slug = ?", (user_id, slug)
     ).fetchone()
-    if row is None:
-        seed = DEFAULT_GRADE if grade is None else _grade(grade)
-        stability = initial_stability(seed)
-        due = now() if due_immediately else _due_iso(interval_days(stability))
-        conn.execute(
-            """
-            INSERT INTO pattern_cards
-                (user_id, pattern, stability, difficulty, reps, lapses,
-                 due_at, last_reflection, created_at)
-            VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)
-            """,
-            (
-                user_id,
-                pattern,
-                stability,
-                initial_difficulty(seed),
-                due,
-                reflection,
-                now(),
-            ),
-        )
-        conn.commit()
-        return conn.execute(
-            "SELECT * FROM pattern_cards WHERE user_id = ? AND pattern = ?",
-            (user_id, pattern),
-        ).fetchone()
-    if reflection:
-        conn.execute(
-            "UPDATE pattern_cards SET last_reflection = ? WHERE id = ?",
-            (reflection, row["id"]),
-        )
-        conn.commit()
-    return row
+    if row is not None:
+        if reflection:
+            conn.execute(
+                "UPDATE item_cards SET last_reflection = ? WHERE id = ?",
+                (reflection, row["id"]),
+            )
+            conn.commit()
+            return conn.execute(
+                "SELECT * FROM item_cards WHERE id = ?", (row["id"],)
+            ).fetchone()
+        return row
+    seed = DEFAULT_GRADE if grade is None else _grade(grade)
+    stability = initial_stability(seed)
+    if due_at is not None:
+        due = due_at
+    elif due_immediately:
+        due = now()
+    else:
+        due = _due_iso(interval_days(stability))
+    conn.execute(
+        """
+        INSERT INTO item_cards
+            (user_id, slug, pattern, stability, difficulty, reps, lapses,
+             due_at, last_reflection, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+        """,
+        (
+            user_id,
+            slug,
+            pattern,
+            stability,
+            initial_difficulty(seed),
+            due,
+            reflection,
+            now(),
+        ),
+    )
+    conn.commit()
+    return conn.execute(
+        "SELECT * FROM item_cards WHERE user_id = ? AND slug = ?", (user_id, slug)
+    ).fetchone()
 
 
 def _parse_utc(iso: str) -> datetime:
@@ -236,7 +247,7 @@ def record_grade(
     due = _due_iso(interval)
     conn.execute(
         """
-        UPDATE pattern_cards SET
+        UPDATE item_cards SET
             stability = ?, difficulty = ?, reps = reps + 1,
             lapses = lapses + ?, due_at = ?, last_review_at = ?
         WHERE id = ?
@@ -263,13 +274,13 @@ def due_cards(
     # ISO form dojo writes, so a card would read as overdue by a day. SQLite
     # parses both shapes, so normalizing here makes the schedule robust to any
     # writer rather than to exactly one.
-    # The pattern tie-break matters: `backfill_cards` gives every card the same
-    # `due_at` (second resolution), so without it a limited fetch returned an
-    # arbitrary subset in unspecified order (v0.13 audit, S2.11).
+    # The slug tie-break matters: a rebuild can give several cards the same
+    # `due_at`, so without it a limited fetch returned an arbitrary subset in
+    # unspecified order (v0.13 audit, S2.11).
     query = (
-        "SELECT * FROM pattern_cards WHERE user_id = ? "
+        "SELECT * FROM item_cards WHERE user_id = ? "
         "AND datetime(due_at) <= datetime(?) "
-        "ORDER BY datetime(due_at) ASC, pattern ASC"
+        "ORDER BY datetime(due_at) ASC, slug ASC"
     )
     params: list = [user_id, now()]
     if limit is not None:
@@ -278,42 +289,24 @@ def due_cards(
     return conn.execute(query, params).fetchall()
 
 
-def warmup_problem(
-    conn: sqlite3.Connection, user_id: int, pattern: str
+def item_problem(
+    conn: sqlite3.Connection, card: sqlite3.Row
 ) -> sqlite3.Row | None:
-    """The solved problem to re-solve for this pattern's warm-up: the one whose
-    *most recent* correct attempt is oldest (oldest memory = most worth
-    retrieving).
+    """The problem a card schedules, or None when it can no longer be served.
 
-    v0.11: the pick is aggregated per problem. Ordering every correct attempt
-    by submitted_at and taking the first instead selected the problem solved
-    earliest *ever* — a value that never ages, so the same problem came back
-    every time (valid_parentheses was served five times while four other solved
-    problems in that pattern were never revisited). Now practising a problem
-    pushes it to the back, which is the rotation the documentation claimed.
-
-    v0.13: `MAX(submitted_at)` goes through `datetime()` and NULL attempts are
-    excluded. A raw string max is the hazard `due_cards` already defends against
-    (a naive stamp sorts before the ISO form dojo writes), and NULL sorts *first*
-    in ASC — so a problem whose only correct attempt had no timestamp was pinned
-    as the warm-up forever, the exact v0.11 failure mode reintroduced for NULL
-    rows."""
+    Per-item cards make this lookup total: the card names its own problem, so
+    the old "which solved problem should represent this pattern today?" rotation
+    is gone (and with it the chance of the same problem coming back forever).
+    None means the problem was renamed, un-curated or removed from the bank —
+    the caller must say so rather than loop quietly (`defer` alone used to hide
+    that for days; v0.13 audit, S2.11)."""
     return conn.execute(
-        """
-        SELECT p.* FROM problems p
-        JOIN attempts a ON a.problem_id = p.id
-        WHERE a.user_id = ? AND a.status = 'correct' AND p.pattern = ?
-          AND a.submitted_at IS NOT NULL
-          AND p.function_name IS NOT NULL AND p.visible_tests IS NOT NULL
-        GROUP BY p.id
-        ORDER BY MAX(datetime(a.submitted_at)) ASC, p.id ASC
-        LIMIT 1
-        """,
-        (user_id, pattern),
+        "SELECT * FROM problems WHERE slug = ? AND function_name IS NOT NULL "
+        "AND visible_tests IS NOT NULL",
+        (card["slug"],),
     ).fetchone()
 
 
-@lru_cache(maxsize=1)
 def _roadmap_groups() -> list[dict]:
     """The roadmap data, loaded once per process (fail loudly at import if
     the vendored file is malformed)."""
@@ -414,7 +407,7 @@ def pick_new_problem(
           )
         ORDER BY
           COALESCE(
-              (SELECT AVG(c.stability) FROM pattern_cards c
+              (SELECT AVG(c.stability) FROM item_cards c
                WHERE c.user_id = ? AND c.pattern = p.pattern),
               0.0
           ) ASC,
@@ -459,59 +452,163 @@ def pick_practice_problem(
     ).fetchone()
 
 
-def backfill_cards(conn: sqlite3.Connection, user_id: int | None = None) -> int:
-    """Create a card for every (user, pattern) with a correct attempt, due
-    immediately — v0.1 solves deserve a first warm-up too.
+def rebuild_item_cards(
+    conn: sqlite3.Connection,
+    user_id: int,
+    *,
+    spread_days: int = 7,
+    print_note=None,
+) -> dict:
+    """Rebuild every per-problem card from the attempt log (v0.13 follow-up).
 
-    Returns the number of cards actually **created** (it used to return the
-    number of (user, pattern) pairs, so a second run reported "backfilled N
-    cards" after writing nothing), and seeds each card from the hint count of the
-    attempt that earned it rather than a flat "good".
+    **Why a replay and not a guess.** `attempts` already stores the events that
+    built the old pattern cards — one row per submit, with `kind`, `recall_grade`
+    (v0.11 persists it) and `submitted_at` — so each problem's own FSRS state can
+    be reconstructed exactly as if per-problem cards had always existed. What the
+    log cannot supply is the 8 of 13 historical warm-ups whose grades predate
+    v0.11: those replay as "good", which is the assumption the old aggregates
+    were themselves built from. Exact from here on.
 
-    One thing it cannot fix from here: `ensure_card` stamps `created_at` = now,
-    and `record_grade` anchors elapsed time at `created_at`, so the *first*
-    review of a backfilled card is information-free (R = 1 exactly, so the
-    retrievability term is 0 and grading good moves stability 2.4 -> 2.4). The
-    honest anchor is the solve that earned the card; that needs `created_at` to
-    be passed in, which is v0.13 §A work (attempt revisions carry the timing).
+    **The spread.** A problem you solved once and never recalled is genuinely
+    overdue (FSRS's initial stability is under a day), so an honest rebuild hands
+    you the whole backlog in one session — eight cards, in the live DB. The
+    backlog is *spread* over ``spread_days`` instead: the driest first, one a day.
+    That is a capacity decision, not a memory claim, and the note says so.
+
+    Idempotent by construction: cards are derived, so this deletes the user's
+    item cards and rebuilds them from the log. It is also the repair tool if a
+    card table is ever corrupted (due dates are the one thing not derivable).
     """
-    query = """
-        SELECT a.user_id, p.pattern,
-               MAX(datetime(a.submitted_at)) AS last_solved,
-               COUNT(*) AS solves,
-               SUM(a.hint_count) AS hints
+    from collections import defaultdict
+
+    def parse(ts: str) -> datetime:
+        return _parse_utc(ts)
+
+    events: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for row in conn.execute(
+        """
+        SELECT p.slug, p.pattern, p.function_name, p.visible_tests,
+               a.kind, a.recall_grade, a.hint_count, a.submitted_at
         FROM attempts a JOIN problems p ON p.id = a.problem_id
-        WHERE a.status = 'correct' AND p.pattern IS NOT NULL
-    """
-    params: list = []
-    if user_id is not None:
-        query += " AND a.user_id = ?"
-        params.append(user_id)
-    query += " GROUP BY a.user_id, p.pattern"
-    created = 0
-    for r in conn.execute(query, params).fetchall():
-        existing = conn.execute(
-            "SELECT 1 FROM pattern_cards WHERE user_id = ? AND pattern = ?",
-            (r["user_id"], r["pattern"]),
-        ).fetchone()
-        if existing:
+        WHERE a.user_id = ? AND a.status = 'correct' AND a.submitted_at IS NOT NULL
+        ORDER BY datetime(a.submitted_at) ASC
+        """,
+        (user_id,),
+    ):
+        # Only problems the judge can still serve: a card for an un-curated row
+        # would spin in the defer loop forever.
+        if not row["function_name"] or not row["visible_tests"]:
             continue
-        # A pattern solved with no hints at all is evidence *against* struggle,
-        # which is exactly what `suggested_grade` encodes for a live session.
-        hints = int(r["hints"] or 0)
-        grade = 3 if hints == 0 else (2 if hints <= 2 else 1)
-        ensure_card(
-            conn, r["user_id"], r["pattern"], due_immediately=True, grade=grade
+        events[row["slug"]].append(row)
+    if not events:
+        return {"cards": 0, "recalled": 0, "spread": 0}
+
+    conn.execute("DELETE FROM item_cards WHERE user_id = ?", (user_id,))
+    rebuilt = []
+    for slug, rows in events.items():
+        first = rows[0]
+        # The seed mirrors `suggested_grade`: a solve with no hints is evidence
+        # *against* struggle, not evidence of ease, so it tops out at "good".
+        hints = first["hint_count"] or 0
+        seed_grade = 3 if hints == 0 else (2 if hints <= 2 else 1)
+        stability = initial_stability(seed_grade)
+        difficulty = initial_difficulty(seed_grade)
+        last = parse(first["submitted_at"])
+        reps = 0
+        lapses = 0
+        for row in rows[1:]:
+            when = parse(row["submitted_at"])
+            # A graded warm-up carries the student's own answer; an ungraded one
+            # (pre-v0.11) or a re-solve assumes "good".
+            grade = _grade(int(row["recall_grade"])) if row["recall_grade"] else 3
+            r = retrievability(
+                max(0.0, (when - last).total_seconds() / 86400), stability
+            )
+            stability, difficulty = review(stability, difficulty, r, grade)
+            last = when
+            reps += 1
+            lapses += 1 if grade == 1 else 0
+        due = last + timedelta(days=interval_days(stability))
+        rebuilt.append(
+            {
+                "slug": slug,
+                "pattern": first["pattern"],
+                "stability": stability,
+                "difficulty": difficulty,
+                "reps": reps,
+                "lapses": lapses,
+                "due": due,
+                "last": last,
+                "recalled": reps > 0,
+            }
         )
-        created += 1
-    return created
+
+    # Spread the overdue never-recalled backlog over `spread_days`, driest first.
+    now_dt = datetime.now(timezone.utc)
+    backlog = sorted(
+        (c for c in rebuilt if not c["recalled"] and c["due"] <= now_dt),
+        key=lambda c: c["due"],
+    )
+    spacing = timedelta(days=spread_days / len(backlog)) if backlog else timedelta(0)
+    for i, card in enumerate(backlog):
+        card["due"] = now_dt + spacing * i
+
+    for card in rebuilt:
+        conn.execute(
+            """
+            INSERT INTO item_cards
+                (user_id, slug, pattern, stability, difficulty, reps, lapses,
+                 due_at, last_review_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                card["slug"],
+                card["pattern"],
+                card["stability"],
+                card["difficulty"],
+                card["reps"],
+                card["lapses"],
+                card["due"].isoformat(timespec="seconds"),
+                card["last"].isoformat(timespec="seconds"),
+                now(),
+            ),
+        )
+    conn.commit()
+    note = {
+        "cards": len(rebuilt),
+        "recalled": sum(1 for c in rebuilt if c["recalled"]),
+        "never_recalled": sum(1 for c in rebuilt if not c["recalled"]),
+        "spread": len(backlog),
+        "spread_days": spread_days,
+    }
+    if print_note:
+        print_note(note)
+    return note
+
+
+def migrate_cards_if_needed(conn: sqlite3.Connection, user_id: int, print_note=None) -> dict | None:
+    """One-time per-user upgrade from pattern cards to item cards.
+
+    Runs only when the legacy table has rows for this user and the new one has
+    none — so it fires exactly once, and a user who never had pattern cards
+    simply gets item cards from their next solve."""
+    legacy = conn.execute(
+        "SELECT COUNT(*) AS n FROM pattern_cards WHERE user_id = ?", (user_id,)
+    ).fetchone()["n"]
+    current = conn.execute(
+        "SELECT COUNT(*) AS n FROM item_cards WHERE user_id = ?", (user_id,)
+    ).fetchone()["n"]
+    if not legacy or current:
+        return None
+    return rebuild_item_cards(conn, user_id, print_note=print_note)
 
 
 def defer(conn: sqlite3.Connection, card: sqlite3.Row, days: float = 1.0) -> str:
     """Push a card's due date forward (e.g. no re-solvable problem found)."""
     due = _due_iso(days)
     conn.execute(
-        "UPDATE pattern_cards SET due_at = ? WHERE id = ?", (due, card["id"])
+        "UPDATE item_cards SET due_at = ? WHERE id = ?", (due, card["id"])
     )
     conn.commit()
     return due
@@ -559,7 +656,7 @@ def next_due(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row | None:
     *no* warm-up is also told when the next one arrives, instead of having to
     infer it from a count over a rolling day."""
     return conn.execute(
-        "SELECT * FROM pattern_cards WHERE user_id = ? "
+        "SELECT * FROM item_cards WHERE user_id = ? "
         "ORDER BY datetime(due_at) ASC LIMIT 1",
         (user_id,),
     ).fetchone()
@@ -580,7 +677,13 @@ def due_summary(conn: sqlite3.Connection, user_id: int) -> str:
     rolling 24 hours."""
     due = due_now_count(conn, user_id)
     if due:
-        return f"{due} card(s) due now"
+        overdue = conn.execute(
+            "SELECT COUNT(*) AS n FROM item_cards WHERE user_id = ? "
+            "AND datetime(due_at) < datetime(?, '-1 day')",
+            (user_id, now()),
+        ).fetchone()["n"]
+        tail = f" ({overdue} overdue)" if overdue else ""
+        return f"{due} card(s) due now{tail}"
     card = next_due(conn, user_id)
     if card is None:
         return "no pattern cards yet — your first solved problem creates one"
@@ -590,7 +693,7 @@ def due_summary(conn: sqlite3.Connection, user_id: int) -> str:
 def due_now_count(conn: sqlite3.Connection, user_id: int) -> int:
     """Cards due right now — the `dojo` status line."""
     return conn.execute(
-        "SELECT COUNT(*) AS n FROM pattern_cards "
+        "SELECT COUNT(*) AS n FROM item_cards "
         "WHERE user_id = ? AND datetime(due_at) <= datetime(?)",
         (user_id, now()),
     ).fetchone()["n"]
@@ -603,7 +706,7 @@ def due_next_day_count(conn: sqlite3.Connection, user_id: int) -> int:
     )
     return conn.execute(
         """
-        SELECT COUNT(*) AS n FROM pattern_cards
+        SELECT COUNT(*) AS n FROM item_cards
         WHERE user_id = ? AND datetime(due_at) > datetime(?)
           AND datetime(due_at) <= datetime(?)
         """,

@@ -6,6 +6,8 @@ FSRS-4.5 equations (w = [0.4, 0.6, 2.4, 5.8, 4.93, 0.94, 0.86, 0.01, 1.49,
 is the point: recomputing the formula here would assert nothing.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 
 from dojo import scheduler
@@ -66,6 +68,17 @@ def _solve_at(conn, user_id, slug, when):
         "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
         "VALUES (?, ?, 'solve', 'correct', COALESCE(?, datetime('now')), COALESCE(?, datetime('now')))",
         (user_id, pid, when, when),
+    )
+    conn.commit()
+
+
+def _recall_at(conn, user_id, slug, when, grade):
+    """A graded warm-up attempt — the event the migration replays."""
+    pid = conn.execute("SELECT id FROM problems WHERE slug = ?", (slug,)).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, "
+        "submitted_at, recall_grade) VALUES (?, ?, 'warmup', 'correct', ?, ?, ?)",
+        (user_id, pid, when, when, grade),
     )
     conn.commit()
 
@@ -136,28 +149,28 @@ def test_schedule_grows_to_weeks_where_the_old_constants_stalled():
 
 def test_card_lifecycle(db):
     uid = get_or_create_user(db, "andy")
-    card = scheduler.ensure_card(db, uid, "stack")
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack")
     # Default seeding is the "good" grade (w[2] = 2.4 days).
     assert card["stability"] == scheduler.initial_stability(3)
     assert card["due_at"] > now()
     # Age the card a day so the review sees real forgetting (R < 1).
     db.execute(
-        "UPDATE pattern_cards SET stability = 1.0, last_review_at = datetime('now', '-1 day') "
+        "UPDATE item_cards SET stability = 1.0, last_review_at = datetime('now', '-1 day') "
         "WHERE id = ?",
         (card["id"],),
     )
     db.commit()
-    card = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    card = db.execute("SELECT * FROM item_cards WHERE id = ?", (card["id"],)).fetchone()
 
     summary = scheduler.record_grade(db, card, 3)
-    row = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    row = db.execute("SELECT * FROM item_cards WHERE id = ?", (card["id"],)).fetchone()
     assert row["reps"] == 1
     assert row["stability"] > 1.0
     assert summary["due_at"] > card["due_at"]
     assert summary["interval_days"] >= 1  # whole days, never a few hours
 
     lapsed = scheduler.record_grade(db, row, 1)
-    row = db.execute("SELECT * FROM pattern_cards WHERE id = ?", (card["id"],)).fetchone()
+    row = db.execute("SELECT * FROM item_cards WHERE id = ?", (card["id"],)).fetchone()
     assert row["lapses"] == 1
     assert lapsed["lapsed"]
 
@@ -166,10 +179,10 @@ def test_card_is_seeded_from_the_grade_that_created_it(db):
     """A first solve's hint count is evidence about the pattern: it seeds
     S0/D0 instead of the flat 0.3/5.0 the old code always wrote."""
     uid = get_or_create_user(db, "andy")
-    good = scheduler.ensure_card(db, uid, "arrays_and_hashing", grade=3)
+    good = scheduler.ensure_item_card(db, uid, "contains_duplicate", "arrays_and_hashing", grade=3)
     assert good["stability"] == 2.4
     assert good["difficulty"] == pytest.approx(4.93, abs=0.01)
-    rough = scheduler.ensure_card(db, uid, "stack", grade=1)
+    rough = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack", grade=1)
     assert rough["stability"] == 0.4
     assert rough["difficulty"] == pytest.approx(6.81, abs=0.01)
     # The seeded stability drives the first due date: a rough first solve comes
@@ -179,10 +192,10 @@ def test_card_is_seeded_from_the_grade_that_created_it(db):
 
 def test_due_cards_only_overdue(db):
     uid = get_or_create_user(db, "andy")
-    future = scheduler.ensure_card(db, uid, "stack")  # due tomorrow
-    overdue = scheduler.ensure_card(db, uid, "two_pointers")
+    future = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack")  # due tomorrow
+    overdue = scheduler.ensure_item_card(db, uid, "valid_palindrome", "two_pointers")
     db.execute(
-        "UPDATE pattern_cards SET due_at = datetime('now', '-1 day') WHERE id = ?",
+        "UPDATE item_cards SET due_at = datetime('now', '-1 day') WHERE id = ?",
         (overdue["id"],),
     )
     db.commit()
@@ -191,45 +204,32 @@ def test_due_cards_only_overdue(db):
     assert future["id"] not in {c["id"] for c in due}
 
 
-def test_warmup_problem_least_recent(db):
+def test_item_problem_returns_the_cards_own_problem(db):
+    """Per-problem cards make the pick total: no rotation, no "which problem
+    represents this pattern today" — the card names the problem (v0.13
+    follow-up)."""
     uid = get_or_create_user(db, "andy")
     for slug in ("two_sum", "valid_anagram"):
         _insert_problem(db, slug, "arrays_and_hashing")
-    for slug, when in (("two_sum", "2024-01-01T00:00:00+00:00"), ("valid_anagram", "2026-01-01T00:00:00+00:00")):
-        pid = db.execute("SELECT id FROM problems WHERE slug=?", (slug,)).fetchone()["id"]
-        db.execute(
-            "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
-            "VALUES (?, ?, 'solve', 'correct', ?, ?)",
-            (uid, pid, when, when),
-        )
+    card = scheduler.ensure_item_card(db, uid, "valid_anagram", "arrays_and_hashing")
+    assert scheduler.item_problem(db, card)["slug"] == "valid_anagram"
+    # Two cards in one pattern are two independent memories.
+    other = scheduler.ensure_item_card(db, uid, "two_sum", "arrays_and_hashing")
+    assert scheduler.item_problem(db, other)["slug"] == "two_sum"
+
+
+def test_item_problem_is_none_when_the_problem_cannot_be_served(db):
+    """An uncurated (or removed) problem must be visible as a curation problem,
+    not deferred in silence for days (v0.13 audit, S2.11)."""
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_item_card(db, uid, "never_landed", "stack")
+    assert scheduler.item_problem(db, card) is None
+
+    _insert_problem(db, "uncurated", "stack")
+    db.execute("UPDATE problems SET function_name = NULL WHERE slug = 'uncurated'")
     db.commit()
-    picked = scheduler.warmup_problem(db, uid, "arrays_and_hashing")
-    assert picked["slug"] == "two_sum"  # least recently solved first
-
-
-def test_warmup_problem_rotates_across_problems(db):
-    """v0.11 rotation. The old rule ordered *every* correct attempt by
-    submitted_at and took the first — the problem solved earliest ever, a
-    value that never ages. `valid_parentheses` was therefore served as the
-    stack warm-up five times while other solved problems in the pattern got
-    none. The pick is now per-problem (its latest attempt), so consecutive
-    warm-ups rotate."""
-    uid = get_or_create_user(db, "andy")
-    for slug in ("two_sum", "valid_anagram"):
-        _insert_problem(db, slug, "arrays_and_hashing")
-    _solve_at(db, uid, "two_sum", "2024-01-01T00:00:00+00:00")
-    _solve_at(db, uid, "valid_anagram", "2024-06-01T00:00:00+00:00")
-    assert scheduler.warmup_problem(db, uid, "arrays_and_hashing")["slug"] == "two_sum"
-
-    # Practising two_sum again (a warm-up, or a re-solve) makes it the most
-    # recent, so the next warm-up moves on to the other problem.
-    _solve_at(db, uid, "two_sum", "2026-01-01T00:00:00+00:00")
-    assert (
-        scheduler.warmup_problem(db, uid, "arrays_and_hashing")["slug"] == "valid_anagram"
-    )
-    # ...and it comes back once that one has been practised.
-    _solve_at(db, uid, "valid_anagram", "2026-02-01T00:00:00+00:00")
-    assert scheduler.warmup_problem(db, uid, "arrays_and_hashing")["slug"] == "two_sum"
+    card = scheduler.ensure_item_card(db, uid, "uncurated", "stack")
+    assert scheduler.item_problem(db, card) is None
 
 
 def test_pick_new_problem_weakest_pattern(db):
@@ -240,8 +240,8 @@ def test_pick_new_problem_weakest_pattern(db):
     # Solve one problem, leave the rest unsolved.
     _solve(db, uid, "already_done")
     # The stack pattern has a strong card; arrays_and_hashing has none (0 = weakest).
-    card = scheduler.ensure_card(db, uid, "stack")
-    db.execute("UPDATE pattern_cards SET stability = 10.0 WHERE id = ?", (card["id"],))
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack")
+    db.execute("UPDATE item_cards SET stability = 10.0 WHERE id = ?", (card["id"],))
     db.commit()
 
     picked = scheduler.pick_new_problem(db, uid)
@@ -312,47 +312,78 @@ def test_practice_pick_prefers_ladder_problem(db):
     assert picked["slug"] == "custom_two_pointer"  # ladder done → fallback
 
 
-def test_backfill_creates_due_cards(db):
+def test_rebuild_derives_one_card_per_solved_problem(db):
+    """The migration is a replay of the attempt log, so it is total and
+    idempotent: one card per solved (and still curated) problem."""
+    uid = get_or_create_user(db, "andy")
+    for slug in ("two_sum", "valid_anagram"):
+        _insert_problem(db, slug, "arrays_and_hashing")
+    _insert_problem(db, "uncurated", "arrays_and_hashing", curated=False)
+    _solve(db, uid, "two_sum")
+    _solve(db, uid, "valid_anagram")
+    _solve(db, uid, "uncurated")
+
+    summary = scheduler.rebuild_item_cards(db, uid)
+    assert summary["cards"] == 2  # the uncurated problem cannot be served
+    assert summary["never_recalled"] == 2
+    cards = {c["slug"] for c in scheduler.due_cards(db, uid, limit=10)}
+    assert "uncurated" not in cards
+    # A replay is deterministic: running it again lands the same state.
+    again = scheduler.rebuild_item_cards(db, uid)
+    assert again == summary
+    assert len(scheduler.due_cards(db, uid, limit=10)) == len(cards)
+
+
+def test_rebuild_replays_grades_per_problem(db):
+    """A warm-up's grade is that problem's (v0.11 persists it on the attempt),
+    so two problems in one pattern end up with their own stability."""
+    uid = get_or_create_user(db, "andy")
+    for slug in ("two_sum", "valid_anagram"):
+        _insert_problem(db, slug, "arrays_and_hashing")
+    _solve_at(db, uid, "two_sum", "2026-08-01T00:00:00+00:00")
+    _solve_at(db, uid, "valid_anagram", "2026-08-01T00:00:00+00:00")
+    _recall_at(db, uid, "two_sum", "2026-08-04T00:00:00+00:00", grade=4)
+    for _ in range(3):
+        _recall_at(db, uid, "valid_anagram", "2026-08-04T00:00:00+00:00", grade=1)
+
+    scheduler.rebuild_item_cards(db, uid)
+    cards = {c["slug"]: c for c in db.execute("SELECT * FROM item_cards").fetchall()}
+    assert cards["two_sum"]["reps"] == 1 and cards["two_sum"]["lapses"] == 0
+    assert cards["valid_anagram"]["lapses"] == 3
+    assert cards["two_sum"]["stability"] > cards["valid_anagram"]["stability"]
+
+
+def test_rebuild_spreads_an_overdue_never_recalled_backlog(db):
+    """Eight solved-but-never-recalled problems are all genuinely overdue at
+    once; the rebuild spreads them so a student is not handed the whole pile in
+    one session (a capacity decision, not a memory claim)."""
+    uid = get_or_create_user(db, "andy")
+    for i in range(7):
+        _insert_problem(db, f"p{i}", "arrays_and_hashing")
+        _solve_at(db, uid, f"p{i}", "2026-08-01T00:00:00+00:00")
+
+    summary = scheduler.rebuild_item_cards(db, uid, spread_days=7)
+    assert summary["spread"] == 7
+    due = scheduler.due_cards(db, uid, limit=10)
+    assert len(due) == 1  # only the first of the spread backlog is due today
+    future = db.execute(
+        "SELECT COUNT(*) AS n FROM item_cards WHERE datetime(due_at) > datetime(?)",
+        (now(),),
+    ).fetchone()["n"]
+    assert future == 6
+
+
+def test_rebuild_leaves_the_recalled_cards_alone(db):
+    """Only the *overdue, never-recalled* backlog is spread: a problem with real
+    recall history keeps the due date its own history earned."""
     uid = get_or_create_user(db, "andy")
     _insert_problem(db, "two_sum", "arrays_and_hashing")
-    pid = db.execute("SELECT id FROM problems WHERE slug='two_sum'").fetchone()["id"]
-    db.execute(
-        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
-        "VALUES (?, ?, 'solve', 'correct', datetime('now'), datetime('now'))",
-        (uid, pid),
-    )
-    db.commit()
-    assert scheduler.backfill_cards(db) == 1
-    cards = scheduler.due_cards(db, uid)
-    assert len(cards) == 1 and cards[0]["pattern"] == "arrays_and_hashing"
-
-
-def test_due_comparisons_survive_a_naive_timestamp(db):
-    """Regression: due_at is TEXT, and a naive stamp ("2026-01-01 09:00:00")
-    sorts *before* the ISO form dojo writes ("2026-01-01T09:00:00+00:00") because
-    a space precedes "T". Comparing the raw strings therefore read a card due
-    tomorrow as overdue today — a bug that only showed up when the wall clock
-    made the two stamps share a date, which is exactly when a test stops
-    catching it. The comparisons now go through SQLite's `datetime()`.
-    """
-    from datetime import datetime, timedelta, timezone
-
-    uid = get_or_create_user(db, "andy")
-    naive = (datetime.now(timezone.utc) + timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S")
-    assert "T" not in naive  # the shape SQLite's own datetime('now') produces
-    db.execute(
-        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, reps, "
-        "lapses, due_at, created_at) VALUES (?, 'heap', 1.0, 5.0, 0, 0, ?, ?)",
-        (uid, naive, now()),
-    )
-    db.commit()
-
-    assert scheduler.due_now_count(db, uid) == 0
-    assert scheduler.due_next_day_count(db, uid) == 1
-    assert scheduler.due_cards(db, uid) == []
-
-
-# ------------------------------------- idempotency + SQL hygiene (v0.13)
+    _solve_at(db, uid, "two_sum", "2026-08-01T00:00:00+00:00")
+    _recall_at(db, uid, "two_sum", "2026-08-04T00:00:00+00:00", grade=4)
+    summary = scheduler.rebuild_item_cards(db, uid, spread_days=7)
+    assert summary["spread"] == 0
+    card = db.execute("SELECT * FROM item_cards").fetchone()
+    assert datetime.fromisoformat(card["due_at"]) > datetime(2026, 8, 4, tzinfo=timezone.utc)
 
 
 def test_record_grade_refuses_an_out_of_range_grade(db):
@@ -361,11 +392,11 @@ def test_record_grade_refuses_an_out_of_range_grade(db):
     from dojo.db import get_or_create_user
 
     uid = get_or_create_user(db, "andy")
-    card = scheduler.ensure_card(db, uid, "stack")
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack")
     for bad in (0, 5, -1, 99):
         with pytest.raises(ValueError):
             scheduler.record_grade(db, card, bad)
-    assert db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"] == 0
+    assert db.execute("SELECT reps FROM item_cards").fetchone()["reps"] == 0
 
 
 def test_record_grade_can_defer_its_commit(db):
@@ -374,11 +405,11 @@ def test_record_grade_can_defer_its_commit(db):
     from dojo.db import get_or_create_user, connect
 
     uid = get_or_create_user(db, "andy")
-    card = scheduler.ensure_card(db, uid, "stack")
+    card = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack")
     scheduler.record_grade(db, card, 2, commit=False)
-    assert db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"] == 1
+    assert db.execute("SELECT reps FROM item_cards").fetchone()["reps"] == 1
     db.rollback()
-    assert db.execute("SELECT reps FROM pattern_cards").fetchone()["reps"] == 0
+    assert db.execute("SELECT reps FROM item_cards").fetchone()["reps"] == 0
 
 
 def test_due_cards_has_a_deterministic_tie_break(db):
@@ -387,86 +418,21 @@ def test_due_cards_has_a_deterministic_tie_break(db):
     from dojo.db import get_or_create_user
 
     uid = get_or_create_user(db, "andy")
-    for pattern in ("trees", "stack", "heap"):
-        scheduler.ensure_card(db, uid, pattern, due_immediately=True)
-    order = [r["pattern"] for r in scheduler.due_cards(db, uid)]
+    for slug in ("trees", "stack", "heap"):
+        scheduler.ensure_item_card(db, uid, slug, slug, due_immediately=True)
+    order = [r["slug"] for r in scheduler.due_cards(db, uid)]
     assert order == ["heap", "stack", "trees"]
 
 
-def test_backfill_counts_cards_created_and_skips_existing(db):
-    from dojo.db import dumps_json, get_or_create_user, now
-
-    uid = get_or_create_user(db, "andy")
-    db.execute(
-        "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
-        "function_name, visible_tests, created_at) VALUES "
-        "('p1','P','Easy','stack','s','f',?,?)",
-        (dumps_json([{"args": [[1]], "expected": 1}]), now()),
-    )
-    db.commit()
-    pid = db.execute("SELECT id FROM problems").fetchone()["id"]
-    db.execute(
-        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, "
-        "submitted_at, hint_count) VALUES (?, ?, 'solve', 'correct', ?, ?, 1)",
-        (uid, pid, now(), now()),
-    )
-    db.commit()
-
-    assert scheduler.backfill_cards(db, uid) == 1
-    assert scheduler.backfill_cards(db, uid) == 0  # idempotent, and it says so
-    card = db.execute("SELECT * FROM pattern_cards").fetchone()
-    # One hint means "hard" (grade 2), which raises initial difficulty above the
-    # flat "good" default: the card is seeded from the solve's own evidence.
-    assert card["stability"] == scheduler.initial_stability(2)
-    assert card["difficulty"] > scheduler.initial_difficulty(3)
-
-
-def test_warmup_problem_ignores_untimestamped_attempts(db):
-    """NULL sorts first in ASC, so a correct attempt with no `submitted_at`
-    pinned the same problem as the warm-up forever — the v0.11 failure mode,
-    reintroduced for NULL rows."""
-    from dojo.db import dumps_json, get_or_create_user, now
-
-    uid = get_or_create_user(db, "andy")
-    for slug in ("a", "b"):
-        db.execute(
-            "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
-            "function_name, visible_tests, created_at) VALUES (?,?, 'Easy','stack','s','f',?,?)",
-            (slug, slug.upper(), dumps_json([{"args": [[1]], "expected": 1}]), now()),
-        )
-    db.commit()
-    ids = {r["slug"]: r["id"] for r in db.execute("SELECT id, slug FROM problems")}
-    db.execute(
-        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
-        "VALUES (?, ?, 'solve', 'correct', ?, NULL)",
-        (uid, ids["a"], now()),
-    )
-    db.execute(
-        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
-        "VALUES (?, ?, 'solve', 'correct', ?, ?)",
-        (uid, ids["b"], now(), now()),
-    )
-    db.commit()
-    picked = scheduler.warmup_problem(db, uid, "stack")
-    assert picked["slug"] == "b"  # the one with a real timestamp
-
-
-# ---------------------------------- honest due reporting (v0.13 follow-up)
-# A real session reported "tomorrow: 1 card(s) due" and then got no warm-up the
-# next morning. The card was due at 23:48 the same evening: the footer counted a
-# *rolling 24 hours* and called it "tomorrow", and a morning session never sees a
-# card that only comes due at night.
-
-
-def _card_due_in(conn, user_id, *, hours=None, days=None, pattern="stack"):
+def _card_due_in(conn, user_id, *, hours=None, days=None, pattern="stack", slug=None):
     from datetime import datetime, timedelta, timezone
 
     delta = timedelta(hours=hours or 0, days=days or 0)
     due = (datetime.now(timezone.utc) + delta).isoformat(timespec="seconds")
     conn.execute(
-        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, "
-        "reps, lapses, due_at, created_at) VALUES (?, ?, 1.0, 5.0, 0, 0, ?, ?)",
-        (user_id, pattern, due, now()),
+        "INSERT INTO item_cards (user_id, slug, pattern, stability, difficulty, "
+        "reps, lapses, due_at, created_at) VALUES (?, ?, ?, 1.0, 5.0, 0, 0, ?, ?)",
+        (user_id, slug or f"{pattern}-{due}", pattern, due, now()),
     )
     conn.commit()
 

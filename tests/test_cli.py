@@ -1,5 +1,7 @@
 """CLI: active-user resolution, user switching, argv normalization, seeding."""
 
+import json
+
 import pytest
 
 from dojo.bank import ensure_seeded
@@ -111,18 +113,18 @@ def test_due_counts(db):
     from dojo import scheduler
 
     uid = get_or_create_user(db, "andy")
-    due_now = scheduler.ensure_card(db, uid, "stack", due_immediately=True)
-    soon = scheduler.ensure_card(db, uid, "heap")
+    due_now = scheduler.ensure_item_card(db, uid, "valid_parentheses", "stack", due_immediately=True)
+    soon = scheduler.ensure_item_card(db, uid, "k_closest_points", "heap")
     # A freshly seeded "good" card is days out, not hours (v0.11), so pin the
     # 24-hour window explicitly instead of relying on the seeding policy. Written
     # in SQLite's *naive* format on purpose: the counts must be format-agnostic
     # (see test_scheduler.test_due_comparisons_survive_a_naive_timestamp).
     db.execute(
-        "UPDATE pattern_cards SET due_at = datetime('now', '+6 hours') WHERE id = ?",
+        "UPDATE item_cards SET due_at = datetime('now', '+6 hours') WHERE id = ?",
         (soon["id"],),
     )
     db.commit()
-    later = scheduler.ensure_card(db, uid, "trees")  # days out: in neither count
+    later = scheduler.ensure_item_card(db, uid, "two_sum", "trees")  # days out: in neither count
     assert scheduler.due_now_count(db, uid) == 1
     assert scheduler.due_next_day_count(db, uid) == 1
     assert later["due_at"] > scheduler.now()
@@ -785,8 +787,8 @@ def test_the_footer_names_when_the_next_warm_up_arrives(cli_env):
     uid = _seed_user(db_path)
     conn = connect(db_path)
     conn.execute(
-        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, reps, "
-        "lapses, due_at, created_at) VALUES (?, 'stack', 1.0, 5.0, 0, 0, ?, ?)",
+        "INSERT INTO item_cards (user_id, slug, pattern, stability, difficulty, reps, "
+        "lapses, due_at, created_at) VALUES (?, 'valid_parentheses', 'stack', 1.0, 5.0, 0, 0, ?, ?)",
         (uid, (datetime.now(timezone.utc) + timedelta(hours=13)).isoformat(timespec="seconds"), now()),
     )
     conn.commit()
@@ -812,8 +814,8 @@ def test_progress_counts_due_cards_the_way_the_scheduler_does(db, tmp_path, monk
     uid = get_or_create_user(db, "andy")
     naive_future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.execute(
-        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, reps, "
-        "lapses, due_at, created_at) VALUES (?, 'stack', 1.0, 5.0, 0, 0, ?, ?)",
+        "INSERT INTO item_cards (user_id, slug, pattern, stability, difficulty, reps, "
+        "lapses, due_at, created_at) VALUES (?, 'valid_parentheses', 'stack', 1.0, 5.0, 0, 0, ?, ?)",
         (uid, naive_future, naive_future),
     )
     db.commit()
@@ -829,3 +831,141 @@ def test_progress_counts_due_cards_the_way_the_scheduler_does(db, tmp_path, monk
     # string compare read it as due.
     row = out[out.index("stack"):]
     assert " 0 " in row[:40], row[:80]
+
+
+# ---------------------------------- per-problem cards (v0.13 follow-up)
+
+
+def test_warmup_limit_drains_the_backlog_and_says_what_is_left(cli_env):
+    """Per-problem cards mean several can be due at once, so the drain is
+    explicit: `--limit N`, and a line saying how many are still waiting."""
+    from dojo import scheduler
+    from dojo.cli import main
+    from dojo.db import connect, now
+
+    rec, db_path, _workbench, _problems = cli_env
+    uid = _seed_user(db_path)
+    conn = connect(db_path)
+    for i in range(4):
+        db_problem = f"backlog_{i}"
+        conn.execute(
+            "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
+            "function_name, visible_tests, signature, created_at) VALUES "
+            "(?, ?, 'Easy', 'stack', 's', 'solve_it', ?, ?, ?)",
+            (db_problem, db_problem.upper(),
+             json.dumps([{"args": [[1]], "expected": 1}]),
+             json.dumps("(nums: list[int]) -> int"), now()),
+        )
+        scheduler.ensure_item_card(conn, uid, db_problem, "stack", due_immediately=True)
+    conn.commit()
+    conn.close()
+
+    # `--limit 1` serves one card; quitting it records nothing (v0.11), so the
+    # card is *still* due and the line says so. What matters here is that the
+    # limit is honoured and the backlog is never invisible.
+    rec.answers = ["quit"]
+    assert main(["warmup", "--limit", "1"]) == 0
+    assert "Warm-up: 1 card(s) due" in rec.text
+    assert "4 more card(s) still due" in rec.text
+    assert "--limit 4" in rec.text
+
+
+def test_the_one_time_card_migration_runs_and_says_so(cli_env):
+    """A DB with legacy pattern cards and no item cards is upgraded once, from
+    the attempt log, with one line explaining what happened."""
+    from dojo.cli import main
+    from dojo.db import connect, dumps_json, now
+
+    rec, db_path, _workbench, _problems = cli_env
+    uid = _seed_user(db_path)
+    conn = connect(db_path)
+    conn.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, "
+        "function_name, visible_tests, signature, created_at) VALUES "
+        "('legacy_solved', 'L', 'Easy', 'stack', 's', 'solve_it', ?, ?, ?)",
+        (dumps_json([{"args": [[1]], "expected": 1}]),
+         dumps_json("(nums: list[int]) -> int"), now()),
+    )
+    conn.commit()
+    pid = conn.execute("SELECT id FROM problems").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at) "
+        "VALUES (?, ?, 'solve', 'correct', ?, ?)",
+        (uid, pid, now(), now()),
+    )
+    # The legacy card the old model would have left behind.
+    conn.execute(
+        "INSERT INTO pattern_cards (user_id, pattern, stability, difficulty, reps, "
+        "lapses, due_at, created_at) VALUES (?, 'stack', 12.0, 5.0, 3, 0, ?, ?)",
+        (uid, now(), now()),
+    )
+    conn.commit()
+    conn.close()
+
+    assert main(["progress"]) == 0
+    assert "Cards are per problem now" in rec.text
+    assert "rebuilt 1" in rec.text.replace("  ", " ")
+
+    conn = connect(db_path)
+    cards = conn.execute("SELECT slug FROM item_cards").fetchall()
+    conn.close()
+    assert [c["slug"] for c in cards] == ["legacy_solved"]
+
+
+def test_progress_problems_lists_every_card_coldest_first(db, tmp_path, monkeypatch, capsys):
+    """`dojo progress --problems` is the per-problem view the pattern rollup
+    cannot give: which specific problems are cold."""
+    import argparse
+
+    from dojo import scheduler
+    from dojo.cli import _cmd_progress
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    scheduler.ensure_item_card(db, uid, "hot_problem", "stack", due_immediately=True)
+    cold = scheduler.ensure_item_card(db, uid, "cold_problem", "stack")
+    db.execute(
+        "UPDATE item_cards SET due_at = datetime('now', '+30 days') WHERE id = ?",
+        (cold["id"],),
+    )
+    db.commit()
+
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.cli.load_conf", lambda *a, **k: {"user": "andy"})
+    assert _cmd_progress(argparse.Namespace(_user="andy", problems=True)) == 0
+    out = capsys.readouterr().out
+    assert "Cards — andy" in out
+    assert "hot_problem" in out and "cold_problem" in out
+    assert out.index("hot_problem") < out.index("cold_problem")  # coldest due first
+    assert "next review" in out
+
+
+def test_the_pattern_table_reports_the_weakest_card(db, tmp_path, monkeypatch, capsys):
+    """A pattern's mean stability can look healthy while one problem is cold;
+    the `weakest` column is the honest signal with per-problem cards."""
+    import argparse
+
+    from dojo import scheduler
+    from dojo.cli import _cmd_progress
+    from dojo.db import get_or_create_user
+
+    uid = get_or_create_user(db, "andy")
+    strong = scheduler.ensure_item_card(db, uid, "strong_problem", "stack")
+    db.execute("UPDATE item_cards SET stability = 90.0 WHERE id = ?", (strong["id"],))
+    db.commit()
+    weak = scheduler.ensure_item_card(db, uid, "weak_problem", "stack")
+    db.execute("UPDATE item_cards SET stability = 1.0 WHERE id = ?", (weak["id"],))
+    db.commit()
+
+    monkeypatch.setattr("dojo.cli.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.cli.load_conf", lambda *a, **k: {"user": "andy"})
+    monkeypatch.setenv("COLUMNS", "220")  # rich squeezes columns to the terminal
+    assert _cmd_progress(argparse.Namespace(_user="andy", problems=False)) == 0
+    rollup = " ".join(capsys.readouterr().out.split())
+    assert "weakest" in rollup
+    assert "1.0" in rollup  # the cold problem, not the 45.5 mean
+    # The per-problem view is where the strong one is visible.
+    assert _cmd_progress(argparse.Namespace(_user="andy", problems=True)) == 0
+    detail = " ".join(capsys.readouterr().out.split())
+    assert "strong_problem" in detail and "90.0" in detail
+    assert "weak_problem" in detail

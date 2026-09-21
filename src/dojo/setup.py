@@ -197,9 +197,13 @@ def run_wizard(
     seeded = ensure_seeded(db_path, problems_dir)
     with connect(db_path) as conn:
         user_id = conn.execute("SELECT id FROM users WHERE name = ?", (name,)).fetchone()["id"]
-        # Scoped to the user this wizard just registered: backfilling every user
-        # inflated the count and created due-immediately cards for someone else.
-        backfilled = scheduler.backfill_cards(conn, user_id) if user_id else 0
+        # Cards are per solved problem now (v0.13 follow-up). A v0.1-era solve
+        # predates cards entirely, so the wizard derives them from the attempt
+        # log: scoped to the user it just registered (rebuilding every user's
+        # cards would create due-immediately reviews for someone else).
+        backfilled = (
+            scheduler.rebuild_item_cards(conn, user_id)["cards"] if user_id else 0
+        )
     save_conf({"user": name}, conf_path)
 
     installed = False

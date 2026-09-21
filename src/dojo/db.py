@@ -94,6 +94,30 @@ CREATE TABLE IF NOT EXISTS attempt_revisions (
     UNIQUE (attempt_id, revision)
 );
 
+-- v0.13 follow-up: the memory unit is one solved **problem**, not one pattern.
+-- A pattern card reported a single stability for problems with wildly different
+-- ones — in the live DB it hid ten solved problems that had never been recalled
+-- once, under a "34-day stable" pattern. Scheduling state lives here; `pattern`
+-- stays as the rollup key for `dojo progress`.
+CREATE TABLE IF NOT EXISTS item_cards (
+    id              INTEGER PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES users(id),
+    slug            TEXT NOT NULL,
+    pattern         TEXT,
+    stability       REAL NOT NULL,     -- FSRS stability, days
+    difficulty      REAL NOT NULL,     -- FSRS difficulty, 1..10
+    reps            INTEGER NOT NULL DEFAULT 0,
+    lapses          INTEGER NOT NULL DEFAULT 0,
+    due_at          TEXT NOT NULL,     -- ISO UTC; due for warm-up retrieval
+    last_review_at  TEXT,
+    last_reflection TEXT,
+    created_at      TEXT NOT NULL,
+    UNIQUE (user_id, slug)
+);
+
+-- Legacy (pre-v0.13-follow-up): one card per pattern. It is no longer written;
+-- `rebuild_item_cards` replays the attempt log into `item_cards` instead, and
+-- this table is kept only so nothing a student earned is destroyed.
 CREATE TABLE IF NOT EXISTS pattern_cards (
     id              INTEGER PRIMARY KEY,
     user_id         INTEGER NOT NULL REFERENCES users(id),

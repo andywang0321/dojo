@@ -955,7 +955,7 @@ def _show_card_update(
 ) -> None:
     console.print(
         Panel(
-            f"pattern: [bold]{card['pattern']}[/bold]\n"
+            f"problem: [bold]{card['slug']}[/bold] [dim]({card['pattern']})[/dim]\n"
             f"stability: {card['stability']:.2f} → {summary['stability']:.2f} days\n"
             f"difficulty: {card['difficulty']:.1f} → {summary['difficulty']:.1f}\n"
             f"next warm-up: [bold]{scheduler.due_phrase(summary['due_at'])}[/bold]",
@@ -967,7 +967,7 @@ def _show_card_update(
         console.print(
             Panel(
                 card["last_reflection"],
-                title="Your last reflection on this pattern",
+                title="Your last reflection on this problem",
                 border_style="blue",
             )
         )
@@ -1284,9 +1284,10 @@ def run_day(
                     return "warmup_done"
                 # A first solve carries evidence about the pattern in its own
                 # hint count — seed the card with it rather than a flat default.
-                scheduler.ensure_card(
+                scheduler.ensure_item_card(
                     conn,
                     user_id,
+                    problem["slug"],
                     problem["pattern"],
                     reflection=reflection,
                     grade=suggested_grade(state.hints),
@@ -1328,14 +1329,18 @@ def run_warmups(
             f"[dim]next warm-up {scheduler.due_hint(conn, user_id)}.[/dim]"
         )
         return []
-    console.print(f"[bold]Warm-up: {len(cards)} pattern card(s) due.[/bold]")
+    console.print(f"[bold]Warm-up: {len(cards)} card(s) due.[/bold]")
     outcomes = []
     for card in cards:
-        problem = scheduler.warmup_problem(conn, user_id, card["pattern"])
+        problem = scheduler.item_problem(conn, card)
         if problem is None:
+            # The card names its own problem now, so this means the problem is
+            # gone or no longer curated — say which and where to look, instead of
+            # deferring quietly for days (v0.13 audit, S2.11).
             console.print(
-                f"[yellow]Card '{card['pattern']}' has no solved problem to "
-                "re-solve; deferring it a day.[/yellow]"
+                f"[yellow]'{card['slug']}' can no longer be re-solved (it is not "
+                f"curated in the bank) — deferring this card a day. "
+                f"`dojo report {card['slug']}` audits its curation.[/yellow]"
             )
             scheduler.defer(conn, card, days=1.0)
             continue
@@ -1352,6 +1357,14 @@ def run_warmups(
         outcomes.append(outcome)
         if outcome in ("quit", "practice"):
             break
+    remaining = scheduler.due_now_count(conn, user_id)
+    if remaining:
+        # Never let the pile grow invisibly: per-problem cards mean several can
+        # be due at once, and `--limit` is the knob.
+        console.print(
+            f"[dim]{remaining} more card(s) still due — `dojo warmup --limit "
+            f"{remaining}` drains them.[/dim]"
+        )
     return outcomes
 
 

@@ -547,7 +547,7 @@ def _cmd_warmup(args) -> int:
         except RuntimeError as exc:
             console.print(f"[red]{exc}[/red]")
             return 1
-        run_warmups(conn, console, backend, user, limit=3)
+        run_warmups(conn, console, backend, user, limit=max(1, args.limit))
     return 0
 
 
@@ -1354,16 +1354,28 @@ def _cmd_progress(args) -> int:
                        -- SQLite's own naive `datetime('now')` form (v0.13).
                        SUM(CASE WHEN datetime(due_at) <= datetime(?) THEN 1 ELSE 0 END) AS due,
                        ROUND(AVG(stability), 2) AS avg_stability,
+                       -- The weakest card is the honest signal for a pattern:
+                       -- one strong problem cannot carry the others (v0.13
+                       -- follow-up, per-problem cards).
+                       ROUND(MIN(stability), 2) AS min_stability,
                        ROUND(AVG(difficulty), 1) AS avg_difficulty
-                FROM pattern_cards WHERE user_id = ? GROUP BY pattern
+                FROM item_cards WHERE user_id = ? GROUP BY pattern
                 """,
                 (now(), user_id),
             ).fetchall()
         }
+        item_rows = conn.execute(
+            """
+            SELECT slug, pattern, stability, difficulty, reps, lapses, due_at
+            FROM item_cards WHERE user_id = ? ORDER BY datetime(due_at) ASC
+            """,
+            (user_id,),
+        ).fetchall()
         trends = review_trends(conn, user_id)
     patterns = sorted({r["pattern"] for r in attempt_rows} | set(card_rows))
     table = ui_table(f"Pattern proficiency — {user}")
-    for col in ("pattern", "solved", "attempts", "avg hints", "cards", "due now", "avg stability", "avg difficulty"):
+    for col in ("pattern", "solved", "attempts", "avg hints", "cards", "due now",
+                "avg stability", "weakest", "avg difficulty"):
         table.add_column(col)
     for pattern in patterns:
         a = next((r for r in attempt_rows if r["pattern"] == pattern), None)
@@ -1376,13 +1388,29 @@ def _cmd_progress(args) -> int:
             str(c["cards"]) if c else "0",
             str(c["due"]) if c else "0",
             str(c["avg_stability"]) if c else "—",
+            str(c["min_stability"]) if c else "—",
             str(c["avg_difficulty"]) if c else "—",
         )
     console.print(table)
     console.print(
-        "[dim]Stability = FSRS-lite memory strength in days; the scheduler picks "
-        "new problems follow the roadmap order; stability governs warm-ups.[/dim]"
+        "[dim]One card per solved problem (v0.13 follow-up): `cards` counts them, "
+        "`avg`/`weakest` are their stability, and the scheduler serves the coldest "
+        "due card first. `dojo progress --problems` lists every card.[/dim]"
     )
+    if getattr(args, "problems", False):
+        items = ui_table(f"Cards — {user}")
+        for col in ("problem", "pattern", "stability", "difficulty", "reps", "next review"):
+            items.add_column(col)
+        for r in item_rows:
+            items.add_row(
+                r["slug"],
+                r["pattern"] or "—",
+                f"{r['stability']:.2f}",
+                f"{r['difficulty']:.1f}",
+                str(r["reps"]),
+                scheduler.due_phrase(r["due_at"]),
+            )
+        console.print(items)
     if trends:
         t = ui_table("Score trends per pattern (review rubric, recency-weighted)")
         for col in (
@@ -1410,6 +1438,49 @@ def _cmd_progress(args) -> int:
     return 0
 
 
+def _migrate_cards(console: Console, user: str | None) -> None:
+    """Upgrade pattern cards to per-problem cards, once per user (v0.13
+    follow-up). Nothing is destroyed: the rebuild is derived from the attempt
+    log, and the legacy table is left untouched."""
+    if not user:
+        return
+    from dojo import scheduler
+
+    with connect(DB_PATH) as conn:
+        user_id = get_or_create_user(conn, user)
+
+        def note(summary: dict) -> None:
+            console.print(
+                f"[dim]Cards are per problem now: rebuilt {summary['cards']} from "
+                f"your attempt history ({summary['recalled']} with recall, "
+                f"{summary['never_recalled']} never recalled; {summary['spread']} "
+                f"spread over {summary['spread_days']} days so the backlog drains "
+                "at a couple a day).[/dim]"
+            )
+
+        scheduler.migrate_cards_if_needed(conn, user_id, print_note=note)
+
+
+def _cmd_rebuild_cards(args) -> int:
+    """`dojo rebuild-cards` (power tool): re-derive every card from the attempt
+    log. The migration runs this automatically once; it stays available as the
+    repair path (and to re-spread a backlog with a different window)."""
+    from dojo import scheduler
+
+    console = Console()
+    user = getattr(args, "_user", None)
+    if not user:
+        console.print("[red]No active user — run `dojo setup`.[/red]")
+        return 1
+    with connect(DB_PATH) as conn:
+        user_id = get_or_create_user(conn, user)
+        summary = scheduler.rebuild_item_cards(
+            conn, user_id, spread_days=max(0, args.spread),
+            print_note=lambda s: console.print(f"[green]Rebuilt {s['cards']} card(s).[/green]"),
+        )
+    return 0 if summary["cards"] else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dojo", description="AI-guided interview prep: never-solve tutor + empirical grader."
@@ -1435,6 +1506,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_day.set_defaults(func=_cmd_day)
 
     p_warmup = sub.add_parser("warmup", help="run due warm-up retrievals only")
+    p_warmup.add_argument(
+        "--limit", type=int, default=3, help="how many cards to drain (default 3)"
+    )
     p_warmup.set_defaults(func=_cmd_warmup)
 
     p_learn = sub.add_parser("learn", help="study a topic with the teacher, then practice a problem")
@@ -1481,6 +1555,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.set_defaults(func=_cmd_show)
 
     p_progress = sub.add_parser("progress", help="per-pattern proficiency + retention schedule")
+    p_progress.add_argument(
+        "--problems", action="store_true", help="also list every card, coldest due first"
+    )
     p_progress.set_defaults(func=_cmd_progress)
 
     p_roadmap = sub.add_parser("roadmap", help="the progression tree: solved, next up, locked")
@@ -1558,6 +1635,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="re-curate through the pipeline when the audit verdict is 'fix'",
     )
     p_report.set_defaults(func=_cmd_report)
+
+    p_rebuild = sub.add_parser(
+        "rebuild-cards", help="re-derive every warm-up card from your attempt history"
+    )
+    p_rebuild.add_argument(
+        "--spread", type=int, default=7,
+        help="spread an overdue never-recalled backlog over N days (default 7)",
+    )
+    p_rebuild.set_defaults(func=_cmd_rebuild_cards)
     return parser
 
 
@@ -1674,6 +1760,7 @@ def main(argv: list[str] | None = None) -> int:
         ensure_seeded(DB_PATH)
     if args.command in USER_COMMANDS:
         args._user = _resolve_for_dispatch(args, console)
+        _migrate_cards(console, args._user)
     try:
         return args.func(args)
     except KeyboardInterrupt:
