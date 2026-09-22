@@ -1,6 +1,6 @@
 [project]
 name = "dojo"
-version = "0.1.0"
+version = "0.13.0"
 description = "AI-guided interview prep: a never-solve tutor, an empirical complexity grader, and a qualitative code reviewer."
 readme = "README.md"
 requires-python = ">=3.13"
