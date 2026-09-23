@@ -38,7 +38,18 @@ Paste a statement (`dojo curate`, or `--text` / `--file`), and the curator agent
 2. **Differential check**: both proposals are executed in isolated namespaces and the two oracles are cross-checked on the generated cases under strict equality. Any disagreement rejects the proposal — the oracle is the trust root.
 3. **Apply with rollback**: the seed file, overrides entry, and registry block are written; the verification gate (`tests/test_registry.py`) runs; any failure rolls back files, DB row, and in-memory registrations.
 
-Proposals are kept in gitignored `data/curation/` for provenance. Human curation still works — the recipe is the same, the gate is the same.
+Proposals are kept in `config.CURATION_DIR` (gitignored `data/curation/` — user state, so it follows `DOJO_DATA_DIR`) for provenance. Human curation still works — the recipe is the same, the gate is the same.
+
+## Model-written code is repaired, never fatal (v0.13 follow-up)
+
+A proposal's code fields are executed twice before anything is written (the dual-oracle differential, then the apply step), so a *shape* the model gets wrong is a curation failure — and one shape got through badly: the prompt's import rule ("may import only: random, math, and the decorators") was read literally as an instruction to write `from decorators import oracle`. The decorators are **injected** into the exec namespace; there is no `decorators` module, so the snippet raised `ModuleNotFoundError`, which escaped `audit_curation` and killed a live session mid-solve (2026-09-23).
+
+Two fixes, deliberately at different levels:
+
+- **The prompt says the truth**: the decorators are already in scope, and an import for them is a hard error — stated for the curator and for the reference writer (both had the same inviting wording).
+- **`curator.sanitize_imports` repairs the shape** (the same stance as `_ensure_reference_registered` and `reviewer.normalize_review`): any import statement the isolated namespace cannot satisfy is dropped, real modules (`heapq`, `typing`, `collections`) are kept, and line numbers are preserved so a traceback inside the snippet still points at the right line. What was stripped is announced — as `_repairs` on the proposal, in the reference's one-line note, and as an automated finding in the audit — because a model that keeps misreading the rule is evidence about the prompt, not noise to hide.
+
+Everything else about model-written code is a boundary: `_exec_proposal` raises `CuratorError` (naming the field and the original exception) instead of leaking whatever the snippet raises, and `_backend_json` already wraps transport failures. The in-session `report` sits behind `dojo.guard` on top of that, so no curator failure of any kind can end a student's session.
 
 ## `dojo fetch` — LeetCode intake (v0.3)
 

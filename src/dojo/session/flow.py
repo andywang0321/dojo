@@ -909,6 +909,51 @@ def _discuss(conn: sqlite3.Connection, console: Console, backend, problem: sqlit
     conn.commit()
 
 
+def _report_audit(
+    console: Console, backend, problem: sqlite3.Row, note: str = ""
+) -> None:
+    """Audit a problem's curation from inside a session (`report [text]`).
+
+    The boundary is not decoration: a curator-shaped failure here (model-written
+    code that would not execute) escaped as a traceback and killed the live
+    session on 2026-09-23, mid-solve. A report is a side errand — it must never
+    cost the student their session."""
+    from dojo.curator import audit_curation
+
+    with guard(
+        console,
+        "the curation audit",
+        "your session is unaffected — details in data/logs/dojo.log",
+    ) as g:
+        g.value = audit_curation(
+            backend,
+            problem["statement"],
+            loads_json(problem["visible_tests"], []),
+            live_oracle=ORACLES.get(problem["slug"]),
+            live_generator=JUDGE_CASES.get(problem["slug"]),
+            note=note or None,
+        )
+    if not g.ok:
+        return
+    audit = g.value
+    if note:
+        console.print(f"[dim]Your report: {note}[/dim]")
+    console.print(
+        f"[bold]Curation audit[/bold] — verdict: {audit.get('verdict', '?')}"
+    )
+    for finding in audit.get("automated_findings") or []:
+        console.print(f"[dim]• cross-check: {finding}[/dim]")
+    for finding in audit.get("findings") or []:
+        console.print(f"[yellow]• {finding}[/yellow]")
+    if audit.get("explanation"):
+        console.print(f"[dim]{audit['explanation']}[/dim]")
+    if not (audit.get("findings") or []):
+        console.print("[green]No contract violations found.[/green]")
+    console.print(
+        "[dim]`dojo report --fix <slug>` re-curates when the verdict is 'fix'.[/dim]"
+    )
+
+
 def _abandon(console: Console, state: WorkbenchState, message: str) -> None:
     """End a session with nothing recorded (v0.11). An attempt row exists iff
     the student submitted, so abandoning — a glance at the tool, a change of
@@ -1155,6 +1200,11 @@ def run_day(
                     "back there (with the post-solve tutor answering).[/dim]"
                 )
                 continue
+            if cmd in ("r", "report"):
+                # Reporting a curation problem is most natural right after
+                # living with it, so the audit is available in both phases.
+                _report_audit(console, backend, problem, rest.strip())
+                continue
             _discuss(conn, console, backend, problem, state, raw)
             continue
 
@@ -1232,29 +1282,10 @@ def run_day(
                 conn, console, backend, user_name, pattern, handoff_slug=state.slug
             )
             return "practice" if result.get("practice") else "quit"
-        elif cmd in ("r", "report") and not rest:
-            try:
-                from dojo.curator import CuratorError, audit_curation
-
-                audit = audit_curation(
-                    backend,
-                    problem["statement"],
-                    loads_json(problem["visible_tests"], []),
-                    live_oracle=ORACLES.get(problem["slug"]),
-                    live_generator=JUDGE_CASES.get(problem["slug"]),
-                )
-                console.print(
-                    f"[bold]Curation audit[/bold] — verdict: {audit.get('verdict', '?')}"
-                )
-                for finding in audit.get("findings") or []:
-                    console.print(f"[yellow]• {finding}[/yellow]")
-                if not (audit.get("findings") or []):
-                    console.print("[green]No contract violations found.[/green]")
-                console.print(
-                    "[dim]`dojo report --fix <slug>` re-curates when the verdict is 'fix'.[/dim]"
-                )
-            except CuratorError as exc:
-                console.print(f"[red]Audit failed: {exc}[/red]")
+        elif cmd in ("r", "report"):
+            # The student's own words are optional and go to the auditor: the
+            # claim is evidence to confirm or refute, never a verdict.
+            _report_audit(console, backend, problem, rest.strip())
         elif cmd in ("s", "submit") and not rest:
             outcome, reflection = _submit(
                 conn, console, backend, problem, state, user_id, warmup=warmup

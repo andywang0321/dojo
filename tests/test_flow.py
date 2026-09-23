@@ -1840,3 +1840,157 @@ def test_a_warm_up_card_that_cannot_be_served_says_why(db, fake_console, monkeyp
     assert "dojo report ghost_problem" in console.text
     # Deferred a day rather than looping on the same card forever.
     assert scheduler.due_cards(db, uid) == []
+
+
+# ------------------------------------------------------ `report` in a session
+# The live crash (2026-09-23): the curator wrote `from decorators import oracle`
+# in every code field, the audit's cross-check exec raised ModuleNotFoundError,
+# and the traceback ended a warm-up session mid-solve.
+
+
+DECORATOR_IMPORT_CURATION = {
+    "slug": "valid_parentheses",
+    "title": "Valid Parentheses",
+    "difficulty": "Easy",
+    "pattern": "stack",
+    "statement": (
+        "Valid Parentheses [Easy]\n\n"
+        "Given a string s containing just the characters '(', ')', '{', '}', "
+        "'[' and ']', determine if the input string is valid.\n\n"
+        "You should aim for a solution with O(n) time and O(n) space, where n is "
+        "the length of the string.\n"
+    ),
+    "function_name": "is_valid",
+    "signature": "(s: str) -> bool",
+    "visible_tests": [
+        {"args": ["()"], "expected": True},
+        {"args": ["(]"], "expected": False},
+        {"args": ["([)]"], "expected": False},
+    ],
+    "oracle_code": (
+        "from decorators import oracle\n"
+        "\n"
+        "@oracle('valid_parentheses')\n"
+        "def _fresh_oracle(s):\n"
+        "    pairs = {')': '(', ']': '[', '}': '{'}\n"
+        "    stack = []\n"
+        "    for ch in s:\n"
+        "        if ch in '([{':\n"
+        "            stack.append(ch)\n"
+        "        elif not stack or stack.pop() != pairs[ch]:\n"
+        "            return False\n"
+        "    return not stack\n"
+    ),
+    "judge_case_code": (
+        "from decorators import judge_case\n"
+        "\n"
+        "@judge_case('valid_parentheses')\n"
+        "def _fresh_case(n, rng):\n"
+        "    n = max(0, min(n, 12))\n"
+        "    s = ''.join(rng.choice('()[]{}') for _ in range(n))\n"
+        "    return [s], _fresh_oracle(s)\n"
+    ),
+}
+
+
+def test_report_in_session_passes_the_note_to_the_auditor(db, fake_console, monkeypatch, tmp_path):
+    """`report <free text>` — the student's own words go to the auditor."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    (tmp_path / "workbench").mkdir(parents=True)
+
+    seen: dict = {}
+
+    def fake_audit(backend, statement, tests, **kwargs):
+        seen["note"] = kwargs.get("note")
+        seen["statement"] = statement
+        return {
+            "findings": [],
+            "verdict": "ok",
+            "explanation": "the generator matches the statement",
+            "automated_findings": [],
+        }
+
+    monkeypatch.setattr("dojo.curator.audit_curation", fake_audit)
+    console = fake_console(
+        ["report the generated arrays are not sorted, so O(n) is unachievable", "quit"]
+    )
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+
+    assert outcome == "quit"
+    assert seen["note"] == "the generated arrays are not sorted, so O(n) is unachievable"
+    row = db.execute(
+        "SELECT statement FROM problems WHERE slug = 'valid_parentheses'"
+    ).fetchone()
+    assert seen["statement"] == row["statement"]  # the live row, not a stale copy
+    assert "Curation audit" in console.text
+    assert "the generator matches the statement" in console.text
+
+
+def test_report_in_session_works_without_a_note_and_post_solve(
+    db, fake_console, monkeypatch, tmp_path
+):
+    _seed_problem(db)
+    _fast_probe(monkeypatch)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    console = fake_console(
+        [
+            "submit", "O(n) one pass", "O(n) stack", "", "The stack mirrors openings.",
+            "report",           # post-solve: the audit is available in both phases
+            "done",
+        ],
+        actions={"submit": lambda: (workbench / "valid_parentheses.py").write_text(SOLUTION)},
+    )
+    assert run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False) == "solved"
+    assert "Curation audit" in console.text
+    # The bare word is not sent to the post-solve agent as a question.
+    assert "Post-solve discussion" not in console.text
+
+
+def test_a_curator_import_in_a_report_does_not_end_the_session(
+    db, fake_console, monkeypatch, tmp_path
+):
+    """The exact live crash, end to end: the fresh proposal imports a module
+    that cannot exist. It is now repaired, so the audit simply runs."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    (tmp_path / "workbench").mkdir(parents=True)
+
+    console = fake_console(["report", "quit"])
+    outcome = run_day(
+        db,
+        console,
+        MockBackend(curator=DECORATOR_IMPORT_CURATION),
+        "valid_parentheses",
+        "andy",
+        open_editor=False,
+    )
+    assert outcome == "quit"                       # the session survived
+    assert "Curation audit" in console.text
+    assert "ModuleNotFoundError" not in console.text
+
+
+def test_a_broken_audit_degrades_to_one_line(db, fake_console, monkeypatch, tmp_path):
+    """A report is a side errand: whatever goes wrong inside it, the student
+    keeps their session (and is told where the detail went)."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    (tmp_path / "workbench").mkdir(parents=True)
+
+    def broken_audit(*args, **kwargs):
+        raise ModuleNotFoundError("No module named 'decorators'")
+
+    monkeypatch.setattr("dojo.curator.audit_curation", broken_audit)
+    console = fake_console(["report", "quit"])
+    outcome = run_day(db, console, MockBackend(), "valid_parentheses", "andy", open_editor=False)
+
+    assert outcome == "quit"
+    assert "the curation audit unavailable" in console.text
+    assert "data/logs/dojo.log" in console.text

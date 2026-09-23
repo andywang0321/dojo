@@ -439,3 +439,55 @@ def test_reseed_does_not_wipe_tagged_lc(tmp_path):
         assert conn.execute(
             "SELECT lc_number FROM problems WHERE slug = 'two-sum'"
         ).fetchone()["lc_number"] == 1
+
+
+def test_bulk_fetch_retags_when_a_stale_duplicate_owns_the_number(db, monkeypatch, tmp_path):
+    """Regression (v0.13 follow-up): the bulk fetch's "already in the bank" test
+    only asked whether the LeetCode number appeared *somewhere*, so a stale
+    duplicate row could hold it while the seed row for the roadmap's own slug had
+    none — and the problem was skipped forever, off the ladder (LC 50/208/235 in
+    the live bank)."""
+    from dojo.cli import _cmd_fetch_all
+
+    monkeypatch.setattr("dojo.config.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.config.PROBLEMS_DIR", tmp_path / "problems")
+    (tmp_path / "problems" / "arrays_and_hashing").mkdir(parents=True)
+    (tmp_path / "problems" / "arrays_and_hashing" / "contains-duplicate.py").write_text(
+        '"""Contains Duplicate [Easy]\n\nStatement."""\n'
+    )
+    # The live shape: the seed row for the roadmap slug exists with no tag,
+    # while a stale duplicate row (no file, uncurated) owns the number.
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, created_at) "
+        "VALUES ('contains-duplicate', 'Contains Duplicate', 'Easy', "
+        "'arrays_and_hashing', 's', '2026-01-01')"
+    )
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, lc_number, created_at) "
+        "VALUES ('contains_duplicate', 'Contains Duplicate', 'Easy', "
+        "'arrays_and_hashing', 's', 217, '2026-01-01')"
+    )
+    db.commit()
+
+    from dojo.fetcher import LeetCodeError
+
+    calls: list[str] = []
+
+    def fake_fetch(slug):
+        # Everything else in the roadmap is "offline" — the point is only which
+        # problems the runner decided it still needed.
+        calls.append(slug)
+        raise LeetCodeError("offline")
+
+    monkeypatch.setattr("dojo.fetcher.fetch_problem", fake_fetch)
+    console = type("C", (), {"print": lambda self, *a, **k: None})()
+    _cmd_fetch_all(console, delay=0)
+
+    from dojo.db import connect
+
+    with connect(tmp_path / "dojo.db") as conn:
+        row = conn.execute(
+            "SELECT lc_number FROM problems WHERE slug = 'contains-duplicate'"
+        ).fetchone()
+    assert row["lc_number"] == 217      # the row that owns the problem got the tag
+    assert "contains-duplicate" not in calls

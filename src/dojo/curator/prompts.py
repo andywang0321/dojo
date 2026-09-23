@@ -55,9 +55,11 @@ worst-case path (never an early exit). Omit when growth is not measurable \
 (exponential output, log growth, fixed-size inputs).
 
 Hard rules:
-- The code snippets may import only: random, math, and the decorators \
-oracle/judge_case/profiler_input/checker (they are already in scope). No \
-network, no filesystem, no importing other dojo modules.
+- The code snippets may import at most `random` and `math`. The decorators \
+(oracle / judge_case / profiler_input / checker) are already in scope: never \
+write an import for them — `from decorators import oracle` is a hard error, \
+because no module named `decorators` exists and the snippet will not load.
+- No network, no filesystem, no importing other dojo modules.
 - Deterministic canonical outputs: where the problem says "any order", emit \
 sorted canonical form and tag those cases "compare": "sorted".
 - Generated cases must stay small (n <= 12) and never violate the problem's \
@@ -70,7 +72,8 @@ AUDIT_SYSTEM = """\
 You are the dojo curation auditor. A student reported a problem with the \
 grading of one problem — or an automated check found one. You receive the \
 problem statement, the curated visible tests, and any automated findings \
-(disagreements between the live oracle and a fresh oracle run).
+(disagreements between the live oracle and a fresh oracle run), and the \
+student's own words when they gave any.
 
 Audit the CURATION, not the student's code. Hunt for contract violations \
 between the prompt and the judge:
@@ -82,20 +85,36 @@ nonzero divisors, empty-input promises);
 - case-size or worst-case-shape problems in profiler inputs;
 - verdict tags (compare / predicate / ops) that don't match the semantics.
 
+When the student made a claim, address it by name in the explanation and say \
+whether it holds. A claim can be wrong — an unsorted generator is correct for \
+a problem whose statement never promises sorted input — and saying so plainly \
+is the useful answer; never invent a finding to agree with a student.
+
 Respond with JSON only: {"findings": [strings — empty if none], \
 "verdict": "ok"|"fix", "explanation": "one short paragraph"}.
 """
 
 
-def build_audit_prompt(statement: str, visible_tests, automated_findings: list[str]) -> str:
+def build_audit_prompt(
+    statement: str,
+    visible_tests,
+    automated_findings: list[str],
+    student_note: str | None = None,
+) -> str:
     tests = "\n".join(
         f"- {case}" for case in visible_tests
     ) or "(no visible tests)"
     findings = "\n".join(f"- {f}" for f in automated_findings) or "(none)"
+    note = (
+        "\n\nWHAT THE STUDENT REPORTED (their words, possibly mistaken):\n"
+        f"{student_note.strip()}"
+        if student_note and student_note.strip()
+        else ""
+    )
     return (
         f"PROBLEM STATEMENT:\n{statement}\n\n"
         f"VISIBLE TESTS:\n{tests}\n\n"
-        f"AUTOMATED FINDINGS (fresh oracle vs live oracle):\n{findings}\n\n"
+        f"AUTOMATED FINDINGS (fresh oracle vs live oracle):\n{findings}{note}\n\n"
         "Audit the curation per the system prompt."
     )
 
@@ -132,8 +151,10 @@ Requirements:
 - Implement the same entry point and argument order as the oracle you are shown,
   so it can be run on identical inputs. For class problems the convention is one
   argument: the list of [method, *args] operations.
-- Self-contained: the code may import only random, math, and the decorator
-  reference. No network, no filesystem, no dojo imports.
+- Self-contained: the code may import at most random and math. The decorator
+  is already in scope — never write an import for it (`from decorators import
+  reference` is a hard error: no module named `decorators` exists). No network,
+  no filesystem, no dojo imports.
 - Deterministic where the problem allows ties: prefer the canonical order the
   oracle produces.
 

@@ -498,3 +498,197 @@ def test_the_curator_prompt_taxonomy_is_the_validated_taxonomy():
         assert pattern in enum_line, f"{pattern} missing from the curator prompt"
     for stale in ("dynamic_programming", "math,", "graph,"):
         assert stale not in enum_line.split("— pick")[0]
+
+
+# ------------------------------------------------- the shape-repair boundary
+# A live session died here (2026-09-23): the curator read the prompt's import
+# rule as an instruction to write `from decorators import oracle`, and the
+# ModuleNotFoundError escaped `audit_curation` as a traceback out of run_day.
+
+
+DECORATOR_IMPORT_PROPOSAL = {
+    **CANNED_PROPOSAL,
+    "oracle_code": (
+        "import math\n"
+        "from decorators import oracle\n"
+        "from typing import List\n"
+        "\n"
+        "@oracle('matrix_diagonal_sum')\n"
+        "def _importing_oracle(matrix):\n"
+        "    n = len(matrix)\n"
+        "    total = sum(matrix[i][i] + matrix[i][n - 1 - i] for i in range(n))\n"
+        "    return total - (matrix[n // 2][n // 2] if n % 2 else 0)\n"
+    ),
+    "judge_case_code": (
+        "from decorators import judge_case\n"
+        "\n"
+        "@judge_case('matrix_diagonal_sum')\n"
+        "def _case(n, rng):\n"
+        "    side = max(1, min(n, 12))\n"
+        "    matrix = [[rng.randint(-5, 5) for _ in range(side)] for _ in range(side)]\n"
+        "    return [matrix], _importing_oracle(matrix)\n"
+    ),
+}
+
+
+def test_sanitize_imports_drops_only_what_cannot_resolve():
+    """The decorators are injected into the namespace, so an import for them
+    can only fail; a real module import is somebody's legitimate tool."""
+    from dojo.curator.curator import sanitize_imports
+
+    source = (
+        "import random\n"
+        "from decorators import oracle\n"
+        "import heapq\n"
+        "from collections import deque\n"
+        "from typing import List\n"
+        "\n"
+        "@oracle('x')\n"
+        "def f(a, b):\n"
+        "    return a + b\n"
+    )
+    repaired, dropped = sanitize_imports(source)
+    assert dropped == ["from decorators import oracle"]
+    assert "import heapq" in repaired and "from collections import deque" in repaired
+    assert "List" in repaired and "import random" in repaired
+    # Line numbers survive the repair: a traceback inside the snippet still
+    # points at the right line.
+    assert repaired.splitlines()[0] == "import random"
+    assert repaired.splitlines()[2] == "import heapq"
+    compile(repaired, "<repaired>", "exec")
+
+
+def test_sanitize_imports_is_a_no_op_for_clean_code():
+    from dojo.curator.curator import sanitize_imports
+
+    source = CANNED_PROPOSAL["oracle_code"]
+    assert sanitize_imports(source) == (source, [])
+
+
+def test_sanitize_imports_leaves_broken_syntax_for_validate():
+    from dojo.curator.curator import sanitize_imports
+
+    source = "from decorators import oracle\ndef broken(:\n"
+    assert sanitize_imports(source) == (source, [])  # validate reports it
+
+
+def test_propose_repairs_a_decorator_import_and_says_so():
+    proposal = propose(MockBackend(curator=DECORATOR_IMPORT_PROPOSAL), "some statement")
+    assert "from decorators import" not in proposal["oracle_code"]
+    assert "from decorators import" not in proposal["judge_case_code"]
+    assert proposal["_repairs"] == [
+        "oracle_code: from decorators import oracle",
+        "judge_case_code: from decorators import judge_case",
+    ]
+    # The repair is what makes the artifact set executable.
+    from dojo.curator.curator import _exec_proposal, make_isolated_namespace
+
+    ns = make_isolated_namespace()
+    _exec_proposal(proposal, ns)
+    assert "matrix_diagonal_sum" in ns["ORACLES"]
+    assert "matrix_diagonal_sum" in ns["JUDGE_CASES"]
+
+
+def test_propose_leaves_repairs_absent_when_nothing_was_repaired():
+    proposal = propose(MockBackend(curator=CANNED_PROPOSAL), "some statement")
+    assert "_repairs" not in proposal
+
+
+def test_exec_proposal_raises_curator_error_not_module_error():
+    """The boundary that keeps a bad proposal from killing a session."""
+    from dojo.curator.curator import _exec_proposal, make_isolated_namespace
+
+    with pytest.raises(CuratorError, match="oracle_code failed to execute"):
+        _exec_proposal(
+            {"oracle_code": "raise RuntimeError('curator wrote nonsense')\n"},
+            make_isolated_namespace(),
+        )
+
+
+def test_audit_curation_survives_a_proposal_that_cannot_execute():
+    """The live crash: the fresh run's code raised out of the cross-check.
+
+    The live registration has to be present, or the cross-check — and with it
+    the exec of the fresh proposal — never runs. That is why this bug reached a
+    student's session instead of failing in some offline path."""
+    from dojo.curator.curator import _exec_proposal, audit_curation, make_isolated_namespace
+
+    ns = make_isolated_namespace()
+    _exec_proposal(CANNED_PROPOSAL, ns)
+    backend = MockBackend(curator={**CANNED_PROPOSAL, "oracle_code": "raise SystemError('boom')\n"})
+    audit = audit_curation(
+        backend,
+        CANNED_PROPOSAL["statement"],
+        CANNED_PROPOSAL["visible_tests"],
+        live_oracle=ns["ORACLES"]["matrix_diagonal_sum"],
+        live_generator=ns["JUDGE_CASES"]["matrix_diagonal_sum"],
+    )
+    assert any(
+        "fresh curator run failed" in f for f in audit["automated_findings"]
+    ), audit["automated_findings"]
+    assert audit["verdict"] == "ok"  # the auditor still ran and answered
+
+
+def test_audit_curation_reports_a_stripped_import_as_a_finding():
+    from dojo.curator.curator import audit_curation
+
+    backend = MockBackend(curator=DECORATOR_IMPORT_PROPOSAL)
+    audit = audit_curation(
+        backend, CANNED_PROPOSAL["statement"], CANNED_PROPOSAL["visible_tests"]
+    )
+    assert any(
+        "cannot resolve" in f and "from decorators import" in f
+        for f in audit["automated_findings"]
+    ), audit["automated_findings"]
+
+
+def test_audit_curation_carries_the_student_note_into_the_prompt():
+    """The optional comment is evidence for the auditor, not a verdict."""
+    from dojo.curator.curator import audit_curation
+    from dojo.tutor.backend import Role
+
+    seen: dict[str, str] = {}
+    backend = MockBackend(curator=CANNED_PROPOSAL)
+    real_chat_json = backend.chat_json
+
+    def capture(role, system, user, **kwargs):
+        if role == Role.CURATION_AUDITOR:
+            seen["prompt"] = user
+        return real_chat_json(role, system, user, **kwargs)
+
+    backend.chat_json = capture
+    note = "the generated arrays are not sorted, so O(n) is unachievable"
+    audit = audit_curation(
+        backend,
+        CANNED_PROPOSAL["statement"],
+        CANNED_PROPOSAL["visible_tests"],
+        note=note,
+    )
+    assert note in seen["prompt"]
+    assert "WHAT THE STUDENT REPORTED" in seen["prompt"]
+    assert audit["student_note"] == note
+
+
+def test_audit_prompt_omits_the_note_block_when_there_is_none():
+    from dojo.curator.prompts import build_audit_prompt
+
+    assert "WHAT THE STUDENT REPORTED" not in build_audit_prompt("stmt", [], [])
+    assert "WHAT THE STUDENT REPORTED" not in build_audit_prompt("stmt", [], [], "   ")
+
+
+def test_audit_system_tells_the_auditor_a_student_can_be_wrong():
+    """A report is a claim: the useful answer for a mistaken one is 'no'."""
+    from dojo.curator.prompts import AUDIT_SYSTEM, build_audit_prompt
+
+    assert "possibly mistaken" in build_audit_prompt("stmt", [], [], "a claim")
+    assert "never invent a finding to agree with a student" in AUDIT_SYSTEM
+
+
+def test_the_curator_prompt_forbids_importing_the_decorators():
+    """The wording that caused the crash: it used to invite exactly the import
+    that cannot resolve ("may import only: random, math, and the decorators")."""
+    from dojo.curator.prompts import CURATOR_SYSTEM, REFERENCE_SYSTEM
+
+    for prompt in (CURATOR_SYSTEM, REFERENCE_SYSTEM):
+        assert "decorators" in prompt  # named, so the model can avoid it
+        assert "no module named `decorators` exists" in prompt

@@ -43,6 +43,12 @@ PROBLEM_OVERRIDES = CONTENT_DIR / "problem_overrides.json"
 #: organized by pattern directory (imported by dojo.bank).
 PROBLEMS_DIR = REPO_ROOT / "problems"
 DB_PATH = DATA_DIR / "dojo.db"
+#: Curator provenance + audit reports (gitignored): a proposal and the audit that
+#: judged it, kept so a curation decision can be re-read later. User state, so it
+#: follows DATA_DIR — `dojo report`/`dojo curate` used to spell out
+#: `REPO_ROOT/"data"/…`, which escaped every redirect (and wrote into the real
+#: repo from a test run).
+CURATION_DIR = DATA_DIR / "curation"
 #: Debug log (gitignored): raw AI traffic for post-hoc debugging; cleared on
 #: major version bumps (dojo/debuglog.py).
 LOGS_DIR = DATA_DIR / "logs"

@@ -90,3 +90,140 @@ def test_repo_corpus_parses():
     assert len(problems) >= 30
     for p in problems:
         assert p.slug and p.title and p.difficulty and p.pattern and p.statement
+
+
+# ------------------------------------------------- the mirror, both directions
+# The reseed is additive, so a row whose file is gone stayed forever: 18
+# kebab-case duplicates from the fetcher's naming convention beside the corpus's
+# snake_case one, each also making `dojo list` and the roadmap show one problem
+# twice (v0.13 follow-up).
+
+
+def test_prune_removes_rows_whose_problem_file_is_gone(db, tmp_path: Path):
+    from dojo.bank import prune_stale_problems
+
+    problems = tmp_path / "problems"
+    (problems / "stack").mkdir(parents=True)
+    (problems / "stack" / "valid_parentheses.py").write_text(GOOD)
+    seed_problems(db, problems)
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, created_at) "
+        "VALUES ('valid-parentheses', 'Valid Parentheses', 'Easy', 'stack', 's', '2026-01-01')"
+    )
+    db.commit()
+
+    notes: list[str] = []
+    pruned = prune_stale_problems(db, problems, note=notes.append)
+
+    assert pruned == ["valid-parentheses"]
+    assert db.execute(
+        "SELECT COUNT(*) c FROM problems WHERE slug = 'valid-parentheses'"
+    ).fetchone()["c"] == 0
+    # The row whose file exists is untouched.
+    assert db.execute(
+        "SELECT COUNT(*) c FROM problems WHERE slug = 'valid_parentheses'"
+    ).fetchone()["c"] == 1
+    assert any("Pruned 1 bank row" in line for line in notes)
+
+
+def test_prune_keeps_rows_that_carry_something(db, tmp_path: Path):
+    """Cleanup may never destroy what a student earned."""
+    from dojo.bank import prune_stale_problems
+    from dojo.db import now
+
+    problems = tmp_path / "problems"
+    (problems / "stack").mkdir(parents=True)
+    # Fileless rows: one attempted, one curated, one with a warm-up card.
+    for slug in ("attempted_one", "curated_one", "carded_one"):
+        db.execute(
+            "INSERT INTO problems (slug, title, difficulty, pattern, statement, created_at) "
+            "VALUES (?, 't', 'Easy', 'stack', 's', ?)",
+            (slug, now()),
+        )
+    db.execute("UPDATE problems SET function_name = 'f' WHERE slug = 'curated_one'")
+    db.execute(
+        "INSERT INTO users (name, created_at) VALUES ('andy', ?)", (now(),)
+    )
+    db.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, code, status, started_at, submitted_at) "
+        "SELECT 1, id, 'solve', 'x', 'correct', ?, ? FROM problems "
+        "WHERE slug = 'attempted_one'",
+        (now(), now()),
+    )
+    db.execute(
+        "INSERT INTO item_cards (user_id, slug, pattern, stability, difficulty, due_at, created_at) "
+        "VALUES (1, 'carded_one', 'stack', 1.0, 5.0, ?, ?)",
+        (now(), now()),
+    )
+    db.commit()
+
+    notes: list[str] = []
+    assert prune_stale_problems(db, problems, note=notes.append) == []
+    assert db.execute("SELECT COUNT(*) c FROM problems").fetchone()["c"] == 3
+    assert any("kept because they carry" in line for line in notes)
+
+
+def test_prune_hands_the_ladder_number_to_the_row_that_owns_it(db, tmp_path: Path):
+    """A stale duplicate can be the only row carrying the LeetCode number while
+    the corpus row for the roadmap's title-slug has none — deleting it without
+    handing the number over drops a roadmap problem off the ladder."""
+    from dojo.bank import prune_stale_problems
+
+    problems = tmp_path / "problems"
+    (problems / "arrays_and_hashing").mkdir(parents=True)
+    (problems / "arrays_and_hashing" / "contains-duplicate.py").write_text(GOOD)
+    seed_problems(db, problems)          # row `contains-duplicate`, lc NULL
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, lc_number, created_at) "
+        "VALUES ('contains_duplicate', 'Contains Duplicate', 'Easy', "
+        "'arrays_and_hashing', 's', 217, '2026-01-01')"
+    )
+    db.commit()
+
+    assert prune_stale_problems(db, problems, note=lambda *_: None) == ["contains_duplicate"]
+    row = db.execute(
+        "SELECT lc_number FROM problems WHERE slug = 'contains-duplicate'"
+    ).fetchone()
+    assert row["lc_number"] == 217
+
+
+def test_prune_never_overwrites_an_existing_number(db, tmp_path: Path):
+    from dojo.bank import prune_stale_problems
+
+    problems = tmp_path / "problems"
+    (problems / "arrays_and_hashing").mkdir(parents=True)
+    (problems / "arrays_and_hashing" / "contains-duplicate.py").write_text(GOOD)
+    seed_problems(db, problems)
+    db.execute("UPDATE problems SET lc_number = 999 WHERE slug = 'contains-duplicate'")
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, lc_number, created_at) "
+        "VALUES ('contains_duplicate', 'Contains Duplicate', 'Easy', "
+        "'arrays_and_hashing', 's', 217, '2026-01-01')"
+    )
+    db.commit()
+
+    prune_stale_problems(db, problems, note=lambda *_: None)
+    row = db.execute(
+        "SELECT lc_number FROM problems WHERE slug = 'contains-duplicate'"
+    ).fetchone()
+    assert row["lc_number"] == 999  # a conflict is a curation problem, not a silent fix
+
+
+def test_ensure_seeded_prunes_and_is_idempotent(db, tmp_path: Path):
+    from dojo.bank import ensure_seeded
+
+    problems = tmp_path / "problems"
+    (problems / "stack").mkdir(parents=True)
+    (problems / "stack" / "valid_parentheses.py").write_text(GOOD)
+    db.execute(
+        "INSERT INTO problems (slug, title, difficulty, pattern, statement, created_at) "
+        "VALUES ('valid-parentheses', 't', 'Easy', 'stack', 's', '2026-01-01')"
+    )
+    db.commit()
+
+    notes: list[str] = []
+    ensure_seeded(tmp_path / "dojo.db", problems, note=notes.append)
+    assert any("Pruned 1 bank row" in line for line in notes)
+    notes.clear()
+    ensure_seeded(tmp_path / "dojo.db", problems, note=notes.append)
+    assert notes == []  # nothing left to prune

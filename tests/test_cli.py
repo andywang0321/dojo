@@ -969,3 +969,78 @@ def test_the_pattern_table_reports_the_weakest_card(db, tmp_path, monkeypatch, c
     detail = " ".join(capsys.readouterr().out.split())
     assert "strong_problem" in detail and "90.0" in detail
     assert "weak_problem" in detail
+
+
+def test_main_version_flag_reports_the_pyproject_version(cli_env, capsys):
+    """`dojo --version` reads the one source of truth (v0.13 follow-up)."""
+    import tomllib
+    from pathlib import Path
+
+    from dojo.cli import main
+    from dojo.version import VERSION
+
+    cli_env  # the fixture still normalizes the environment
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--version"])
+    assert exit_info.value.code == 0
+    assert f"dojo {VERSION}" in capsys.readouterr().out
+    repo_root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text())
+    assert VERSION == pyproject["project"]["version"]
+
+
+def test_main_report_writes_the_student_note_into_the_report(cli_env, monkeypatch):
+    """`dojo report <slug> --note TEXT` — the observation reaches the auditor and
+    the report JSON on disk."""
+    from dojo.cli import main
+
+    rec, db_path, _workbench, _problems = cli_env
+    _seed_user(db_path)
+    main(["list"])  # seeds the bank
+
+    seen: dict = {}
+
+    def fake_audit(backend, statement, tests, **kwargs):
+        seen["note"] = kwargs.get("note")
+        return {
+            "findings": [],
+            "verdict": "ok",
+            "explanation": "clean",
+            "automated_findings": ["n=3 seed=1: live oracle and fresh oracle disagree"],
+            "student_note": kwargs.get("note"),
+        }
+
+    monkeypatch.setattr("dojo.curator.audit_curation", fake_audit)
+    note = "the generated arrays are not sorted, so O(n) is unachievable"
+    assert main(["report", "valid_parentheses", "--note", note]) == 0
+    assert seen["note"] == note
+    assert "WHAT" not in rec.text  # the note is echoed, not the prompt scaffolding
+    assert note in rec.text
+    assert "live oracle and fresh oracle disagree" in rec.text  # cross-check shown
+
+    from dojo.config import CURATION_DIR
+
+    # The report lands under DATA_DIR (user state), so the conftest redirect
+    # keeps it out of the real repo.
+    report_path = CURATION_DIR / "valid_parentheses.report.json"
+    assert report_path.exists()
+    assert json.loads(report_path.read_text())["student_note"] == note
+
+
+def test_main_report_without_a_note_still_audits(cli_env, monkeypatch):
+    from dojo.cli import main
+
+    rec, db_path, _workbench, _problems = cli_env
+    _seed_user(db_path)
+    main(["list"])
+
+    seen: dict = {}
+
+    def fake_audit(backend, statement, tests, **kwargs):
+        seen["note"] = kwargs.get("note")
+        return {"findings": [], "verdict": "ok", "explanation": "", "automated_findings": []}
+
+    monkeypatch.setattr("dojo.curator.audit_curation", fake_audit)
+    assert main(["report", "valid_parentheses"]) == 0
+    assert seen["note"] is None
+    assert "No contract violations found." in rec.text

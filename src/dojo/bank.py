@@ -182,9 +182,117 @@ def seed_problems(conn: sqlite3.Connection, root: Path = PROBLEMS_DIR) -> int:
     return inserted
 
 
-def ensure_seeded(db_path: Path, root: Path = PROBLEMS_DIR) -> int:
+def _hand_over_lc_numbers(conn: sqlite3.Connection, doomed: list[str]) -> list[str]:
+    """Move a doomed row's LeetCode number to the seed row for the same ladder
+    problem, before the row goes.
+
+    A fetcher-landed duplicate is often the only row carrying the number, while
+    the corpus row for the roadmap's own title-slug has none (three live cases:
+    LC 50, 208, 235). The ladder matches on `problems.lc_number`, so deleting the
+    duplicate without handing the number over would silently drop a roadmap
+    problem — and `dojo fetch --all` would then re-land the duplicate file it was
+    deleted for. Returns the moves it made, as `"<lc> -> <slug>"` strings."""
+    if not doomed:
+        return []
+    from dojo.roadmap import load_roadmap
+
+    by_lc: dict[int, str] = {}
+    for group in load_roadmap():
+        for entry in group["entries"]:
+            number, _, slug = entry.partition("_")
+            if number.isdigit():
+                by_lc[int(number)] = slug.replace("_", "-")
+    received = []
+    for slug in doomed:
+        row = conn.execute(
+            "SELECT lc_number FROM problems WHERE slug = ?", (slug,)
+        ).fetchone()
+        if row is None or row["lc_number"] is None:
+            continue
+        lc = row["lc_number"]
+        target = by_lc.get(lc)
+        if target is None or target == slug:
+            continue
+        # Never overwrite a tag another row already holds: a conflicting number
+        # is a curation problem to see, not to paper over.
+        moved = conn.execute(
+            "UPDATE problems SET lc_number = ? WHERE slug = ? AND lc_number IS NULL",
+            (lc, target),
+        ).rowcount
+        if moved:
+            received.append(f"{lc} -> {target}")
+    return received
+
+
+def prune_stale_problems(
+    conn: sqlite3.Connection, root: Path = PROBLEMS_DIR, *, note=None
+) -> list[str]:
+    """Delete bank rows that no longer correspond to anything on disk.
+
+    The bank is defined as a mirror of ``problems/`` (v0.5), but the reseed is
+    additive-only, so a row whose seed file is gone stays forever. Two naming
+    conventions for the same problem (the fetcher's LeetCode kebab-case slug
+    beside the corpus's snake_case one) left 18 dead duplicates that way, each
+    also making the roadmap and `dojo list` show one problem twice.
+
+    The criterion is deliberately the weakest one that cannot lose anything: a
+    row with no seed file, no curation, no attempt and no warm-up card. A row
+    an attempt references is never touched (`dojo history`/`show` need its
+    statement), and a curated or card-bearing row is kept and merely reported —
+    deleting something a student earned is not cleanup.
+
+    ``note`` is an optional ``print``-alike, so the CLI startup can say what
+    happened instead of silently shrinking the table."""
+    files = {path.stem for path in Path(root).rglob("*.py")}
+    rows = conn.execute(
+        """
+        SELECT p.slug,
+               (p.function_name IS NOT NULL OR p.visible_tests IS NOT NULL)
+                   AS curated,
+               EXISTS (SELECT 1 FROM attempts a WHERE a.problem_id = p.id)
+                   AS attempted,
+               EXISTS (SELECT 1 FROM item_cards c WHERE c.slug = p.slug)
+                   AS carded
+        FROM problems p
+        """
+    ).fetchall()
+    fileless = [row for row in rows if row["slug"] not in files]
+    stale = [
+        row["slug"]
+        for row in fileless
+        if not (row["curated"] or row["attempted"] or row["carded"])
+    ]
+    stranded = [row["slug"] for row in fileless if row["slug"] not in stale]
+    handed_over = _hand_over_lc_numbers(conn, stale)
+    if stale:
+        conn.executemany("DELETE FROM problems WHERE slug = ?", [(s,) for s in stale])
+        conn.commit()
+    if note is not None:
+        if stale:
+            note(
+                f"[dim]Pruned {len(stale)} bank row(s) with no problem file: "
+                f"{', '.join(sorted(stale))}[/dim]"
+            )
+        if handed_over:
+            note(
+                "[dim]Moved ladder number(s) to the problem that owns them: "
+                f"{', '.join(handed_over)}[/dim]"
+            )
+        if stranded:
+            note(
+                f"[yellow]{len(stranded)} bank row(s) have no problem file — kept "
+                "because they carry curation, attempts, or a warm-up card: "
+                f"{', '.join(sorted(stranded))}[/yellow]"
+            )
+    return stale
+
+
+def ensure_seeded(db_path: Path, root: Path = PROBLEMS_DIR, *, note=None) -> int:
     """The startup reseed (v0.5): the bank always mirrors problems/.
     Idempotent upsert — never deletes rows attempts reference. Runs at the
     CLI entry layer, not in db.connect() (bank imports db; the reverse
     would be circular)."""
-    return seed_problems(connect(db_path), root)
+    conn = connect(db_path)
+    seeded = seed_problems(conn, root)
+    prune_stale_problems(conn, root, note=note)
+    return seeded

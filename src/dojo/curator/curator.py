@@ -12,6 +12,9 @@ curation contract tests (tests/test_registry.py) as the acceptance gate.
 
 from __future__ import annotations
 
+import ast
+import importlib
+import importlib.util
 import json
 import random
 import re
@@ -110,6 +113,100 @@ def propose(backend, statement: str, hints: dict | None = None) -> dict:
     )
 
 
+_MODULE_AVAILABLE: dict[str, bool] = {}
+
+
+def _module_available(name: str) -> bool:
+    """Whether `import name` could succeed inside an isolated namespace."""
+    if not name:
+        return False
+    if name not in _MODULE_AVAILABLE:
+        try:
+            _MODULE_AVAILABLE[name] = importlib.util.find_spec(name) is not None
+        except Exception:  # noqa: BLE001 - a missing parent package raises here
+            _MODULE_AVAILABLE[name] = False
+    return _MODULE_AVAILABLE[name]
+
+
+def _import_survives(node: ast.Import | ast.ImportFrom) -> bool:
+    if isinstance(node, ast.Import):
+        return all(_module_available(alias.name) for alias in node.names)
+    if node.level:  # a relative import needs a package — never available here
+        return False
+    if not _module_available(node.module or ""):
+        return False
+    names = [alias.name for alias in node.names]
+    if "*" in names:
+        return True
+    try:
+        module = importlib.import_module(node.module)
+    except Exception:  # noqa: BLE001 - an unimportable module is exactly the case
+        return False
+    return all(hasattr(module, name) for name in names)
+
+
+def sanitize_imports(source: str) -> tuple[str, list[str]]:
+    """Drop import statements the registry namespace cannot satisfy.
+
+    Model shape variance is repaired, never fatal — the same stance as
+    `_ensure_reference_registered` and `reviewer.normalize_review`. A live
+    session (2026-09-23) ended in a traceback because the curator read the
+    prompt's "may import only: random, math, and the decorators" as an
+    instruction to write ``from decorators import oracle``; there is no such
+    module, so `audit_curation`'s cross-check exec raised ModuleNotFoundError
+    out of the session. The decorators are *injected* into the namespace, so an
+    import for them cannot do anything but fail.
+
+    Line numbers are preserved (removed statements become blank lines) so
+    tracebacks inside the snippet still point at the right line. Returns the
+    repaired source and the removed statements, because a systematically wrong
+    model has to stay visible rather than being silently patched.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source, []  # `validate` reports the syntax error properly
+    drop: list[tuple[int, int]] = []
+    removed: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and not _import_survives(node):
+            end = node.end_lineno or node.lineno
+            drop.append((node.lineno, end))
+            removed.append(" ".join(ast.unparse(node).split()))
+    if not drop:
+        return source, []
+    lines = source.splitlines(keepends=True)
+    for start, end in drop:
+        lines[start - 1 : end] = ["\n"] * (end - start + 1)
+    return "".join(lines), removed
+
+
+def _append_note(note: str, extra: str) -> str:
+    """Fold a repair into the one-line note the CLI prints. Repairs are always
+    announced: a shape the model keeps getting wrong must stay visible."""
+    return f"{note} ({extra})" if note else extra
+
+
+def _sanitize_proposal(proposal: dict) -> list[str]:
+    """Repair every code field in place; returns the removed import statements."""
+    removed: list[str] = []
+    for field in (
+        "oracle_code",
+        "judge_case_code",
+        "reference_code",
+        "checker_code",
+        "profiler_code",
+    ):
+        source = proposal.get(field)
+        if not source:
+            continue
+        repaired, dropped = sanitize_imports(source)
+        if dropped:
+            proposal[field] = repaired
+            removed.extend(f"{field}: {stmt}" for stmt in dropped)
+    return removed
+
+
 def _backend_json(backend, role, system: str, user: str, what: str) -> dict:
     """One AI call, with the transport boundary applied (v0.13).
 
@@ -128,7 +225,10 @@ def _propose_with(backend, role, system: str, user: str) -> dict:
     raw = _backend_json(backend, role, system, user, "proposing")
     if "error" in raw:
         raise CuratorError(f"curator returned non-JSON: {raw['error']}")
+    repairs = _sanitize_proposal(raw)
     validate(raw)
+    if repairs:
+        raw["_repairs"] = repairs
     return raw
 
 
@@ -164,6 +264,12 @@ def make_isolated_namespace() -> dict:
 
 
 def _exec_proposal(proposal: dict, namespace: dict) -> None:
+    """Execute a proposal's code fields into a namespace, as a `CuratorError`.
+
+    The boundary matters: this runs *model-written* code, so anything it can
+    raise (ModuleNotFoundError from an import, NameError from a typo) used to
+    escape `audit_curation` as a traceback and kill the student's session —
+    `audit_curation` only catches `CuratorError` (live crash, 2026-09-23)."""
     for field in (
         "oracle_code",
         "judge_case_code",
@@ -172,8 +278,12 @@ def _exec_proposal(proposal: dict, namespace: dict) -> None:
         "profiler_code",
     ):
         source = proposal.get(field)
-        if source:
-            exec(compile(source, f"<dual {field}>", "exec"), namespace)
+        if not source:
+            continue
+        try:
+            exec(compile(source, f"<curator {field}>", "exec"), namespace)
+        except Exception as exc:  # noqa: BLE001 - the boundary is the point
+            raise CuratorError(f"{field} failed to execute: {type(exc).__name__}: {exc}") from exc
 
 
 def _strict_equal(a, b) -> bool:
@@ -327,13 +437,20 @@ def audit_curation(
     *,
     live_oracle=None,
     live_generator=None,
+    note: str | None = None,
 ) -> dict:
     """Cross-check the live oracle against a fresh curator run, then let the
     audit agent reason about the prompt-vs-judge contract. Returns the audit
-    JSON: {"findings": [...], "verdict": "ok"|"fix", "explanation": ...}."""
+    JSON: {"findings": [...], "verdict": "ok"|"fix", "explanation": ...}.
+
+    ``note`` is the student's own observation ("the generated arrays are not
+    sorted, so O(n) is unachievable"). It goes into the audit prompt because it
+    is evidence, not a verdict: the auditor is told to confirm or refute it —
+    a report can be mistaken, and the audit is where that gets decided."""
     from dojo.curator.prompts import AUDIT_SYSTEM, build_audit_prompt
 
     automated: list[str] = []
+    fresh: dict = {}
     try:
         fresh = propose(backend, statement)
         if live_oracle is not None and live_generator is not None and fresh.get("oracle_code"):
@@ -358,19 +475,26 @@ def audit_curation(
                             break
                     if len(automated) >= 5:
                         break
-    except CuratorError:
-        automated.append("fresh curator run failed — cannot cross-check")
+    except CuratorError as exc:
+        automated.append(f"fresh curator run failed — cannot cross-check ({exc})")
+    for repair in fresh.get("_repairs") or []:
+        automated.append(
+            f"the fresh curator run wrote an import that cannot resolve: {repair} "
+            "(stripped before execution; the model is misreading the import rule)"
+        )
 
     audit = _backend_json(
         backend,
         Role.CURATION_AUDITOR,
         AUDIT_SYSTEM,
-        build_audit_prompt(statement, visible_tests, automated),
+        build_audit_prompt(statement, visible_tests, automated, note),
         "auditing a curation",
     )
     if "error" in audit:
         raise CuratorError(f"auditor returned non-JSON: {audit['error']}")
     audit["automated_findings"] = automated
+    if note:
+        audit["student_note"] = note
     return audit
 
 
@@ -617,6 +741,7 @@ def add_reference(
     source = (raw.get("reference_code") or "").strip()
     if not source:
         raise CuratorError("the reference writer returned no reference_code")
+    source, dropped = sanitize_imports(source)
     try:
         compile(source, f"<reference {slug}>", "exec")
     except SyntaxError as exc:
@@ -665,8 +790,10 @@ def add_reference(
         registry_path.write_text(registry_text)
         raise CuratorError(f"verification gate failed; rolled back.\n{output}")
     note = raw.get("note", "")
-    if repair:
-        note = f"{note} ({repair})" if note else repair
+    if dropped:
+        note = _append_note(note, "stripped unusable import(s): " + "; ".join(dropped))
+    if repair:  # _ensure_reference_registered's shape repair (missing decorator, …)
+        note = _append_note(note, repair)
     return {"slug": slug, "note": note, "verification": output or "verified"}
 
 

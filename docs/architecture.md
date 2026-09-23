@@ -34,7 +34,10 @@ src/dojo/
   editor.py         # $EDITOR launching: detached GUI, tmux/macOS windows for terminal editors
   db.py             # SQLite schema (users, problems, attempts, pattern_cards) +
                     # migrations + attempt-history and trends queries
-  bank.py           # seed importer: problems/**/*.py docstrings -> problems
+  bank.py           # seed importer: problems/**/*.py docstrings -> problems, plus
+                    # the prune that keeps the bank a mirror (v0.13 follow-up)
+  version.py        # VERSION/MAJOR_VERSION, derived from pyproject.toml (the single
+                    # source of truth; MAJOR_VERSION gates debug-log retention)
   complexity.py     # O(...) normalization + mismatch logic
   patterns.py       # the pattern taxonomy + LeetCode tag -> pattern mapping
   static.py         # radon cyclomatic complexity + ruff at submit
@@ -165,7 +168,7 @@ All `$EDITOR` behavior lives in `editor.py`. GUI editors detach via `Popen(start
 - **The practice loop (v0.8):** `_cmd_day` and `_cmd_learn` run solve sessions through `_run_practice_session`, which loops while the outcome is `"practice"` (the in-session learn handoff) — always the same slug. `run_warmups` treats `"practice"` like quit.
 - **Learning mode (v0.8):** `dojo learn [TOPIC]` (USER_COMMANDS member — needs the active user); no topic → the shared `_choose` numbered picker (generalized from the user picker); unknown topic → a `difflib` did-you-mean, never a silent wrong pattern.
 - **One computer, one user:** no `--user` flags anywhere. The active user resolves from gitignored `data/dojo.conf` → the DB's sole user; zero users means first run, which triggers the setup wizard (`dojo/setup.py`, pure injectable logic) and then continues the original command. Non-TTY first runs print guidance instead of prompting.
-- **Auto-reseed:** every CLI entry (except `setup`) runs `bank.ensure_seeded` — the bank always mirrors `problems/` (idempotent upsert, additive-only, at the CLI layer, not in `db.connect()`).
+- **Auto-reseed:** every CLI entry (except `setup`) runs `bank.ensure_seeded` — the bank always mirrors `problems/` (idempotent upsert, additive-only, at the CLI layer, not in `db.connect()`). **Both directions since v0.13 follow-up:** `ensure_seeded` then prunes with `bank.prune_stale_problems`, which deletes a row that has no seed file, no curation, no attempt and no card — the shape left behind when a problem file is removed or renamed (18 fetcher-named duplicates and 3 fileless rows in the live bank, all invisible-value rows that still showed up in `dojo list`). It is conservative by construction: a row that carries curation, an attempt or a warm-up card is kept and merely *reported*, and before deleting a row it **hands that row's LeetCode number to the seed row for the same roadmap entry** — a dead duplicate is often the only row holding the number, and the ladder matches on it. The prune announces itself at startup (a shrinking bank is never silent). `dojo fetch --all` re-tags by slug for the same reason: it used to skip a problem whenever its number existed *somewhere*, which is how LC 50/208/235 stayed on dead rows with the real problems untagged and permanently off the ladder.
 - **`dojo user [name]`** switches the active user; no name → numbered picker. A conf user missing from the DB is an error, never a silent typo'd account.
 - `history` (list attempts, newest first) and `show <id>` (full attempt detail) render rows fetched by `db.list_attempts` / `db.get_attempt`.
 - Interactive flows read from `console.input`; tests use the `FakeConsole` fixture (its `actions` hook simulates editing the workbench mid-session).

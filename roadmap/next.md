@@ -134,6 +134,40 @@ that would not compile are refused loudly; the timing flake is gone (the probe's
 measurement is injected in tests, never its verdict); and the suite now drives
 `cli.main` end to end against a sandboxed DB and workbench.
 
+## Reported (2026-09-23) — duplicates, a report crash, and one version
+
+Three live reports, each with a diagnosis that turned out to be the second one:
+
+1. **"Remove all duplicate problems, keep the better version."** Every
+   LeetCode-shaped slug existed twice: the fetcher's kebab-case row (dead — no
+   curation, no lc number, no attempt, no card) beside the corpus's snake_case row
+   (curated, tagged, sometimes solved). All 18 pairs resolved the same way, so the
+   curated twin survived and the 18 duplicate files are gone; three further rows
+   had lost their files altogether. `bank.prune_stale_problems` now deletes a
+   fileless, uncurated, unattempted, card-less row at startup (announced, never
+   silent) and hands its LeetCode number to the row that owns the problem — and
+   `dojo fetch --all` re-tags by slug, because its old "already in the bank" check
+   only asked whether the number existed *somewhere*, which is how LC 50/208/235
+   were skipped forever and left off the ladder. Live effect: 182 rows → 161 (one
+   per file), the ladder set unchanged, no orphan attempts or cards. **The
+   `two_sum` premise was checked and corrected:** neither statement mentions
+   sortedness, and the sorted variant is `two_sum_2` (LC 167), already curated with
+   its own card — the generator for LC 1 is right to produce unsorted arrays.
+2. **"Report crash."** The curator read the prompt's import rule ("may import
+   only: random, math, and the decorators") as an instruction to write
+   `from decorators import oracle`, and the resulting `ModuleNotFoundError` escaped
+   `audit_curation` as a traceback that killed the session. Fixed: the prompt says
+   that import is a hard error, `curator.sanitize_imports` repairs the shape and
+   reports what it stripped, `_exec_proposal` raises `CuratorError`, and `report`
+   runs behind `guard` (in both phases). A report can now carry the student's own
+   words — `report <text>` / `dojo report --note TEXT` — which the auditor must
+   address by name, including by disagreeing.
+3. **"Use `pyproject.toml` as the version source of truth."** Done and pinned:
+   `version.VERSION` reads it, `MAJOR_VERSION` derives the debug-log gate from it,
+   `dojo --version` reports it, and a test fails if any `src/` file hardcodes a
+   version literal — which is how `0.13.0`, `"0.10"` and `0.1.0` coexisted for two
+   stages.
+
 ## v0.11 work — shipped
 
 - Warm-up picks rotate (per-problem `MAX(submitted_at)` aggregation).

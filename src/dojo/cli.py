@@ -33,7 +33,9 @@ from rich.table import Table
 from dojo import scheduler
 from dojo.bank import ensure_seeded
 from dojo.config import (
+    CURATION_DIR,
     DB_PATH,
+    DOJO_CONF,
     PROBLEMS_DIR,
     REPO_ROOT,
     WORKBENCH_DIR,
@@ -55,6 +57,7 @@ from dojo.db import (
 from dojo.patterns import PATTERNS
 from dojo.terminal import make_prompt
 from dojo.ui import table as ui_table
+from dojo.version import VERSION
 
 
 class NeedsSetup(RuntimeError):
@@ -197,7 +200,7 @@ def _cmd_setup(args) -> int:
     run_wizard(
         console,
         dotenv_path=REPO_ROOT / ".env",
-        conf_path=REPO_ROOT / "data" / "dojo.conf",
+        conf_path=DOJO_CONF,
         db_path=DB_PATH,
         problems_dir=PROBLEMS_DIR,
         default_name=default_user_name(os.environ.get("USER"), _git_user_name()),
@@ -987,7 +990,7 @@ def _cmd_curate(args) -> int:
         console.print(f"[red]Curation proposal rejected: {exc}[/red]")
         return 1
     # Provenance record (gitignored scratch).
-    proposal_dir = REPO_ROOT / "data" / "curation"
+    proposal_dir = CURATION_DIR
     proposal_dir.mkdir(parents=True, exist_ok=True)
     (proposal_dir / f"{proposal['slug']}.proposal.json").write_text(
         json.dumps(proposal, indent=2)
@@ -1066,6 +1069,14 @@ def _cmd_fetch_all(console, delay: float = 0.8) -> int:
     failures = []
     for lc, slug in _roadmap_entries():
         if lc in existing_rows and (slug in seed_files or lc in curated_lc):
+            # The number being *somewhere* in the table is not enough: a stale
+            # duplicate once owned it while the seed row for this slug had none,
+            # so the bulk fetch skipped the problem forever and left a roadmap
+            # problem off the ladder (LC 50/208/235, v0.13 follow-up). Re-tag by
+            # slug — the update is a no-op unless this row's tag is NULL.
+            if slug in seed_files:
+                with connect(DB_PATH) as conn:
+                    _tag_lc_number(conn, slug, lc)
             skipped += 1
             continue
         if slug in seed_files:
@@ -1167,7 +1178,7 @@ def _cmd_fetch(args) -> int:
             f"rejected: {exc}[/yellow]"
         )
         return 1
-    proposal_dir = REPO_ROOT / "data" / "curation"
+    proposal_dir = CURATION_DIR
     proposal_dir.mkdir(parents=True, exist_ok=True)
     (proposal_dir / f"{proposal['slug']}.proposal.json").write_text(
         json.dumps(proposal, indent=2)
@@ -1276,6 +1287,7 @@ def _cmd_report(args) -> int:
     if problem is None:
         console.print(f"[red]Unknown problem '{slug}'.[/red]")
         return 1
+    note = (getattr(args, "note", None) or "").strip() or None
     try:
         audit = audit_curation(
             backend,
@@ -1283,23 +1295,30 @@ def _cmd_report(args) -> int:
             loads_json(problem["visible_tests"], []),
             live_oracle=ORACLES.get(slug),
             live_generator=JUDGE_CASES.get(slug),
+            note=note,
         )
     except CuratorError as exc:
         console.print(f"[red]Audit failed: {exc}[/red]")
         return 1
-    report_dir = REPO_ROOT / "data" / "curation"
+    report_dir = CURATION_DIR
     report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / f"{slug}.report.json").write_text(json.dumps(audit, indent=2))
+    report_path = report_dir / f"{slug}.report.json"
+    report_path.write_text(json.dumps(audit, indent=2))
     findings = audit.get("findings") or []
     console.print(
         f"[bold]Curation audit: {slug}[/bold] — verdict: {audit.get('verdict', '?')}"
     )
+    if note:
+        console.print(f"[dim]Your report: {note}[/dim]")
+    for finding in audit.get("automated_findings") or []:
+        console.print(f"[dim]• cross-check: {finding}[/dim]")
     for finding in findings:
         console.print(f"[yellow]• {finding}[/yellow]")
     if audit.get("explanation"):
         console.print(f"[dim]{audit['explanation']}[/dim]")
     if not findings:
         console.print("[green]No contract violations found.[/green]")
+    console.print(f"[dim]Report written to {report_path}[/dim]")
     if args.fix:
         if audit.get("verdict") != "fix":
             console.print("[dim]Verdict is 'ok' — skipping re-curation.[/dim]")
@@ -1483,7 +1502,13 @@ def _cmd_rebuild_cards(args) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="dojo", description="AI-guided interview prep: never-solve tutor + empirical grader."
+        prog="dojo",
+        description="AI-guided interview prep: never-solve tutor + empirical grader.",
+    )
+    # pyproject.toml is the single source of truth for the version (v0.13
+    # follow-up); this flag is how it becomes observable from the CLI.
+    parser.add_argument(
+        "--version", action="version", version=f"dojo {VERSION}"
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -1630,6 +1655,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report = sub.add_parser("report", help="audit a problem's curation (AI); --fix re-curates")
     p_report.add_argument("slug", nargs="?", help="problem slug (default: active session)")
     p_report.add_argument(
+        "--note",
+        default=None,
+        metavar="TEXT",
+        help="what you observed, in your words — the auditor answers it",
+    )
+    p_report.add_argument(
         "--fix",
         action="store_true",
         help="re-curate through the pipeline when the audit verdict is 'fix'",
@@ -1674,7 +1705,7 @@ def _resolve_for_dispatch(args, console: Console):
                 run_wizard(
                     console,
                     dotenv_path=REPO_ROOT / ".env",
-                    conf_path=REPO_ROOT / "data" / "dojo.conf",
+                    conf_path=DOJO_CONF,
                     db_path=DB_PATH,
                     problems_dir=PROBLEMS_DIR,
                     default_name=default_user_name(
@@ -1718,6 +1749,7 @@ AI review), and scheduled for spaced recall.
 Usage:
   dojo                  the daily routine
   dojo <problem-slug>   the routine on one specific problem
+  dojo --version        the version (pyproject.toml is its source of truth)
 
 Commands:
   learn [TOPIC]   study a topic with the teacher, then practice a problem
@@ -1757,7 +1789,9 @@ def main(argv: list[str] | None = None) -> int:
         auto_update()
     console = Console()
     if args.command != "setup":
-        ensure_seeded(DB_PATH)
+        # A row whose problem file is gone is pruned here, and the student is
+        # told: a shrinking bank must never be silent (v0.13 follow-up).
+        ensure_seeded(DB_PATH, note=console.print)
     if args.command in USER_COMMANDS:
         args._user = _resolve_for_dispatch(args, console)
         _migrate_cards(console, args._user)
