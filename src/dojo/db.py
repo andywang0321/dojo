@@ -292,7 +292,8 @@ def list_attempts(
                a.self_reported_time, a.self_reported_space,
                a.measured_time_class, a.measured_time_r2,
                a.measured_space_class, a.measured_space_r2,
-               a.reflection, p.slug, p.title, p.difficulty, p.pattern
+               a.reflection, p.slug, p.title, p.difficulty, p.pattern,
+               p.expected_time, p.expected_space
         FROM attempts a JOIN problems p ON p.id = a.problem_id
         WHERE a.user_id = ?
     """

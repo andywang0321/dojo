@@ -1046,13 +1046,17 @@ def test_main_report_without_a_note_still_audits(cli_env, monkeypatch):
     assert "No contract violations found." in rec.text
 
 
-def test_main_history_reads_chronologically_and_drops_the_dead_r2_column(cli_env):
-    """The table is long and the eye ends at its bottom, so the newest attempt is
-    the last line (v0.13 follow-up). `--limit` still means the most recent N.
-
-    The r² column is gone with the v0.12 fit that produced it: `measured_*_r2`
-    has been written as NULL since then, so every cell was an em dash (audit S3.3).
+def test_main_history_shows_time_slash_space_and_a_relative_date(cli_env):
+    """The three complexity-ish columns are `expected`, `measured` and
+    `submitted`, each readable at a glance: the expected and measured cells are
+    "Time / Space", and the timestamp is how long ago it was (v0.13 follow-up).
+    `claimed` — the student's own answers *with their justifications* — wrapped
+    over several lines a row, and the r² column died with the v0.12 fit (audit
+    S3.3). The table is long and the eye ends at its bottom, so it reads oldest
+    first while `--limit` still means the most recent N.
     """
+    from datetime import datetime, timedelta, timezone
+
     from dojo.cli import main
     from dojo.db import connect, now
 
@@ -1064,7 +1068,10 @@ def test_main_history_reads_chronologically_and_drops_the_dead_r2_column(cli_env
     newer = conn.execute(
         "SELECT id FROM problems WHERE slug = 'contains_duplicate'"
     ).fetchone()["id"]
-    for problem_id, stamp in ((older, "2026-01-01T00:00:00+00:00"), (newer, "2026-02-01T00:00:00+00:00")):
+    # Relative to *now*, so the submitted column's phrasing is deterministic:
+    # three days back is three calendar days whatever the clock says.
+    older_stamp = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    for problem_id, stamp in ((older, older_stamp), (newer, now())):
         conn.execute(
             "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at)"
             " VALUES (?, ?, 'solve', 'correct', ?, ?)",
@@ -1076,10 +1083,45 @@ def test_main_history_reads_chronologically_and_drops_the_dead_r2_column(cli_env
     assert main(["history"]) == 0
     text = " ".join(rec.text.split())                # collapse the table's wrapping
     assert text.index("two_sum") < text.index("contains_duplicate")
-    assert "r²" not in text
+    # The new columns, and the ones that are gone.
+    for header in ("expected", "measured", "submitted"):
+        assert header in text
+    for gone in ("claimed", "r²", "self-reported"):
+        assert gone not in text
+    # two_sum's statement asks for O(n) time and O(n) space; nothing was measured
+    # for these synthetic attempts; and the timestamp is relative, not raw.
+    assert "O(n) / O(n)" in text
+    assert "— / —" in text
+    assert "3 days ago" in text and "just now" in text
+    assert older_stamp[:19] not in text           # the raw timestamp is replaced
 
     # `--limit 1` is the *newest* attempt, wherever it now sits in the table.
     rec.out.clear()
     assert main(["history", "--limit", "1"]) == 0
     limited = " ".join(rec.text.split())
     assert "contains_duplicate" in limited and "two_sum" not in limited
+
+
+def test_main_history_marks_a_problem_with_no_stated_target(cli_env):
+    """`expected` comes from the statement's "You should aim for ..." line, which
+    not every problem carries — a missing side is an em dash, not a blank."""
+    from dojo.cli import main
+    from dojo.db import connect, now
+
+    rec, db_path, _workbench, _problems = cli_env
+    uid = _seed_user(db_path)
+    assert main(["list"]) == 0
+    conn = connect(db_path)
+    conn.execute("UPDATE problems SET expected_time = NULL, expected_space = NULL "
+                 "WHERE slug = 'two_sum'")
+    problem_id = conn.execute("SELECT id FROM problems WHERE slug = 'two_sum'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at)"
+        " VALUES (?, ?, 'solve', 'correct', ?, ?)",
+        (uid, problem_id, now(), now()),
+    )
+    conn.commit()
+
+    rec.out.clear()
+    assert main(["history", "--slug", "two_sum"]) == 0
+    assert "— / —" in rec.text

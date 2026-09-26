@@ -645,6 +645,13 @@ def _cmd_check(args) -> int:
     return 0 if outcome == "ok" else 1
 
 
+def _complexity_pair(time_class: str | None, space_class: str | None) -> str:
+    """One history cell: "O(n) / O(1)" — Time / Space, the shape all three
+    complexity columns share. A missing side is an em dash rather than a blank, so
+    a half-known row still lines up."""
+    return f"{time_class or '—'} / {space_class or '—'}"
+
+
 def _cmd_history(args) -> int:
     console = Console()
     user = getattr(args, "_user", None)
@@ -655,30 +662,32 @@ def _cmd_history(args) -> int:
         user_id = get_or_create_user(conn, user)
         rows = list_attempts(conn, user_id, slug=args.slug, limit=args.limit)
     table = ui_table(f"Attempts — {user}")
-    # No r² column: `measured_*_r2` stopped being written in v0.12 with the
-    # absolute fit it described, so every cell was an em dash (audit S3.3).
+    # Three complexity columns, all "Time / Space", plus a relative timestamp
+    # (v0.13 follow-up). What they replaced: `claimed` — the student's own
+    # complexity answers *and their justifications*, which wrapped over four lines
+    # a row and pushed the informative cells off the screen — and a bare
+    # timestamp nobody counts backwards from. No r² column either: `measured_*_r2`
+    # stopped being written in v0.12 with the absolute fit it described, so every
+    # cell was an em dash (audit S3.3).
     for col in (
         "id", "problem", "kind", "status", "hints",
-        "claimed", "measured", "submitted",
+        "expected", "measured", "submitted",
     ):
         table.add_column(col)
-    # Chronological (v0.13 follow-up): `--limit` still means the *most recent* N —
-    # `list_attempts` asks the database for newest-first — but the table reads
-    # oldest to newest, so the attempt you just made is the last line. The table
-    # is long, and the eye ends at its bottom.
+    # Chronological: `--limit` still means the *most recent* N — `list_attempts`
+    # asks the database for newest-first — but the table reads oldest to newest,
+    # so the attempt you just made is the last line. The table is long, and the
+    # eye ends at its bottom.
     for r in reversed(rows):
-        claimed = " / ".join(
-            x for x in (r["self_reported_time"], r["self_reported_space"]) if x
-        )
         table.add_row(
             str(r["id"]),
             f"{r['title']} [dim]({r['slug']})[/dim]",
             r["kind"],
             r["status"],
             str(r["hint_count"]),
-            (claimed or "—")[:40],
-            r["measured_time_class"] or "—",
-            (r["submitted_at"] or r["started_at"])[:19],
+            _complexity_pair(r["expected_time"], r["expected_space"]),
+            _complexity_pair(r["measured_time_class"], r["measured_space_class"]),
+            scheduler.ago_phrase(r["submitted_at"] or r["started_at"]),
         )
     console.print(table)
     if rows:

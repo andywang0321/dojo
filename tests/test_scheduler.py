@@ -480,3 +480,42 @@ def test_next_due_returns_the_earliest_card(db):
     _card_due_in(db, uid, days=30, pattern="stack")
     _card_due_in(db, uid, days=2, pattern="heap")
     assert scheduler.next_due(db, uid)["pattern"] == "heap"
+
+
+def test_ago_phrase_buckets_and_never_counts_backwards():
+    """The past-facing sibling of `due_phrase`, used by `dojo history`'s submitted
+    column: buckets, because the question is "when did I last work on this", not
+    "what was the timestamp" (v0.13 follow-up)."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 26, 20, 0, tzinfo=timezone.utc)
+
+    def ago(**kwargs) -> str:
+        return scheduler.ago_phrase((now - timedelta(**kwargs)).isoformat(), now)
+
+    assert ago(seconds=20) == "just now"
+    assert ago(minutes=1) == "just now"
+    assert ago(minutes=5) == "5 minutes ago"
+    assert ago(minutes=42) == "42 minutes ago"
+    assert ago(hours=1) == "1 hour ago"
+    assert ago(hours=3) == "3 hours ago"
+    assert ago(hours=19) == "yesterday"      # past the six-hour window, calendar days win
+    assert ago(days=1, hours=2) == "yesterday"
+    assert ago(days=3) == "3 days ago"
+    assert ago(days=10) == "10 days ago"
+    assert ago(days=21) == "3 weeks ago"
+    assert ago(days=8) == "8 days ago"       # days until two weeks
+    assert ago(days=150) == "5 months ago"
+    assert ago(days=800) == "2 years ago"
+
+
+def test_ago_phrase_is_never_negative():
+    """Clock skew (a timestamp from the future) answers the question the other way
+    round instead of printing a negative bucket."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 26, 20, 0, tzinfo=timezone.utc)
+    future = (now + timedelta(hours=3)).isoformat()
+    phrase = scheduler.ago_phrase(future, now)
+    assert "ago" not in phrase
+    assert phrase == scheduler.due_phrase(future, now)

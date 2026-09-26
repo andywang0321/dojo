@@ -649,6 +649,50 @@ def due_phrase(due_iso: str, now_utc: datetime | None = None) -> str:
     return f"in {months} month{'s' if months != 1 else ''} ({due_local.strftime('%b %d')})"
 
 
+def _ago_count(value: float, unit: str) -> str:
+    count = max(1, round(value))
+    return f"{count} {unit}{'s' if count != 1 else ''} ago"
+
+
+def ago_phrase(past_iso: str, now_utc: datetime | None = None) -> str:
+    """How long ago a past moment was — the past-facing sibling of `due_phrase`,
+    used by `dojo history`'s submitted column (v0.13 follow-up).
+
+    "just now" / "42 minutes ago" / "3 hours ago" / "yesterday" / "3 days ago" /
+    "2 weeks ago" / "5 months ago". Buckets rather than a duration, because the
+    question the column answers is "when did I last work on this" — and the date
+    a timestamp hides is not the answer a student is looking for (they asked for
+    `3 days ago`, not `2026-09-23T21:10:36`). Sub-six-hour gaps stay in hours even
+    across midnight; past that, calendar days take over, so an attempt from
+    yesterday evening reads as "yesterday" rather than "19 hours ago".
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    past = _parse_utc(past_iso)
+    seconds = (now_utc - past).total_seconds()
+    if seconds < 0:
+        # Clock skew, or a timestamp from the future: answer the question the
+        # other way round rather than printing a negative bucket.
+        return due_phrase(past_iso, now_utc)
+    if seconds < 90:
+        return "just now"
+    minutes = seconds / 60
+    if minutes < 60:
+        return _ago_count(minutes, "minute")
+    hours = minutes / 60
+    days = (now_utc.astimezone().date() - past.astimezone().date()).days
+    if hours < 6 or days == 0:
+        return _ago_count(hours, "hour")
+    if days == 1:
+        return "yesterday"
+    if days < 14:
+        return _ago_count(days, "day")
+    if days < 60:
+        return _ago_count(days / 7, "week")
+    if days < 545:
+        return _ago_count(days / 30, "month")
+    return _ago_count(days / 365, "year")
+
+
 def next_due(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row | None:
     """The card that comes due next — or the most overdue one, when any is.
 

@@ -196,6 +196,14 @@ Three live reports, each with a diagnosis that turned out to be the second one:
    ends); `--limit N` still selects the most recent N.
 3. **The `r²` column is gone from that table** — `measured_*_r2` has been NULL since
    v0.12 dropped the fit behind it (audit S3.3), so every cell was an em dash.
+4. **`claimed` / `measured` / `submitted` → `expected` / `measured` / `submitted`**,
+   all three complexity cells formatted **Time / Space**. `expected` is the
+   problem's own target complexity (from its "You should aim for…" line),
+   `measured` is the paired probe's verdict, and `submitted` is
+   `scheduler.ago_phrase` — "3 days ago" rather than a timestamp nobody counts
+   backwards from. The student's claimed answers *and their justifications* left
+   the list view (one cell wrapped over four rows); `dojo show <id>` still has
+   them.
 
 ## v0.11 work — shipped
 
