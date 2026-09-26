@@ -144,3 +144,24 @@ def test_learn_typo_guard_confirms_done(db, fake_console):
     assert result == {"practice": None}
     assert "Did you mean `done`" in console.text
     assert db.execute("SELECT completed FROM learn_sessions").fetchone()["completed"] == 1
+
+
+def test_an_offline_teacher_says_the_network_and_records_nothing(db, fake_console):
+    """Learn mode cannot start without the teacher — and the line says *why*,
+    without implying the student has to re-learn how to type (v0.13 follow-up)."""
+    from dojo.guard import network_message
+
+    class OfflineBackend(MockBackend):
+        def chat(self, role, system, user):
+            raise ConnectionResetError(54, "Connection reset by peer")
+
+    console = fake_console([])   # the primer fails before a single prompt
+    result = run_learn(db, console, OfflineBackend(), "andy", "heap")
+
+    assert result == {"practice": None}
+    assert network_message() in console.text
+    assert "nothing was recorded" in console.text
+    assert "ConnectionResetError" not in console.text
+    row = db.execute("SELECT * FROM learn_sessions").fetchone()
+    assert loads_json(row["transcript"]) == []       # no phantom teacher turn
+    assert not row["completed"]

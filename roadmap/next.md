@@ -167,6 +167,20 @@ Three live reports, each with a diagnosis that turned out to be the second one:
    `dojo --version` reports it, and a test fails if any `src/` file hardcodes a
    version literal — which is how `0.13.0`, `"0.10"` and `0.1.0` coexisted for two
    stages.
+4. **"If the network is down, dojo crashes."** It didn't — v0.13's guards kept
+   every path alive (verified by driving every CLI entry with the socket layer
+   offline) — but it *looked* like it, twice over: the message was
+   `the tutor unavailable (APIConnectionError: Connection error.)`, and with a
+   connection that opens and never answers (captive portal, dropped VPN) a single
+   hint held the terminal for **>600 s** (measured), because the SDKs default to a
+   600 s read timeout with two retries. Fixed both: `guard.is_network_error`
+   classifies the whole cause chain and the student reads "I'm having trouble
+   connecting to the AI backend — is the network connection ok?" plus a dim line
+   naming what didn't answer (a 401/429/5xx or a dojo bug keeps its technical
+   line); every request carries its role's timeout (60 s interactive, 180 s
+   long-form, `DOJO_TIMEOUT` overrides) with one retry, so a stalled call gives up
+   in 121 s (measured). Decision (the user's): per-role bounds rather than one
+   global number.
 
 ## v0.11 work — shipped
 

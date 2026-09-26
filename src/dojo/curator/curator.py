@@ -27,6 +27,7 @@ from typing import Any, Callable
 from dojo import bank
 from dojo.config import DB_PATH, PROBLEMS_DIR, PROBLEM_OVERRIDES, REPO_ROOT
 from dojo.db import connect
+from dojo.guard import is_network_error, network_message
 from dojo.judge.compare import check_equal
 from dojo.patterns import PATTERNS
 from dojo.tutor.backend import Role
@@ -212,10 +213,16 @@ def _backend_json(backend, role, system: str, user: str, what: str) -> dict:
 
     A network blip during curation used to propagate as a traceback out of the
     CLI; the curator's contract is a `CuratorError`, so the caller can report it
-    and roll back like any other refusal."""
+    and roll back like any other refusal. An unreachable backend is reported in
+    plain language (`guard.network_message`) rather than as
+    "APIConnectionError: Connection error." — the class name is not something a
+    student can act on."""
+
     try:
         return backend.chat_json(role, system, user)
     except Exception as exc:  # noqa: BLE001 - the boundary is the point
+        if is_network_error(exc):
+            raise CuratorError(network_message()) from exc
         raise CuratorError(
             f"the AI backend failed while {what}: {type(exc).__name__}: {exc}"
         ) from exc

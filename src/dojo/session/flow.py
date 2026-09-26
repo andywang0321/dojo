@@ -38,7 +38,7 @@ from dojo.db import (
     update_revision,
 )
 from dojo.editor import ensure_ide_config, launch as launch_editor
-from dojo.guard import guard
+from dojo.guard import guard, network_message
 from dojo.judge import (
     JUDGE_CASES,
     ORACLES,
@@ -1115,7 +1115,17 @@ def run_day(
             return
         result = g.value
         if not result.delivered:
-            if result.audit_failed:
+            if result.audit_network:
+                # The tutor answered; the *audit* call could not reach the
+                # backend. Saying "the tutor unavailable" here would be a lie
+                # about which call failed (v0.13 follow-up).
+                console.print(f"[yellow]{network_message()}[/yellow]")
+                console.print(
+                    "[dim]The leak check couldn't run, so that answer was "
+                    "discarded rather than shown — nothing was recorded, and the "
+                    "tier didn't move. Ask again when you're back online.[/dim]"
+                )
+            elif result.audit_failed:
                 # Distinct from a leak: the answer may be fine, but nothing
                 # verified it, and never-solve is not delivered on trust (v0.13).
                 console.print(

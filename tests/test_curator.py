@@ -692,3 +692,36 @@ def test_the_curator_prompt_forbids_importing_the_decorators():
     for prompt in (CURATOR_SYSTEM, REFERENCE_SYSTEM):
         assert "decorators" in prompt  # named, so the model can avoid it
         assert "no module named `decorators` exists" in prompt
+
+
+def test_an_unreachable_backend_is_reported_in_plain_language():
+    """`dojo curate`/`report --fix` offline: the same sentence a session uses,
+    not "the AI backend failed while proposing: APIConnectionError: …"."""
+    from dojo.curator.curator import _backend_json
+    from dojo.guard import network_message
+    from dojo.tutor.backend import Role
+
+    class OfflineBackend:
+        def chat_json(self, role, system, user):
+            raise ConnectionRefusedError(61, "Connection refused")
+
+    with pytest.raises(CuratorError) as exc_info:
+        _backend_json(
+            OfflineBackend(), Role.CURATOR, "system", "user", "proposing"
+        )
+    assert str(exc_info.value) == network_message()
+    # The cause is kept for the debug log / a traceback, but never shown as the
+    # message a student reads.
+    assert isinstance(exc_info.value.__cause__, ConnectionRefusedError)
+
+
+def test_a_non_network_backend_failure_keeps_its_detail():
+    from dojo.curator.curator import _backend_json
+    from dojo.tutor.backend import Role
+
+    class BrokenBackend:
+        def chat_json(self, role, system, user):
+            raise ValueError("the JSON schema was wrong")
+
+    with pytest.raises(CuratorError, match="while proposing: ValueError"):
+        _backend_json(BrokenBackend(), Role.CURATOR, "system", "user", "proposing")

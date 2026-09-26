@@ -76,6 +76,10 @@ def run_learn(
         )
     )
 
+    #: The last teacher failure, so the follow-up line can be about the *cause*
+    #: ("try again when you're back online") instead of the teacher.
+    last_failure: dict = {"network": False}
+
     def teacher_says(message: str | None = None) -> str | None:
         if message is not None:
             transcript.append({"role": "student", "text": message})
@@ -84,7 +88,9 @@ def run_learn(
                 Role.TEACHER, TEACHER_SYSTEM, build_teacher_prompt(pattern, transcript)
             )
         if not g.ok:
+            last_failure["network"] = g.network
             return None
+        last_failure["network"] = False
         answer = g.value
         transcript.append({"role": "teacher", "text": answer})  # raw markdown
         update_learn_transcript(conn, session_id, transcript)
@@ -92,10 +98,17 @@ def run_learn(
 
     primer = teacher_says()
     if primer is None:
-        console.print(
-            "[yellow]Learning mode could not start (the teacher is unavailable) "
-            "— nothing was recorded. Try again later.[/yellow]"
-        )
+        if last_failure["network"]:
+            console.print(
+                "[yellow]Learning mode needs the teacher, and the backend is "
+                "unreachable — nothing was recorded. Run `dojo learn "
+                f"{pattern}` again once you're back online.[/yellow]"
+            )
+        else:
+            console.print(
+                "[yellow]Learning mode could not start (the teacher is unavailable) "
+                "— nothing was recorded. Try again later.[/yellow]"
+            )
         return {"practice": None}
     render_ai(console, f"teacher — {pattern}", primer, border_style="blue")
 

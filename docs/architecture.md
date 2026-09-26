@@ -28,7 +28,8 @@ src/dojo/
   config.py         # paths, env, the PROVIDERS table + role models (v0.13);
                     # CONTENT_DIR = authored data, DATA_DIR = user state (DOJO_DATA_DIR)
   guard.py          # the exception boundary: an AI/subprocess failure degrades the
-                    # session, it never ends it (v0.13)
+                    # session, it never ends it (v0.13); network failures get the
+                    # plain-language line, answered errors keep their detail
   proc.py           # bounded subprocess execution: capped output, child rlimits,
                     # process-group kill on timeout (v0.13)
   editor.py         # $EDITOR launching: detached GUI, tmux/macOS windows for terminal editors
@@ -75,7 +76,17 @@ Every AI and subprocess call on that path runs inside `dojo.guard.guard(...)`
 (v0.13): a transport failure prints one line ("the tutor unavailable — ask again
 in a moment"), records a `degraded` event in the debug log, and the session
 continues. Before that, eleven call sites re-raised and `cli.main` caught only
-`KeyboardInterrupt`, so one network blip ended a session with a traceback. The
+`KeyboardInterrupt`, so one network blip ended a session with a traceback. **A
+network failure is reported as the network** (v0.13 follow-up): `is_network_error`
+classifies the exception *and its cause chain* (SDK wrapper → transport error →
+socket error) without importing any client library, and the student gets
+"I'm having trouble connecting to the AI backend — is the network connection ok?"
+plus a dim line naming what didn't answer. A service that *answered* — 401 (wrong
+key), 429 (quota), a 5xx — keeps its technical line, because those need different
+actions; a dojo bug keeps it too (`NameError` must never read as bad wifi). The
+same sentence covers the fetcher with its own noun ("…connecting to LeetCode…"),
+the curator raises it as its `CuratorError` message, and `HintResult.audit_network`
+keeps "the auditor couldn't be reached" distinct from "the tutor didn't answer". The
 scale probe degrades to "no measurement" (with the reason), and the curator
 converts backend failures into `CuratorError` so its caller can roll back and
 report like any other refusal.

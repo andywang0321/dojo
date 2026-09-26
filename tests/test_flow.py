@@ -6,14 +6,16 @@ The solve path exercised: submit → judge → self-report → profiler → revi
 
 from __future__ import annotations
 
+import errno
 import json
 import textwrap
 
 import dojo.judge
 
 from dojo import complexity
+from dojo.guard import network_message
 from dojo.session.flow import run_day, run_warmups
-from dojo.tutor.backend import MockBackend
+from dojo.tutor.backend import MockBackend, Role
 
 SOLUTION = textwrap.dedent(
     '''
@@ -1295,7 +1297,11 @@ def test_a_failing_tutor_does_not_end_the_session(db, fake_console, monkeypatch,
         db, console, FlakyBackend("chat_json"), "valid_parentheses", "andy", open_editor=False
     )
     assert outcome == "solved"          # the session carried on
-    assert "tutor unavailable" in console.text
+    # A transport failure is reported as the *network*, in plain language — not
+    # as an exception class the student cannot act on (v0.13 follow-up).
+    assert network_message() in console.text
+    assert "the tutor didn't answer" in console.text
+    assert "TimeoutError" not in console.text
     row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert json.loads(row["hints"]) == []   # nothing recorded for a failed call
     assert row["status"] == "correct"
@@ -1318,7 +1324,8 @@ def test_a_failing_reviewer_still_records_the_attempt(db, fake_console, monkeypa
     assert run_day(
         db, console, FlakyBackend("chat_json"), "valid_parentheses", "andy", open_editor=False
     ) == "solved"
-    assert "reviewer unavailable" in console.text
+    assert network_message() in console.text
+    assert "the reviewer didn't answer" in console.text
     row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert row["status"] == "correct"
     assert row["review"] is None
@@ -1343,7 +1350,8 @@ def test_a_failing_discussion_tutor_does_not_end_the_session(db, fake_console, m
     assert run_day(
         db, console, FlakyBackend("chat"), "valid_parentheses", "andy", open_editor=False
     ) == "solved"
-    assert "discussion tutor unavailable" in console.text
+    assert network_message() in console.text
+    assert "the discussion tutor didn't answer" in console.text
     row = db.execute("SELECT * FROM attempts ORDER BY id DESC LIMIT 1").fetchone()
     assert row["discussion"] is None
 
@@ -1994,3 +2002,65 @@ def test_a_broken_audit_degrades_to_one_line(db, fake_console, monkeypatch, tmp_
     assert outcome == "quit"
     assert "the curation audit unavailable" in console.text
     assert "data/logs/dojo.log" in console.text
+
+
+def test_an_offline_audit_says_the_network_and_keeps_the_session(
+    db, fake_console, monkeypatch, tmp_path
+):
+    """The tutor answered, the *leak check* could not reach the backend. The
+    student is told which call failed and what it cost them — and the session
+    continues (v0.13 follow-up)."""
+    _seed_problem(db)
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    (tmp_path / "workbench").mkdir(parents=True)
+
+    class OfflineAuditor(MockBackend):
+        def chat_json(self, role, system, user):
+            if role == Role.AUDITOR:
+                raise ConnectionRefusedError(errno.ECONNREFUSED, "refused")
+            return super().chat_json(role, system, user)
+
+    console = fake_console(["how do I start?", "quit"])
+    assert run_day(
+        db, console, OfflineAuditor(), "valid_parentheses", "andy", open_editor=False
+    ) == "quit"
+    assert network_message() in console.text
+    assert "The leak check couldn't run" in console.text
+    assert "the tutor unavailable" not in console.text
+    # Nothing was recorded for the discarded hint, and the abandoned session
+    # leaves no rows behind (the v0.11 lifecycle contract).
+    assert db.execute("SELECT * FROM attempts").fetchall() == []
+    assert list((tmp_path / "workbench").glob("*.state.json")) == []
+
+
+def test_an_offline_backend_never_ends_a_warmup_session(db, fake_console, monkeypatch, tmp_path):
+    """The live report: a warm-up was in progress when the network dropped. The
+    session says what happened, nothing earned is thrown away, and the card's
+    schedule is untouched — quitting changes nothing (v0.13 follow-up)."""
+    from dojo import scheduler
+    from dojo.db import get_or_create_user
+
+    _seed_problem(db)
+    uid = get_or_create_user(db, "andy")
+    card = scheduler.ensure_item_card(
+        db, uid, "valid_parentheses", "stack", due_immediately=True
+    )
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    (tmp_path / "workbench").mkdir(parents=True)
+
+    console = fake_console(["why?", "quit"])
+    outcomes = run_warmups(db, console, FlakyBackend("chat_json"), "andy", limit=1)
+
+    assert outcomes == ["quit"]
+    assert network_message() in console.text
+    # No exception class reaches the student, and the card is exactly as it was.
+    assert "TimeoutError" not in console.text and "APIConnectionError" not in console.text
+    still_due = db.execute(
+        "SELECT due_at, reps, lapses, last_review_at FROM item_cards WHERE slug = ?",
+        (card["slug"],),
+    ).fetchone()
+    assert still_due["reps"] == card["reps"] and still_due["lapses"] == card["lapses"]
+    assert still_due["due_at"] == card["due_at"] and still_due["last_review_at"] is None
+    assert db.execute("SELECT * FROM attempts").fetchall() == []

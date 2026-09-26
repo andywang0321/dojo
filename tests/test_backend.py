@@ -260,3 +260,88 @@ def test_json_tolerance_across_providers(content):
 def test_a_response_with_no_json_is_an_error_not_an_exception():
     assert parse_json_content("no object here")["error"]
     assert parse_json_content("")["error"]
+
+
+# ------------------------------------------- bounded requests (v0.13 follow-up)
+# The SDK default is a 600-second read timeout with two retries. Against a
+# connection that opens and never answers (captive portal, dropped VPN) that is
+# up to half an hour of a frozen terminal for one hint — measured at >600 s for a
+# single call. Every request now carries its role's bound, and the client is
+# built with one retry instead of the SDK's two.
+
+
+def test_the_interactive_roles_are_bounded_tighter_than_the_long_ones():
+    from dojo.tutor.backend import INTERACTIVE_TIMEOUT, LONG_TIMEOUT
+
+    # A student is watching the cursor for these three.
+    for role in (Role.TUTOR, Role.DISCUSSION, Role.AUDITOR):
+        assert budget_for(role).timeout == INTERACTIVE_TIMEOUT
+    # The long-form work happens outside the back-and-forth.
+    for role in (Role.REVIEWER, Role.CURATOR, Role.CURATION_AUDITOR, Role.REFERENCER, Role.TEACHER):
+        assert budget_for(role).timeout == LONG_TIMEOUT
+    # Both tiers stay far below the SDK default that caused the freeze.
+    assert LONG_TIMEOUT < 600 and INTERACTIVE_TIMEOUT < LONG_TIMEOUT
+
+
+def test_every_role_has_a_timeout_and_an_unknown_role_fails_loudly():
+    for role in Role:
+        assert budget_for(role).timeout > 0
+    # Roles are the routing key: a typo must not silently inherit a budget.
+    with pytest.raises(ValueError):
+        budget_for("not-a-role")
+
+
+def test_dojo_timeout_overrides_every_role(monkeypatch):
+    monkeypatch.setenv("DOJO_TIMEOUT", "42")
+    assert budget_for(Role.TUTOR).timeout == 42.0
+    assert budget_for(Role.REVIEWER).timeout == 42.0
+    # The rest of the budget is untouched.
+    assert budget_for(Role.AUDITOR).max_tokens == 128
+
+
+def test_a_typo_in_dojo_timeout_cannot_end_a_session(monkeypatch):
+    from dojo.config import timeout_override
+
+    for bad in ("banana", "", "0", "-5", " "):
+        monkeypatch.setenv("DOJO_TIMEOUT", bad)
+        assert timeout_override() is None
+        assert budget_for(Role.TUTOR).timeout > 0     # the per-role default stands
+    monkeypatch.delenv("DOJO_TIMEOUT")
+    assert timeout_override() is None
+
+
+def test_the_openai_request_carries_the_role_timeout():
+    client = FakeOpenAIClient('{"ok": true}')
+    backend = OpenAICompatBackend(PROVIDERS["deepseek"], api_key="sk-test", client=client)
+    backend.chat(Role.TUTOR, "s", "u")
+    backend.chat(Role.REVIEWER, "s", "u")
+    assert client.completions.calls[0]["timeout"] == budget_for(Role.TUTOR).timeout
+    assert client.completions.calls[1]["timeout"] == budget_for(Role.REVIEWER).timeout
+
+
+def test_the_anthropic_request_carries_the_role_timeout():
+    client = FakeAnthropicClient([_text_block("hi")])
+    backend = AnthropicBackend(PROVIDERS["anthropic"], api_key="sk-test", client=client)
+    backend.chat(Role.TUTOR, "s", "u")
+    assert client.messages.calls[0]["timeout"] == budget_for(Role.TUTOR).timeout
+
+
+def test_the_live_clients_are_built_with_one_retry(monkeypatch):
+    """Injected clients (tests) never see this, so it needs its own pin: the
+    retry count is what multiplies a stalled wait."""
+    from dojo.tutor.backend import REQUEST_RETRIES
+
+    assert REQUEST_RETRIES == 1
+    seen: list[dict] = []
+
+    class Recorder:
+        def __init__(self, **kwargs):
+            seen.append(kwargs)
+
+    monkeypatch.setattr("openai.OpenAI", Recorder)
+    OpenAICompatBackend(PROVIDERS["deepseek"], api_key="sk-test")
+    monkeypatch.setattr("anthropic.Anthropic", Recorder)
+    AnthropicBackend(PROVIDERS["anthropic"], api_key="sk-test")
+
+    assert [call["max_retries"] for call in seen] == [REQUEST_RETRIES, REQUEST_RETRIES]
+    assert seen[0]["base_url"] == PROVIDERS["deepseek"].base_url

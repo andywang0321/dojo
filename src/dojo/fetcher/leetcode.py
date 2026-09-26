@@ -18,6 +18,7 @@ from pathlib import Path
 from dojo.bank import seed_problems
 from dojo.db import connect
 from dojo.fetcher.htmltext import HTMLToText
+from dojo.guard import is_network_error, network_message
 from dojo.patterns import pattern_for_tags
 
 GRAPHQL_URL = "https://leetcode.com/graphql/"
@@ -54,6 +55,7 @@ class ParsedProblem:
 
 def fetch_question_data(post, title_slug: str) -> dict:
     """POST the GraphQL query; raises LeetCodeError on any failure."""
+
     payload = {"query": QUERY, "variables": {"titleSlug": title_slug}}
     headers = {
         "Content-Type": "application/json",
@@ -62,6 +64,10 @@ def fetch_question_data(post, title_slug: str) -> dict:
     try:
         status, text = post(GRAPHQL_URL, payload, headers)
     except Exception as exc:  # noqa: BLE001 - any transport failure is one
+        if is_network_error(exc):
+            # Same plain-language line as an unreachable AI backend, one noun
+            # different: the student's connection is the thing to check either way.
+            raise LeetCodeError(network_message("LeetCode")) from exc
         raise LeetCodeError(f"transport error: {exc}") from exc
     if status != 200:
         raise LeetCodeError(f"HTTP {status}")

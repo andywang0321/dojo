@@ -491,3 +491,31 @@ def test_bulk_fetch_retags_when_a_stale_duplicate_owns_the_number(db, monkeypatc
         ).fetchone()
     assert row["lc_number"] == 217      # the row that owns the problem got the tag
     assert "contains-duplicate" not in calls
+
+
+def test_an_offline_leetcode_is_reported_in_plain_language():
+    """The fetcher's transport is a different service from the AI backend, and
+    gets the same plain-language line with the right noun (v0.13 follow-up)."""
+    import urllib.error
+
+    from dojo.fetcher import LeetCodeError
+    from dojo.fetcher.leetcode import fetch_question_data
+    from dojo.guard import network_message
+
+    def offline_post(url, payload, headers):
+        raise urllib.error.URLError("no route to host")
+
+    with pytest.raises(LeetCodeError) as exc_info:
+        fetch_question_data(offline_post, "two-sum")
+    assert str(exc_info.value) == network_message("LeetCode")
+
+
+def test_a_non_network_transport_failure_keeps_its_detail():
+    from dojo.fetcher import LeetCodeError
+    from dojo.fetcher.leetcode import fetch_question_data
+
+    def broken_post(url, payload, headers):
+        raise ValueError("the transport returned garbage")
+
+    with pytest.raises(LeetCodeError, match="transport error: the transport returned garbage"):
+        fetch_question_data(broken_post, "two-sum")

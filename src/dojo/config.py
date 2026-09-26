@@ -182,6 +182,23 @@ def role_model(role, provider: "Provider | None" = None) -> str:
     )
 
 
+def timeout_override() -> float | None:
+    """`DOJO_TIMEOUT` (seconds): one number for every role, for a provider or a
+    model slower than dojo's per-role defaults (v0.13 follow-up).
+
+    Unparseable or non-positive values are ignored rather than fatal: a typo in
+    an environment variable must not be the reason a session ends, and the
+    per-role default is always a sane bound."""
+    raw = os.environ.get("DOJO_TIMEOUT")
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def _read_dotenv(key: str) -> str | None:
     """Minimal .env reader (no python-dotenv dependency)."""
     dotenv = REPO_ROOT / ".env"

@@ -91,6 +91,8 @@ The daily pick follows the **NeetCode 150 roadmap** (`data/roadmap.toml`, vendor
 
 Something about a problem's *grading* looks wrong — the judge disagrees with your passing solution, the cases don't respect the stated constraints, a claim you made got flagged? Say so in a session: **`report <what you noticed>`** audits that problem's curation (a fresh curator pass cross-checked against the live one, then an audit agent hunting prompt-vs-judge contract violations) and prints the verdict. Your words go to the auditor, which must answer the claim — including telling you it's wrong. It is a side errand: whatever fails inside it, your session keeps going.
 
+**If your network drops mid-session, dojo says so and carries on.** No stack trace, no lost session: you get "I'm having trouble connecting to the AI backend — is the network connection ok?" and one line saying what didn't answer (the tutor, the review, the leak check). Nothing is recorded for the call that failed, your tier doesn't move, and `dojo check`, the judge, the profiler and the scheduler keep working offline — only the AI calls need the network. A stalled connection can't freeze the session either: each AI call gives up after its role's bound (60s interactive, 180s long-form) rather than the SDK's default ten minutes. A *rejected* call is still reported as itself, so a wrong API key or an exhausted quota never reads as bad wifi.
+
 ## Models
 
 dojo talks to DeepSeek by default and also speaks OpenAI and Anthropic. Pick one with `DOJO_AI_BACKEND` (or `DOJO_PROVIDER`), and let `dojo setup` detect whichever key you already have:
@@ -102,6 +104,8 @@ uv run dojo                              # runs on Claude from here
 ```
 
 Override the model globally with `DOJO_MODEL`, or per agent with `DOJO_MODEL_<ROLE>` — the roles are `TUTOR`, `DISCUSSION`, `TEACHER`, `REVIEWER`, `AUDITOR`, `CURATOR`, `CURATION_AUDITOR`, `REFERENCER`. The leak auditor runs on every hint, so it is deliberately cheap (128-token budget, temperature 0); pointing `DOJO_MODEL_AUDITOR` at a small fast model is the intended economy. `DOJO_AI_BACKEND=mock` still runs the entire pipeline offline with canned text.
+
+Every request is also **time-bounded**, because the SDKs are not: they default to a 600-second read timeout with two retries, which a connection that opens and never answers (captive portal, dropped VPN) turns into half an hour of a frozen terminal for one hint. The interactive roles — tutor, discussion, the leak audit — give up after 60 seconds (one retry); the long-form ones — review, teacher, curator, reference — after 180. Set `DOJO_TIMEOUT=<seconds>` to use one number for every role, e.g. for a slow reasoning model.
 
 Every attempt records which backend and model produced its review (`ai_provenance`), so a mock run can never be mistaken for a live one.
 

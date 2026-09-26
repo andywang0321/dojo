@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dojo.guard import is_network_error
 from dojo.tutor.backend import AIBackend, Role
 from dojo.tutor.prompts import (
     LEAK_CHECK_SYSTEM,
@@ -59,6 +60,10 @@ class HintResult:
     #: True when the response was discarded because the *audit* failed, not
     #: because it leaked: the caller says so rather than blaming the answer.
     audit_failed: bool = False
+    #: True when that audit failure was the backend being unreachable (v0.13
+    #: follow-up), so the caller says "check your connection" rather than
+    #: implying the auditor read something it could not parse.
+    audit_network: bool = False
 
 
 def _vague(message: str) -> bool:
@@ -112,32 +117,43 @@ def _tutor_call(backend: AIBackend, prompt: str, default_tier: int) -> tuple[str
     return kind, tier, text
 
 
-def _audit_once(backend: AIBackend, text: str) -> int | None:
-    """One leak-audit call: the rating, or None when it cannot be read.
+def _audit_once(backend: AIBackend, text: str) -> tuple[int | None, bool]:
+    """One leak-audit call: ``(rating, offline)``.
 
-    None means *unknown*, never "clean". A bare-int rating is accepted; a bool is
-    not (it is an int in Python and would silently pass as a 1/0 score); a
-    string or a missing key is unknown. The old version returned 1 — "clean" —
-    for every one of those.
-    """
-    leak = backend.chat_json(Role.AUDITOR, LEAK_CHECK_SYSTEM, build_leak_prompt(text, 0))
+    The rating is None when the audit cannot be read, and None means *unknown*,
+    never "clean". A bare-int rating is accepted; a bool is not (it is an int in
+    Python and would silently pass as a 1/0 score); a string or a missing key is
+    unknown. The old version returned 1 — "clean" — for every one of those.
+
+    An unreachable backend is one more way the audit cannot be read (v0.13
+    follow-up), and it is reported as such: the hint call already answered, and
+    losing that answer to a dropped connection should land on the *audit* path —
+    "the check couldn't be read, so the answer was discarded" — instead of
+    surfacing as the tutor failing to answer a question it did answer."""
+
+    try:
+        leak = backend.chat_json(Role.AUDITOR, LEAK_CHECK_SYSTEM, build_leak_prompt(text, 0))
+    except Exception as exc:  # noqa: BLE001 - only connectivity is absorbed here
+        if is_network_error(exc):
+            return None, True
+        raise  # a non-transport failure is a bug, and the guard reports it as one
     if not isinstance(leak, dict):
-        return None
+        return None, False
     rating = leak.get("rating")
     if isinstance(rating, bool) or not isinstance(rating, (int, float)):
-        return None
-    return int(rating)
+        return None, False
+    return int(rating), False
 
 
-def _audit(backend: AIBackend, text: str) -> int | None:
+def _audit(backend: AIBackend, text: str) -> tuple[int | None, bool]:
     """Audit with a retry: a transient JSON hiccup in the auditor must not cost
     the student an answer, but a *persistent* one must not become a pass."""
-    rating = _audit_once(backend, text)
+    rating, offline = _audit_once(backend, text)
     attempts = 1
-    while rating is None and attempts < AUDIT_ATTEMPTS:
-        rating = _audit_once(backend, text)
-        attempts += 1
-    return rating
+    while rating is None and not offline and attempts < AUDIT_ATTEMPTS:
+        rating, offline = _audit_once(backend, text)
+        attempts += 1  # retrying an unreachable backend just doubles the wait
+    return rating, offline
 
 
 def ask_tutor(
@@ -159,7 +175,7 @@ def ask_tutor(
     if vague:
         kind = "ladder"  # "stuck" with no words is always the metacognition path
 
-    rating = _audit(backend, text)
+    rating, audit_network = _audit(backend, text)
     retries = 0
     while rating is not None and rating >= LEAK_THRESHOLD and retries < LEAK_RETRIES:
         flagged = (
@@ -168,7 +184,7 @@ def ask_tutor(
             f"the solution. Answer again more guardedly, keeping kind={kind}."
         )
         _, _, text = _tutor_call(backend, flagged, default_tier=tier)
-        rating = _audit(backend, text)
+        rating, audit_network = _audit(backend, text)
         retries += 1
 
     if rating is None:
@@ -182,6 +198,7 @@ def ask_tutor(
             kind=kind,
             delivered=False,
             audit_failed=True,
+            audit_network=audit_network,
         )
     if rating >= LEAK_THRESHOLD:
         return HintResult(

@@ -17,6 +17,14 @@ for the review). Two wire formats are in play: OpenAI-compatible chat
 completions (DeepSeek and OpenAI differ only by base URL, model and key) and
 Anthropic's messages API, which takes the system prompt as a top-level field,
 has no `response_format`, and returns JSON best via a forced tool call.
+
+**Every request is bounded (v0.13 follow-up).** The SDKs default to a 600-second
+read timeout and two retries. Against a connection that *opens and never answers*
+— a captive portal, a dropped VPN, a sleeping router — that is up to half an hour
+of a frozen terminal for one hint (measured: >600 s for a single call), which is
+how "dojo crashed" was experienced offline. Each role carries its own timeout and
+the retry count is one, so a stalled call fails while the student is still
+watching. `DOJO_TIMEOUT` overrides the numbers for a slow provider or model.
 """
 
 from __future__ import annotations
@@ -24,17 +32,37 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol
 
 from dojo import debuglog
-from dojo.config import PROVIDERS, Provider, ai_backend, resolve_key, role_model
+from dojo.config import (
+    PROVIDERS,
+    Provider,
+    ai_backend,
+    resolve_key,
+    role_model,
+    timeout_override,
+)
 
 #: Output cap for JSON responses — generous because the reviewer's rubric is
 #: the longest object the pipeline asks for, and a truncated (mid-object)
 #: response is exactly the "non-JSON" failure real sessions saw.
 JSON_MAX_TOKENS = 4096
+
+#: How long a role waits for an answer, in seconds — two tiers, because the cost
+#: of waiting is not the same everywhere. The interactive loop (a hint, the leak
+#: rating on it, a discussion turn) has a student watching the cursor; the
+#: long-form work (a rubric, a whole curation artifact set, a reference solution)
+#: already happens outside the back-and-forth.
+INTERACTIVE_TIMEOUT = 60.0
+LONG_TIMEOUT = 180.0
+
+#: Attempts per request (the SDK default is 2, which triples the wait). A retry
+#: covers a transient blip; against a stalled connection it only doubles a wait
+#: the student cannot distinguish from a hang.
+REQUEST_RETRIES = 1
 
 
 class Role(StrEnum):
@@ -54,27 +82,40 @@ class Role(StrEnum):
 @dataclass(frozen=True)
 class Budget:
     """Per-role generation settings. The audit is a one-line JSON verdict and
-    does not need the reviewer's budget; the reviewer needs room for a rubric."""
+    does not need the reviewer's budget; the reviewer needs room for a rubric.
+    ``timeout`` is how long to wait for the answer (see `INTERACTIVE_TIMEOUT`)."""
 
     max_tokens: int = 2048
     temperature: float = 0.3
+    timeout: float = INTERACTIVE_TIMEOUT
 
 
 #: A cheap, tight audit is the point: it runs on *every* hint.
 ROLE_BUDGETS: dict[Role, Budget] = {
     Role.AUDITOR: Budget(max_tokens=128, temperature=0.0),
-    Role.REVIEWER: Budget(max_tokens=JSON_MAX_TOKENS, temperature=0.0),
-    Role.CURATOR: Budget(max_tokens=JSON_MAX_TOKENS, temperature=0.0),
-    Role.CURATION_AUDITOR: Budget(max_tokens=JSON_MAX_TOKENS, temperature=0.0),
-    Role.REFERENCER: Budget(max_tokens=JSON_MAX_TOKENS, temperature=0.0),
     Role.TUTOR: Budget(),
     Role.DISCUSSION: Budget(),
-    Role.TEACHER: Budget(),
+    Role.REVIEWER: Budget(
+        max_tokens=JSON_MAX_TOKENS, temperature=0.0, timeout=LONG_TIMEOUT
+    ),
+    Role.CURATOR: Budget(
+        max_tokens=JSON_MAX_TOKENS, temperature=0.0, timeout=LONG_TIMEOUT
+    ),
+    Role.CURATION_AUDITOR: Budget(
+        max_tokens=JSON_MAX_TOKENS, temperature=0.0, timeout=LONG_TIMEOUT
+    ),
+    Role.REFERENCER: Budget(
+        max_tokens=JSON_MAX_TOKENS, temperature=0.0, timeout=LONG_TIMEOUT
+    ),
+    Role.TEACHER: Budget(timeout=LONG_TIMEOUT),
 }
 
 
 def budget_for(role) -> Budget:
-    return ROLE_BUDGETS.get(Role(role), Budget())
+    """The role's settings, with `DOJO_TIMEOUT` applied when it is set."""
+    budget = ROLE_BUDGETS.get(Role(role), Budget())
+    override = timeout_override()
+    return replace(budget, timeout=override) if override is not None else budget
 
 
 def parse_json_content(content: str) -> dict:
@@ -170,7 +211,11 @@ class OpenAICompatBackend(_LiveBackend):
         if client is None:
             from openai import OpenAI  # local import: heavy dependency, lazy load
 
-            client = OpenAI(api_key=key, base_url=provider.base_url)
+            client = OpenAI(
+                api_key=key,
+                base_url=provider.base_url,
+                max_retries=REQUEST_RETRIES,  # the SDK's 2 triples a stalled wait
+            )
         self._client = client
 
     def _create(self, role, system: str, user: str, *, as_json: bool):
@@ -184,6 +229,9 @@ class OpenAICompatBackend(_LiveBackend):
             ],
             "temperature": budget.temperature,
             "max_tokens": budget.max_tokens,
+            # Per-request bound: without it a connection that never answers
+            # holds the session for the SDK's 600-second default (v0.13 follow-up).
+            "timeout": budget.timeout,
         }
         if as_json:
             kwargs["response_format"] = {"type": "json_object"}
@@ -261,7 +309,10 @@ class AnthropicBackend(_LiveBackend):
         if client is None:
             import anthropic  # local import: heavy dependency, lazy load
 
-            client = anthropic.Anthropic(api_key=key)
+            client = anthropic.Anthropic(
+                api_key=key,
+                max_retries=REQUEST_RETRIES,  # the SDK's 2 triples a stalled wait
+            )
         self._client = client
 
     def _create(self, role, system: str, user: str, *, as_json: bool):
@@ -273,6 +324,8 @@ class AnthropicBackend(_LiveBackend):
             "messages": [{"role": "user", "content": user}],
             "temperature": budget.temperature,
             "max_tokens": budget.max_tokens,
+            # Per-request bound: see OpenAICompatBackend._create.
+            "timeout": budget.timeout,
         }
         if as_json:
             kwargs["tools"] = [JSON_TOOL]

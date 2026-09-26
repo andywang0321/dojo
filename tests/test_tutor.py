@@ -1,6 +1,8 @@
 """Tutor: AI-classified ladder vs discussion, leak re-audit + discard,
 and Markdown stripping for terminal display."""
 
+import errno
+
 import pytest
 
 from dojo.tutor.backend import MockBackend, Role
@@ -324,3 +326,38 @@ def test_a_leaking_response_with_an_unreadable_reaudit_is_still_refused():
     result = ask_tutor(LeakThenBroken(), "stmt", "code", 1, "help me", [])
     assert result.delivered is False
     assert result.audit_failed is True
+
+
+# ------------------------------------- the audit when the network is down
+# The hint call already answered; losing that answer to a dropped connection is
+# an *audit* failure, and saying "the tutor unavailable" would misname which call
+# actually failed (v0.13 follow-up).
+
+
+class OfflineAuditor(MockBackend):
+    """The tutor answers; the auditor cannot be reached at all."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def chat_json(self, role, system, user):
+        if "auditor" in system.lower():
+            self.calls += 1
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "refused")
+        return super().chat_json(role, system, user)
+
+
+def test_an_unreachable_auditor_is_reported_as_the_network():
+    backend = OfflineAuditor()
+    result = ask_tutor(backend, "stmt", "code", 1, "help me", [])
+    assert result.delivered is False          # fail closed, as always
+    assert result.audit_failed is True
+    assert result.audit_network is True       # ... and it was the connection
+    # Retrying an unreachable backend just doubles the wait.
+    assert backend.calls == 1
+
+
+def test_an_unreadable_audit_is_not_called_a_network_failure():
+    result = ask_tutor(BrokenAuditor("nonjson"), "stmt", "code", 1, "help me", [])
+    assert (result.audit_failed, result.audit_network) == (True, False)
