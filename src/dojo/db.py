@@ -282,8 +282,10 @@ def list_attempts(
     slug: str | None = None,
     limit: int | None = None,
 ) -> list[sqlite3.Row]:
-    """Attempt history for one user, newest first, optionally filtered to
-    one problem slug and capped. Backs `dojo history`."""
+    """Attempt history for one user, newest first, optionally filtered to one
+    problem slug and capped. Backs `dojo history`, which asks for the *most
+    recent* N and then renders them oldest-first (v0.13 follow-up) — the order
+    here is the contract `--limit` depends on, not the display order."""
     query = """
         SELECT a.id, a.kind, a.status, a.hint_count, a.started_at,
                a.submitted_at, a.duration_seconds,

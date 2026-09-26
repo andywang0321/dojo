@@ -1044,3 +1044,42 @@ def test_main_report_without_a_note_still_audits(cli_env, monkeypatch):
     assert main(["report", "valid_parentheses"]) == 0
     assert seen["note"] is None
     assert "No contract violations found." in rec.text
+
+
+def test_main_history_reads_chronologically_and_drops_the_dead_r2_column(cli_env):
+    """The table is long and the eye ends at its bottom, so the newest attempt is
+    the last line (v0.13 follow-up). `--limit` still means the most recent N.
+
+    The r² column is gone with the v0.12 fit that produced it: `measured_*_r2`
+    has been written as NULL since then, so every cell was an em dash (audit S3.3).
+    """
+    from dojo.cli import main
+    from dojo.db import connect, now
+
+    rec, db_path, _workbench, _problems = cli_env
+    uid = _seed_user(db_path)
+    assert main(["list"]) == 0                      # seeds the real corpus
+    conn = connect(db_path)
+    older = conn.execute("SELECT id FROM problems WHERE slug = 'two_sum'").fetchone()["id"]
+    newer = conn.execute(
+        "SELECT id FROM problems WHERE slug = 'contains_duplicate'"
+    ).fetchone()["id"]
+    for problem_id, stamp in ((older, "2026-01-01T00:00:00+00:00"), (newer, "2026-02-01T00:00:00+00:00")):
+        conn.execute(
+            "INSERT INTO attempts (user_id, problem_id, kind, status, started_at, submitted_at)"
+            " VALUES (?, ?, 'solve', 'correct', ?, ?)",
+            (uid, problem_id, stamp, stamp),
+        )
+    conn.commit()
+
+    rec.out.clear()                                 # only the history table now
+    assert main(["history"]) == 0
+    text = " ".join(rec.text.split())                # collapse the table's wrapping
+    assert text.index("two_sum") < text.index("contains_duplicate")
+    assert "r²" not in text
+
+    # `--limit 1` is the *newest* attempt, wherever it now sits in the table.
+    rec.out.clear()
+    assert main(["history", "--limit", "1"]) == 0
+    limited = " ".join(rec.text.split())
+    assert "contains_duplicate" in limited and "two_sum" not in limited

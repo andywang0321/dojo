@@ -73,7 +73,7 @@ dojo list                   # the problem bank (✓ = curated, ready for the dai
 dojo roadmap                # the progression tree: solved · next up · locked
 dojo learn [TOPIC]          # learning mode: a topic primer with a practice handoff
 dojo progress               # per-pattern proficiency, card schedule, score trends
-dojo history                # your attempts, newest first
+dojo history                # your attempts, oldest first (the newest is the last line)
 dojo show <id>              # one attempt in full (hints, code, review; --code for code only)
 dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
                              #   `dojo fetch --all` lands the whole roadmap without curating

@@ -655,12 +655,18 @@ def _cmd_history(args) -> int:
         user_id = get_or_create_user(conn, user)
         rows = list_attempts(conn, user_id, slug=args.slug, limit=args.limit)
     table = ui_table(f"Attempts — {user}")
+    # No r² column: `measured_*_r2` stopped being written in v0.12 with the
+    # absolute fit it described, so every cell was an em dash (audit S3.3).
     for col in (
         "id", "problem", "kind", "status", "hints",
-        "claimed", "measured", "r²", "submitted",
+        "claimed", "measured", "submitted",
     ):
         table.add_column(col)
-    for r in rows:
+    # Chronological (v0.13 follow-up): `--limit` still means the *most recent* N —
+    # `list_attempts` asks the database for newest-first — but the table reads
+    # oldest to newest, so the attempt you just made is the last line. The table
+    # is long, and the eye ends at its bottom.
+    for r in reversed(rows):
         claimed = " / ".join(
             x for x in (r["self_reported_time"], r["self_reported_space"]) if x
         )
@@ -672,7 +678,6 @@ def _cmd_history(args) -> int:
             str(r["hint_count"]),
             (claimed or "—")[:40],
             r["measured_time_class"] or "—",
-            str(r["measured_time_r2"]) if r["measured_time_r2"] is not None else "—",
             (r["submitted_at"] or r["started_at"])[:19],
         )
     console.print(table)

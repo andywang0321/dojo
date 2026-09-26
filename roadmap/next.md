@@ -182,6 +182,21 @@ Three live reports, each with a diagnosis that turned out to be the second one:
    in 121 s (measured). Decision (the user's): per-role bounds rather than one
    global number.
 
+## Reported (2026-09-26) — a pre-gating slate, and the history table
+
+1. **"Remove my stack and heap entries — they predate progression gating."** 13
+   attempts across `valid_parentheses` (LC 20) and `k_closest_points` (LC 973),
+   their revision and their 2 warm-up cards, deleted in one transaction: both
+   problems count as never solved and the ladder's solved set drops LC 20 and
+   LC 973 (stack 1/7 → 0/7). Verified against the derivation rather than asserted —
+   `rebuild_item_cards` on the cleaned copy reproduces the remaining 15 cards
+   exactly, with no orphan revision rows.
+2. **`dojo history` reads chronologically** (oldest → newest, so the attempt you
+   just finished is the last line — the bottom of a long table is where the eye
+   ends); `--limit N` still selects the most recent N.
+3. **The `r²` column is gone from that table** — `measured_*_r2` has been NULL since
+   v0.12 dropped the fit behind it (audit S3.3), so every cell was an em dash.
+
 ## v0.11 work — shipped
 
 - Warm-up picks rotate (per-problem `MAX(submitted_at)` aggregation).
@@ -227,6 +242,12 @@ Three live reports, each with a diagnosis that turned out to be the second one:
 
 ## Backlog (unchanged)
 
+- **`dojo forget <slug>` (or `dojo history --delete <id>`)**: 2026-09-26's cleanup
+  needed a hand-written script, because nothing in dojo can remove an attempt.
+  Deleting history is exactly the kind of thing that should be explicit, previewed
+  ("this drops LC 20 from the ladder and 1 card"), and reversible in the same
+  breath — the shape `bank.prune_stale_problems` already uses. Wanted the first
+  time it is asked for twice.
 - TUI polish (Textual) — only if the CLI loop proves insufficient.
 - Two-machine sync.
 - Warm-up problem variants (transfer, not recognition — see docs/retention.md).
