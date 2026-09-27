@@ -21,7 +21,7 @@ The result is a loop: you practise, dojo gathers evidence, the evidence moves th
 schedule, the schedule picks the next thing, and the agents adapt the curriculum
 around how you are actually doing.
 
-> **Status: this branch is the rebuild.** You are reading `v0.14-curricula`, where
+> **Status: this branch is the rebuild.** You are reading `curricula`, where
 > dojo is being split into an **engine** (this repository) and **curricula**
 > (separate repositories you enroll). `main` still carries the working trainer with
 > the NeetCode 150 built in, and it is what to run today. Everything below describes
@@ -295,7 +295,7 @@ make version   # write the version this commit will have into pyproject.toml
 ```
 
 Two branches are live: `main` is the trainer people practise on every day, and
-`v0.14-curricula` is this rebuild. If you are working on the rebuild, read
+`curricula` is this rebuild. If you are working on the rebuild, read
 [`HANDOFF.md`](HANDOFF.md) first and [`AGENTS.md`](AGENTS.md) §0 before you commit
 anything — the branch check is mandatory, not a formality.
 

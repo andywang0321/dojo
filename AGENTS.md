@@ -18,7 +18,7 @@ phase in flight).
 | branch | what it is | who is on it |
 |---|---|---|
 | `main` | the working trainer: the students practise here **every day**, on the NeetCode 150 curriculum | daily use; bug fixes, problem curation, small corrections |
-| `v0.14-curricula` | the curricula rebuild: splits the engine from the curriculum, moves NeetCode 150 out | this phase's work |
+| `curricula` | the curricula rebuild: splits the engine from the curriculum, moves NeetCode 150 out | this phase's work |
 
 Rules, in order of severity:
 
@@ -189,10 +189,20 @@ that repository or to a separate authoring project built on `curriculum-kit/`.
     `tests/test_version.py` accepts exactly two values (HEAD's, or the commit in
     flight) and fails otherwise with "run `make version`". The third component counts
     commits since the last phase tag **on this branch**, so the two branches show
-    different counts off the same tag — expected, not drift. Phase 14 completes by
-    setting `pyproject.toml` to the phase version and tagging that commit; the major
-    is a manual epoch bump and this phase is the natural place for one (see
-    `roadmap/v0.14.md` §7).
+    different counts off the same tag — expected, not drift.
+
+    **The epoch bump is taken: dojo is `1.x` from this phase on** (decided 2026-09-27,
+    so the branch develops as `1.13.N` — major 1, thirteen phases complete, N commits
+    since phase 13 closed), and phase 14 completes at `1.14.0` + `git tag v1.14.0` on
+    that commit. A hand-bumped major does **not** orphan the tag the count comes from:
+    phase 13's marker is `v0.13.0` and keeps that major forever, so the lookup tries
+    the exact `v<major>.<phase>` spelling first and then falls back to any major
+    carrying this phase. Without that fallback `git describe` finds nothing, the count
+    silently degrades to whatever `pyproject.toml` says, and the version stops being
+    verifiable at exactly the moment it changes epoch (`tests/test_version.py` pins
+    both the fallback and that it still refuses another phase's tag). One side effect
+    worth knowing: `PHASE_VERSION` becomes `1.13`, so the debug-log marker no longer
+    matches and `data/logs/` is cleared once.
 11. **Identity is `(curriculum, item)` with an optional external id.** Two rows may
     never share an `external_id` inside one curriculum — an invariant the schema
     enforces, because the live bank still carries four LeetCode problems twice

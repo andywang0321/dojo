@@ -28,6 +28,14 @@ A checkout with no such tag (an installed wheel, a shallow clone, a tarball) fal
 back to the exact string in `pyproject.toml` — which is why keeping the file
 current matters: it is what a packaged dojo reports about itself.
 
+**An epoch bump does not orphan the phase tag.** The major is a manual decision, and
+it is taken *after* the tag that completed the last phase was written: phase 13's
+marker is `v0.13.0` and stays that way forever, so a checkout at `1.13.11` is still
+counting commits from `v0.13.0`. `commits_since_phase` therefore looks for the exact
+`v<major>.<phase>` spelling first and falls back to *any* major with this phase —
+without that, the epoch bump silently degrades the count to "whatever
+`pyproject.toml` says", which is precisely the drift this module exists to prevent.
+
 `PHASE_VERSION` (``<major>.<phase>``) is what gates debug-log retention — a phase
 is a stage, so completing one clears `data/logs/`, while the commits *inside* a
 phase accumulate without throwing history away.
@@ -97,40 +105,73 @@ def _default_runner() -> Runner:
     return run
 
 
-def commits_since_phase(major: int, phase: int, run: Runner | None = None) -> int | None:
-    """How many commits have landed since the tag that completed this phase.
+def _describe(
+    runner: Runner, patterns: list[str], *, major: int | None, phase: int
+) -> tuple[str, int] | None:
+    """Ask git for the nearest tag matching `patterns`; return (tag, distance).
 
-    ``None`` means git cannot say — no checkout, no tag, or a shallow clone that
-    does not carry it — and the caller then keeps pyproject's own third
-    component. ``run`` is injectable so the suite never shells out."""
-    runner = run or _default_runner()
-    base = f"v{major}.{phase}"
+    The tag is accepted only when its *phase* matches — and its major too, when one
+    was demanded — so a leftover tag from another phase can never be mistaken for
+    this phase's marker, and the count never spans phases."""
+    cmd = ["git", "describe", "--tags", "--long"]
+    for pattern in patterns:
+        cmd += ["--match", pattern]
     try:
-        result = runner(
-            [
-                "git",
-                "describe",
-                "--tags",
-                "--long",
-                # Both spellings, since the tag may be written either way.
-                "--match",
-                base,
-                "--match",
-                f"{base}.*",
-            ]
-        )
+        result = runner(cmd)
     except Exception:  # noqa: BLE001 - a missing git must not break a run
         return None
     if getattr(result, "returncode", 1) != 0:
         return None
     # `v0.13.0-7-gabc1234`: the tag, the distance, the abbreviated commit.
-    described = (result.stdout or "").strip()
-    parts = described.rsplit("-", 2)
+    parts = (result.stdout or "").strip().rsplit("-", 2)
     if len(parts) != 3 or not parts[1].isdigit():
         return None
-    if not parts[0].lstrip("v").startswith(f"{major}.{phase}"):
-        return None  # a tag from another phase: not this phase's distance
-    return int(parts[1])
+    tag = parts[0]
+    parsed = _parse(tag.lstrip("v"))
+    if parsed is None:
+        return None
+    tag_major, tag_phase, _tag_commit = parsed
+    if tag_phase != phase or (major is not None and tag_major != major):
+        return None
+    return tag, int(parts[1])
+
+
+def _find_phase_tag(
+    major: int, phase: int, run: Runner | None = None
+) -> tuple[str, int] | None:
+    """The tag this checkout counts from for `phase`, and the distance to HEAD.
+
+    Two passes, because of the epoch bump: the exact `v<major>.<phase>` spelling
+    first, then any major carrying this phase. Phase 13's tag is `v0.13.0` and stays
+    that way after a hand-bumped major, so `1.13.11` still means "eleven commits
+    since `v0.13.0`". ``None`` means git cannot answer — no checkout, no such tag,
+    a shallow clone that does not carry it — and the caller then keeps
+    `pyproject.toml`'s own third component."""
+    runner = run or _default_runner()
+    base = f"v{major}.{phase}"
+    passes = (
+        ([base, f"{base}.*"], major),
+        ([f"v*.{phase}", f"v*.{phase}.*"], None),
+    )
+    for patterns, demanded_major in passes:
+        found = _describe(runner, patterns, major=demanded_major, phase=phase)
+        if found is not None:
+            return found
+    return None
+
+
+def phase_tag(major: int, phase: int, run: Runner | None = None) -> str | None:
+    """The tag that completed this phase, whatever major it carries (or None)."""
+    found = _find_phase_tag(major, phase, run=run)
+    return found[0] if found is not None else None
+
+
+def commits_since_phase(major: int, phase: int, run: Runner | None = None) -> int | None:
+    """How many commits have landed since the tag that completed this phase.
+
+    ``run`` is injectable so the suite never shells out."""
+    found = _find_phase_tag(major, phase, run=run)
+    return found[1] if found is not None else None
 
 
 def _resolve(run: Runner | None = None) -> str:

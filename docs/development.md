@@ -17,7 +17,7 @@ an entry-script shebang can never break it again.
 
 ## 2. Two lines of work
 
-`main` is the trainer two people practise on **every day**; `v0.14-curricula` is this
+`main` is the trainer two people practise on **every day**; `curricula` is this
 rebuild. `AGENTS.md` §0 has the rules; the mechanics:
 
 - **Check the branch before every commit** — `git branch --show-current`. `make
@@ -133,8 +133,16 @@ expected, not drift.
 **Completing a phase** is `make version` plus two manual touches in one commit: set
 `pyproject.toml` to the phase version (`<major>.<phase>.0`) and `git tag
 v<major>.<phase>.0` on that commit. The tag is what the next phase's commits count
-from. Phase 14's completion is also the natural moment for the manual major-epoch
-bump (`1.14.0`) — the engine's identity changes here; see `roadmap/v0.14.md` §7.
+from.
+
+**The epoch bump is taken (2026-09-27): dojo is `1.x`.** Phase 14 completes at
+`1.14.0` + `git tag v1.14.0`, and until then this branch is `1.13.N` while `main` is
+`0.13.N` off the same tag. The bump is a hand edit to the major only; `version.py`
+finds the phase tag across majors (it tries `v<major>.<phase>` first, then any major
+carrying that phase), so the count stays checkable against git either way. Because
+`PHASE_VERSION` changes from `0.13` to `1.13`, the debug-log marker mismatches once
+and `data/logs/` is cleared — the same thing a phase completion does, and the reason
+the log is version-gated at all.
 
 ## 8. Do-not-break list
 

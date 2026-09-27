@@ -219,15 +219,47 @@ def test_the_writer_refuses_a_pyproject_it_cannot_edit(monkeypatch, tmp_path):
 
 def test_the_commit_count_matches_the_history_it_describes():
     """The number claims to be a fact, so re-count it: the checkout's version must
-    equal `git rev-list --count v<major>.<phase>.0..HEAD`. Skipped where there is
-    no checkout or no phase tag (a wheel, a shallow clone, a fresh fork)."""
+    equal `git rev-list --count <phase tag>..HEAD`. The tag is the one git found
+    rather than an assumed `v<major>.<phase>.0`, because an epoch bump leaves the
+    phase tag carrying an older major (`1.13.11` counts from `v0.13.0`). Skipped
+    where there is no checkout or no phase tag (a wheel, a shallow clone)."""
     major, phase, commit = version_mod.VERSION.split(".")
-    if version_mod.commits_since_phase(int(major), int(phase)) is None:
+    tag = version_mod.phase_tag(int(major), int(phase))
+    if tag is None:
         pytest.skip("no git checkout carrying this phase's tag")
-    counted = _git("rev-list", "--count", f"v{major}.{phase}.0..HEAD")
-    if counted.returncode != 0:
-        pytest.skip(f"tag v{major}.{phase}.0 is not in this checkout")
+    counted = _git("rev-list", "--count", f"{tag}..HEAD")
+    assert counted.returncode == 0, f"{tag} is not in this checkout"
     assert int(commit) == int(counted.stdout.strip())
+
+
+def test_the_phase_tag_is_found_across_an_epoch_bump():
+    """**The bug the bump found.** Setting the major by hand (`0.13.x` → `1.13.x`)
+    must not orphan the tag the count comes from: phase 13's marker is `v0.13.0`
+    and keeps that major forever, so the lookup has to fall back to *any* major
+    carrying this phase. Before the fallback, `git describe` found nothing, the
+    count silently became pyproject's own string, and the version stopped being
+    verifiable at exactly the moment it changed epoch."""
+    calls: list[list[str]] = []
+
+    def runner(cmd):
+        calls.append(list(cmd))
+        # The exact `v1.13.*` spellings do not exist; the phase-only pass finds the
+        # tag written before the bump.
+        if any(pattern.startswith("v1.") for pattern in cmd if pattern.startswith("v")):
+            return SimpleNamespace(returncode=128, stdout="")
+        return SimpleNamespace(returncode=0, stdout="v0.13.0-11-gabc1234\n")
+
+    assert version_mod.commits_since_phase(1, 13, run=runner) == 11
+    assert len(calls) == 2, "the exact spelling is tried first, the phase-only second"
+    assert "v1.13" in calls[0] and "v*.13" in calls[1]
+
+
+def test_the_epoch_bump_still_refuses_another_phases_tag():
+    """The fallback widens the *major*, never the phase: a `v0.12.*` tag is still
+    not this phase's marker, or the count would span phases."""
+    stale = SimpleNamespace(returncode=0, stdout="v0.12.0-31-gdeadbee\n")
+    assert version_mod.commits_since_phase(1, 13, run=lambda cmd: stale) is None
+    assert version_mod.phase_tag(1, 13, run=lambda cmd: stale) is None
 
 
 # ------------------------------------------------------------- the fallbacks

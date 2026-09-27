@@ -3,8 +3,9 @@
 **Read this first. Then `AGENTS.md` (§0 is the branch discipline), `docs/curricula.md`
 (the format), and `roadmap/v0.14.md` (the plan you are executing).**
 
-Written 2026-09-27 on branch `v0.14-curricula`, at commit `069f630` + the docs commit
-that added this file. Delete this file when phase 14 merges to `main`.
+Written 2026-09-27 on branch `curricula` (renamed from `v0.14-curricula` and pushed
+to `origin`), at commit `3d0236e` + the commits that added this file. Delete this
+file when phase 14 merges to `main`.
 
 ---
 
@@ -15,7 +16,7 @@ Two lines of work are live, and **you are on the rebuild line**:
 | branch | what it is |
 |---|---|
 | `main` | the working trainer. The students practise here **every day**; the live database, the workbench and the debug log are here. Problem curation continues here, because the authoring commands still exist here. |
-| `v0.14-curricula` | this branch: splitting dojo into an **engine** (this repository) and **curricula** (their own repositories). Nothing that lands here is used for daily practice yet. |
+| `curricula` | this branch: splitting dojo into an **engine** (this repository) and **curricula** (their own repositories). Nothing that lands here is used for daily practice yet. |
 
 The user's setup: one workspace on `main` for practice, and a **second workspace**
 for this branch plus the curriculum repositories being built alongside it. You are in
@@ -145,10 +146,17 @@ Then: bump the version, tag it (the major-epoch question is `roadmap/v0.14.md` �
 the recommendation is `1.14.0` + `git tag v1.14.0`), merge to `main`, and delete this
 file.
 
-## 7. Open questions for the user
+## 7. Settled, and open
 
-- **Major epoch at phase 14?** (`1.14.0` recommended, `0.14.0` the alternative.) Ask
-  at the boundary, not before.
+**Settled:** the major-epoch bump is taken — this branch is `1.x` (`1.13.N` while
+phase 13 is the last completed phase), and phase 14 completes at `1.14.0` with `git
+tag v1.14.0` on that commit. `version.py` finds the phase tag across majors, so the
+count stays checkable (`1.13.11` = eleven commits since `v0.13.0`). One consequence
+to expect: `PHASE_VERSION` is now `1.13`, so the debug-log marker mismatches once and
+`data/logs/` is cleared.
+
+**Open:**
+
 - **Which curriculum next?** JAX is planned (phase 15.B). If another subject is
   wanted first, say so — the format is at its most changeable right now, and a second
   real user of it is what freezes v1.
