@@ -220,9 +220,11 @@ ends is treated as "no", and bare `dojo` still starts with the warm-ups unasked.
 commit distance from the tag that closed the phase, so `dojo --version` reads
 `0.13.6` and moves on its own with every commit. Completing a phase = bump the
 base **and** `git tag v<major>.<phase>.0` on that commit (v0.13's marker is
-`v0.13.0`). `PHASE_VERSION` (major.phase) still gates debug-log retention. AGENTS
-rule 9 is the contract; `tests/test_version.py` re-counts the distance in git
-instead of trusting it.
+`v0.13.0`). `pyproject.toml` carries the **current** version and `make version`
+keeps it in step on every commit (the suite fails otherwise), because a shell
+prompt reads that file for a glanceable version — `PHASE_VERSION` (major.phase)
+still gates debug-log retention. AGENTS rule 9 is the contract;
+`tests/test_version.py` re-counts the distance in git instead of trusting it.
 
 ## v0.11 work — shipped
 

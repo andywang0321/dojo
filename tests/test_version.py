@@ -129,6 +129,60 @@ def test_a_missing_git_binary_is_not_an_error():
     assert version_mod.commits_since_phase(0, 13, run=runner) is None
 
 
+def test_pyproject_is_kept_in_step_with_the_history():
+    """`pyproject.toml` is what a shell prompt and a packaging tool read, so it
+    carries the *current* version rather than a phase base — `make version` writes
+    it as part of every commit (AGENTS rule 9).
+
+    Two values are legal, because the check also runs before the commit exists:
+    the version of HEAD (already committed, `VERSION`), or the version that commit
+    is about to have (`pending_version()`). Anything else means someone landed a
+    commit without the bump — which is exactly what this test is for."""
+    declared = _project_version()
+    current = version_mod.VERSION
+    pending = version_mod.pending_version()
+    assert declared in (current, pending), (
+        f"pyproject.toml says {declared}; the history says {current} and the next "
+        f"commit will be {pending} — run `make version`"
+    )
+
+
+def test_the_written_version_is_the_next_commits(monkeypatch, tmp_path):
+    """`make version` = `sync_pyproject()`: write the number the pending commit
+    will have, touch nothing else, and be a no-op the second time."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\nname = "dojo"\nversion = "1.15.0"\n\n[tool.other]\nversion = "keep-me"\n'
+    )
+    monkeypatch.setattr(version_mod, "_PYPROJECT", pyproject)
+    monkeypatch.setattr(version_mod, "commits_since_phase", lambda *a, **k: 4)
+
+    assert version_mod.sync_pyproject() == ("1.15.5", True)
+    text = pyproject.read_text()
+    assert 'version = "1.15.5"' in text
+    assert 'version = "keep-me"' in text            # only [project] is touched
+    assert 'name = "dojo"' in text                  # ... and only that one line
+    assert version_mod.sync_pyproject() == ("1.15.5", False)   # idempotent
+
+
+def test_at_a_phase_boundary_the_new_base_stands(monkeypatch, tmp_path):
+    """The commit that completes a phase *is* the tag, so nothing is added to the
+    count yet: `make version` writes `1.15.0` and the tag is created on it."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nversion = "1.15.0"\n')
+    monkeypatch.setattr(version_mod, "_PYPROJECT", pyproject)
+    monkeypatch.setattr(version_mod, "commits_since_phase", lambda *a, **k: None)
+    assert version_mod.sync_pyproject() == ("1.15.0", False)
+
+
+def test_the_writer_refuses_a_pyproject_it_cannot_edit(monkeypatch, tmp_path):
+    bad = tmp_path / "pyproject.toml"
+    bad.write_text('[build-system]\nrequires = ["hatchling"]\n')
+    monkeypatch.setattr(version_mod, "_PYPROJECT", bad)
+    with pytest.raises(RuntimeError, match=r"\[project\]"):
+        version_mod.write_pyproject("1.0.0")
+
+
 def test_the_commit_count_matches_the_history_it_describes():
     """The number claims to be a fact, so re-count it: the checkout's version must
     equal `git rev-list --count v<major>.<phase>.0..HEAD`. Skipped where there is

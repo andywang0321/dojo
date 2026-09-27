@@ -1,25 +1,30 @@
-"""dojo's version: ``<major>.<phase>.<commit>`` — from pyproject.toml and git.
+"""dojo's version: ``<major>.<phase>.<commit>`` — written in pyproject, proved by git.
 
-`pyproject.toml` is the source of truth for the **base** (``<major>.<phase>.0``),
-and the third component is a fact about the checkout rather than a number
-somebody remembers to edit: it is how many commits have landed since the phase
-was completed, counted by ``git describe`` from the tag that marks it.
+**The version is a fact about the checkout, and `pyproject.toml` mirrors it.** git
+is authoritative for the third component — it is how many commits have landed
+since the tag that completed the phase — and `pyproject.toml` carries the same
+number so anything that reads the file (a shell prompt, a packaging tool, a
+human) sees the real version rather than a phase base.
 
-    1.15.5   →  major 1 (a manual decision)
-                15 phases completed
-                5 commits since phase 15 was completed
+    0.13.7   →  major 0 (a manual decision)
+                13 phases completed
+                7 commits since phase 13 was completed
 
-**The ritual when a phase completes** — one commit, and nothing else ever:
+**Every commit keeps `pyproject.toml` in step: run `make version`.** It writes the
+version *this* commit will have (`commits_since_phase() + 1`), and
+`tests/test_version.py` fails when the file and the history disagree — so a
+forgotten bump is caught by the suite, not by a stale prompt later.
 
-1. ``pyproject.toml`` → ``version = "<major>.<phase>.0"``. The phase number is
-   the roadmap stage (v0.13 → ``0.13.0``); bump the major by hand whenever you
-   want a new epoch.
-2. ``git tag v<major>.<phase>.0`` **on that same commit**.
+**Completing a phase** is that same bump plus two manual touches, in one commit:
 
-Every commit after it moves the third component on its own, so the number cannot
-drift from the history it claims to describe. A checkout with no such tag (an
-installed wheel, a shallow clone, a tarball) falls back to the exact string in
-`pyproject.toml`: the base is always pyproject's, git only refines it.
+1. ``pyproject.toml`` → ``version = "<major>.<phase>.0"`` (the phase number is the
+   roadmap stage: v0.13 → ``0.13.0``; bump the major by hand for a new epoch).
+2. ``git tag v<major>.<phase>.0`` **on that commit** — the mark the next phase's
+   commits are counted from.
+
+A checkout with no such tag (an installed wheel, a shallow clone, a tarball) falls
+back to the exact string in `pyproject.toml` — which is why keeping the file
+current matters: it is what a packaged dojo reports about itself.
 
 `PHASE_VERSION` (``<major>.<phase>``) is what gates debug-log retention — a phase
 is a stage, so completing one clears `data/logs/`, while the commits *inside* a
@@ -126,13 +131,65 @@ def commits_since_phase(major: int, phase: int, run: Runner | None = None) -> in
     return int(parts[1])
 
 
-def _resolve() -> str:
+def _resolve(run: Runner | None = None) -> str:
+    """The version this checkout *is*: git's distance when git can answer, else
+    the string in `pyproject.toml` verbatim (a wheel, a tarball, a shallow clone)."""
     parsed = _parse(_pyproject_version()) or _parse(_installed_version())
     if parsed is None:
         return "0.0.0"
     major, phase, commit = parsed
-    distance = commits_since_phase(major, phase)
+    distance = commits_since_phase(major, phase, run=run)
     return f"{major}.{phase}.{commit if distance is None else distance}"
+
+
+def pending_version(run: Runner | None = None) -> str:
+    """The version the **next commit** will have — what `make version` writes.
+
+    One more than the current distance, because the commit being prepared becomes
+    part of the history the number describes. When git cannot answer — a phase
+    whose tag does not exist yet, or no checkout — the file's own value stands,
+    which is exactly right at a phase boundary: that commit *is* the tag, so
+    nothing has been added to the count yet."""
+    parsed = _parse(_pyproject_version()) or _parse(_installed_version())
+    if parsed is None:
+        return "0.0.0"
+    major, phase, commit = parsed
+    distance = commits_since_phase(major, phase, run=run)
+    if distance is None:
+        return f"{major}.{phase}.{commit}"
+    return f"{major}.{phase}.{distance + 1}"
+
+
+def write_pyproject(version: str, path: Path | None = None) -> Path:
+    """Set ``[project].version`` in pyproject.toml, touching nothing else."""
+    target = path or _PYPROJECT
+    text = target.read_text()
+    start = text.find("[project]")
+    if start == -1:
+        raise RuntimeError(f"{target} has no [project] table")
+    head, sep, tail = text.partition("[project]")
+    replaced, count = re.subn(
+        r'(?m)^version\s*=\s*"[^"]*"',
+        f'version = "{version}"',
+        tail,
+        count=1,
+    )
+    if not count:
+        raise RuntimeError(f"{target} has no version line in [project]")
+    target.write_text(head + sep + replaced)
+    return target
+
+
+def sync_pyproject(run: Runner | None = None) -> tuple[str, bool]:
+    """Bring `pyproject.toml` in step with the history; returns (version, changed).
+
+    This is `make version`: idempotent, so running it twice in a row is a no-op,
+    and safe on a checkout whose git it cannot read (nothing changes)."""
+    version = pending_version(run=run)
+    if _parse(version) is None or _pyproject_version() == version:
+        return version, False
+    write_pyproject(version)
+    return version, True
 
 
 #: The full version, e.g. ``0.13.7`` — major.phases-completed.commits-since.
@@ -141,3 +198,4 @@ VERSION = _resolve()
 #: ``<major>.<phase>``: the marker the debug log compares against, so finishing a
 #: phase clears `data/logs/` and the commits inside a phase do not.
 PHASE_VERSION = ".".join(VERSION.split(".")[:2])
+
