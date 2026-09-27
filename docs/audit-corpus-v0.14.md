@@ -121,25 +121,59 @@ problem the batch produces: the statement's complexity line + representation
 note, the `problem_overrides.json` entry, the `@oracle` / `@judge_case` /
 `@profiler_input` set, and a `@reference` admitted by `curator.reference_findings`.
 
-Status (updated as batches land):
+Three pieces of tooling made that tractable, and all three found real defects
+before anything landed (they live in the gitignored `data/curation/offline/` —
+scratch, like the curator's own proposals):
+
+* **Fragments + `assemble.py`** — one JSON file per problem, written
+  independently so authors never touch a shared file, merged into the three
+  artifacts idempotently (registry blocks found through the AST, references
+  through their marker comment, statements and overrides keyed by slug).
+* **`probe_smoke.py`** — per problem, oracle-as-student vs the registered
+  reference across the probe's ladder, plus a reference-vs-itself run at the
+  largest measured size. `tests/test_registry.py` only proves agreement on small
+  cases; this is where "the reference cannot handle n=6400" or "the profiler
+  input makes the two disagree" shows up, and it caught LC 74's generator calling
+  `math.isqrt` without importing `math` — a `NameError` that a live session would
+  have reported as "no measurement" and nothing else.
+* **The corpus-wide profiler-input smoke** in `tests/test_registry.py`
+  (generators must run and their args must survive `json.dumps`) — the permanent
+  version of the same check.
+
+Two findings came out of the content work rather than the code:
+
+* **A sub-linear reference could not support a "better" claim.** Against an
+  `O(log n)` reference the whole `O(1)` → `O(log n)` step spans ~1.9x over the
+  ladder — the same magnitude as a constant-factor advantage — so a correct
+  student calling the C-implemented `bisect` was named "better — O(1)" in 5 of 8
+  runs while both sides did the same logarithmic work. `growth.verdict` now
+  returns `unresolved` for the improvement direction against a sub-linear
+  declared class, keeping the worse direction (a linear scan against a log
+  reference is ~60x) decidable.
+* **Two legacy complexity lines did not parse** (`min_stack`,
+  `encode_and_decode_strings`): the statement-shaped `O(1) time and O(n) space`
+  adjacency is what `bank._COMPLEXITY_RE` reads, and both interpolated words
+  between the two halves, so their Expected column had always been blank.
+
+Status (each group is a commit; "✓" = assembled, gated, probe-smoked, verified):
 
 | group | problems | status |
 |---|---|---|
-| sliding_window | 6 | see commits |
-| binary_search | 7 | see commits |
-| linked_list | 11 | see commits |
-| trees | 14 | see commits |
-| tries | 3 | see commits |
-| heap | 6 | see commits |
-| backtracking | 9 | see commits |
-| graphs | 13 | see commits |
-| advanced_graphs | 6 | see commits |
-| dp_1d | 12 | see commits |
-| dp_2d | 11 | see commits |
-| greedy | 7 | see commits |
-| intervals | 6 | see commits |
-| math_and_geometry | 8 | see commits |
-| bit_manipulation | 7 | see commits |
+| sliding_window | 6 | ✓ |
+| binary_search | 7 | ✓ |
+| linked_list | 11 | in flight |
+| trees | 14 | |
+| tries | 3 | in flight |
+| heap | 6 | in flight |
+| backtracking | 9 | |
+| graphs | 13 | (4 premium statements need authoring) |
+| advanced_graphs | 6 | (1 premium statement) |
+| dp_1d | 12 | |
+| dp_2d | 11 | |
+| greedy | 7 | |
+| intervals | 6 | (2 premium statements) |
+| math_and_geometry | 8 | |
+| bit_manipulation | 7 | |
 
 ## 7. What this audit did not do
 

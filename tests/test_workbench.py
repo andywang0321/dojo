@@ -199,3 +199,37 @@ def test_a_missing_signature_still_yields_a_callable_stub():
     source = wb.template_for(problem)
     ast.parse(source)
     assert "def contains_duplicate(*args, **kwargs):" in source
+
+
+def test_every_curated_problem_renders_a_compiling_template():
+    """Corpus-wide (v0.14): a curated problem that cannot render a template
+    cannot be solved.
+
+    `template_for` refuses to write a file that does not compile, so the failure
+    would reach the student as a session that will not start — and a problem
+    whose cases cannot be rendered loses its runnable examples block, which is the
+    student's own local check. Both are silent in the other corpus tests, which
+    look at the judge, not at the artifact.
+    """
+    from dojo.bank import discover_problems, load_overrides
+    from dojo.config import PROBLEMS_DIR
+
+    overrides = load_overrides()
+    assert overrides, "no curated problems found"
+    for problem in discover_problems(PROBLEMS_DIR):
+        ov = overrides.get(problem.slug)
+        if ov is None:
+            continue
+        row = {
+            "slug": problem.slug,
+            "statement": problem.statement,
+            "function_name": ov.function_name,
+            "signature": dumps_json(ov.signature) if ov.signature else None,
+            "visible_tests": dumps_json(ov.visible_tests),
+        }
+        source = wb.template_for(row)  # raises TemplateError when it cannot compile
+        ast.parse(source)
+        assert wb.SENTINEL_OPEN in source, f"{problem.slug}: no examples block"
+        block = wb.example_block(row)
+        assert block, f"{problem.slug}: example_block refused to build"
+        ast.parse(block.replace(wb.SENTINEL_OPEN, "").replace(wb.SENTINEL_CLOSE, ""))

@@ -17,7 +17,7 @@ Constraints:
 0 <= strs[i].length < 200
 strs[i] contains only UTF-8 characters.
 
-You should aim for a solution with O(m) time for each encode() and decode() call and O(m+n) space, where m is the sum of lengths of all the strings and n is the number of strings.
+You should aim for a solution with O(m) time and O(m) space, where m is the sum of the lengths of all the strings.
 """
 
 

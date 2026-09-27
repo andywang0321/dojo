@@ -28,5 +28,5 @@ Constraints:
 -2^31 <= val <= 2^31 - 1.
 pop, top and getMin will always be called on non-empty stacks.
 
-You should aim for a solution with O(1) time for each function call and O(n) space, where n is the maximum number of elements present in the stack.
+You should aim for a solution with O(1) time and O(n) space, where n is the maximum number of elements present in the stack.
 """
