@@ -15,4 +15,7 @@ Input: s = "eccbbbbdec"
 Output: [10]
 Constraints:
 * 1 <= s.length <= 500
-* s consists of lowercase English letters."""
+* s consists of lowercase English letters.
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of s (the fixed 26-letter alphabet keeps the last-occurrence table constant).
+"""

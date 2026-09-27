@@ -14,4 +14,7 @@ Constraints:
 * 1 <= hand.length <= 10^4
 * 0 <= hand[i] <= 10^9
 * 1 <= groupSize <= hand.length
-Note: This question is the same as 1296: https://leetcode.com/problems/divide-array-in-sets-of-k-consecutive-numbers/"""
+Note: This question is the same as 1296: https://leetcode.com/problems/divide-array-in-sets-of-k-consecutive-numbers/
+
+You should aim for a solution as good or better than O(n log n) time and O(n) space, where n is the length of the hand array: the intended solution sorts the distinct card values and sweeps them once, and keeps a count per distinct value.
+"""

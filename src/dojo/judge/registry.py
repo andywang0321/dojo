@@ -3189,6 +3189,642 @@ def _is_peak(module, got, args) -> bool:
     return nums[got] > left and nums[got] > right
 
 
+@oracle("jump-game-ii")
+def _jump_game_ii_oracle(nums: list[int]) -> int:
+    """Brute force: the minimum-jumps DP. best[i] is the fewest jumps that reach
+    index i, relaxed over every jump length from every index — O(n^2), and it
+    fills the whole table rather than returning at the first hit, so it cannot
+    early-exit on the profiler input.
+
+    A position no path reaches stays at n + 1 (no route needs more than n - 1
+    jumps) and is reported as -1; the statement guarantees that never happens,
+    and the generator's guarantee is checked against this answer."""
+    n = len(nums)
+    if n <= 1:
+        return 0
+    unreachable = n + 1
+    best = [unreachable] * n
+    best[0] = 0
+    for i in range(n):
+        if best[i] == unreachable:
+            continue
+        for j in range(i + 1, min(n, i + nums[i] + 1)):
+            if best[i] + 1 < best[j]:
+                best[j] = best[i] + 1
+    return best[-1] if best[-1] != unreachable else -1
+
+
+@judge_case("jump-game-ii")
+def _jump_game_ii_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= nums.length
+    # The statement guarantees nums[n - 1] is reachable, so the case is built to
+    # be: a random walk lays a path down first and every index it lands on keeps
+    # at least the step it needs. Extra reach anywhere else only helps.
+    nums = [rng.randint(0, 3) for _ in range(n)]
+    idx = 0
+    while idx < n - 1:
+        step = rng.randint(1, min(3, n - 1 - idx))
+        nums[idx] = max(nums[idx], step)
+        idx += step
+    return [nums], _jump_game_ii_oracle(nums)
+
+
+@profiler_input("jump-game-ii")
+def _jump_game_ii_profiler(n: int, rng: random.Random) -> list:
+    # All ones: a strictly increasing staircase of reach. The level boundary
+    # advances by exactly one index per level, so the greedy pays a jump at every
+    # index and first reaches index n - 1 only on its (n - 1)-th level — there is
+    # no `farthest >= n - 1` shortcut to take and no level that swallows the rest
+    # of the array. The DP oracle re-relaxes the whole table too, one jump length
+    # per index, and the values respect the statement's 0 <= nums[i] <= 1000.
+    return [[1] * max(1, n)]
+
+
+@oracle("jump-game")
+def _jump_game_oracle(nums: list[int]) -> bool:
+    """Brute force: fill a reachability table by trying every jump length from
+    every index that turned out to be reachable. No shortcut on success — the
+    whole table is filled, so it cannot early-exit on the profiler input.
+
+    Total on the empty list (excluded by the statement's length >= 1): there is
+    no last index to reach, so the answer is False, and the reference agrees."""
+    n = len(nums)
+    if n == 0:
+        return False
+    reachable = [False] * n
+    reachable[0] = True
+    for i in range(n):
+        if not reachable[i]:
+            continue
+        for j in range(i + 1, min(n, i + nums[i] + 1)):
+            reachable[j] = True
+    return reachable[-1]
+
+
+@judge_case("jump-game")
+def _jump_game_case(n: int, rng: random.Random) -> tuple[list, bool]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= nums.length
+    nums = [rng.randint(0, 3) for _ in range(n)]
+    if rng.random() < 0.4:
+        # One long jump somewhere: values in 0..3 alone leave most short arrays
+        # unsolvable, and both answers have to show up in the generated cases.
+        nums[rng.randrange(n)] = rng.randint(0, n)
+    return [nums], _jump_game_oracle(nums)
+
+
+@profiler_input("jump-game")
+def _jump_game_profiler(n: int, rng: random.Random) -> list:
+    # All ones: the frontier advances by exactly one index per step, so
+    # `reach >= n - 1` first holds at index n - 2 — the latest index it can hold
+    # at, since a jump of 1 is the shortest that can finish the array — and the
+    # pass has to visit every index to find that out. The reachability table has
+    # nothing to early-exit on either: one jump length per index and no value big
+    # enough to shortcut to the end. (A student that re-scans the array per index
+    # is still quadratic here; a student that scans the *jump lengths* is not,
+    # and cannot be — no solvable array both lags the frontier this way and has
+    # sum(nums) = O(n^2).)
+    return [[1] * max(1, n)]
+
+
+@oracle("gas-station")
+def _gas_station_oracle(gas: list[int], cost: list[int]) -> int:
+    """Brute force: try every station and drive the whole circuit from it,
+    abandoning a start the moment the tank goes negative. The first station that
+    completes the loop is the answer, else -1.
+
+    With the statement's uniqueness guarantee that first hit *is* the answer, but
+    the oracle assumes nothing: on an input with two valid stations it answers
+    with the lowest index, which is also what the canonical greedy answers there
+    (checked exhaustively over small arrays before this fragment was written)."""
+    n = len(gas)
+    for start in range(n):
+        tank = 0
+        for k in range(n):
+            i = (start + k) % n
+            tank += gas[i] - cost[i]
+            if tank < 0:
+                break
+        else:
+            return start
+    return -1
+
+
+def _gas_station_valid_starts(gas: list[int], cost: list[int]) -> list[int]:
+    """Every station the circuit can be completed from, by simulation. The
+    generator uses it to check the uniqueness the statement promises before it
+    hands a case over; the oracle is the same idea with a first-hit return."""
+    n = len(gas)
+    starts: list[int] = []
+    for start in range(n):
+        tank = 0
+        for k in range(n):
+            i = (start + k) % n
+            tank += gas[i] - cost[i]
+            if tank < 0:
+                break
+        else:
+            starts.append(start)
+    return starts
+
+
+@judge_case("gas-station")
+def _gas_station_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= n <= 10^5
+    # The net profile d[i] = gas[i] - cost[i] is built as a tank-level walk seen
+    # from the starting station: levels[0] = 0 at `start`, the levels ahead of it
+    # stay positive, and levels[n] is the circuit's total.
+    #
+    # A station at offset m can finish the circuit exactly when (a) no later
+    # level sits below its own, and (b) after the wrap the total still covers
+    # every earlier level. With levels[0] = 0 the unique minimum, (b) for m >= 1
+    # reduces to `total >= levels[m]`. So:
+    #   * total >= 0 and every other level >= 3 -> only offset 0 can finish, i.e.
+    #     the answer is unique, which is the statement's "if there exists a
+    #     solution, it is guaranteed to be unique" (note it is NOT enough for the
+    #     total to be non-negative, and a strict surplus does not imply
+    #     uniqueness either: gas=[0,1]/cost=[0,0] has two valid starts);
+    #   * total < 0 -> every circuit ends in deficit, no station finishes, and
+    #     the answer is -1, trivially unique.
+    # 2 cases in 5 are solvable and 3 in 5 are not: the statement says nothing
+    # about the mix, and a generator producing only one kind would leave half the
+    # contract untested.
+    start = rng.randrange(n)
+    solvable = rng.random() < 0.4
+    total = rng.randint(0, 2) if solvable else -rng.randint(1, 3)
+    levels = [0] + [rng.randint(3, 6) for _ in range(n - 1)] + [total]
+    net = [levels[(i - start) % n + 1] - levels[(i - start) % n] for i in range(n)]
+    cost = [rng.randint(max(0, -d), max(0, -d) + 4) for d in net]
+    gas = [c + d for c, d in zip(cost, net)]
+    expected = _gas_station_oracle(gas, cost)
+    if expected >= 0 and _gas_station_valid_starts(gas, cost) != [expected]:
+        # Verified, not assumed: if the walk ever failed to leave exactly one
+        # station able to finish, this generator would ship an input the
+        # statement forbids. Fall back to a shape whose uniqueness is by
+        # inspection (the whole surplus at the last station, every earlier one
+        # empty) rather than trusting the argument above. Two earlier versions of
+        # that argument were wrong, which is exactly why it is checked.
+        cost = [1] * n
+        gas = [0] * (n - 1) + [n + 1]
+        expected = _gas_station_oracle(gas, cost)
+    return [gas, cost], expected
+
+
+@profiler_input("gas-station")
+def _gas_station_profiler(n: int, rng: random.Random) -> list:
+    # The answer is the LAST station, and every earlier start fails only on the
+    # step that would have carried it there.
+    #
+    # cost[i] = n everywhere; gas ramps at n + 1 (a net gain of +1 per station)
+    # and drops to 0 at station n - 2, with the whole surplus parked at station
+    # n - 1. Starting at j < n - 1 the tank climbs by one per station and the
+    # cliff empties it, so the failure lands exactly on the step before station
+    # n - 1 — a per-start simulation is Theta(n^2) here (20.5M steps at n = 6400)
+    # and the brute-force oracle cannot early-exit. The canonical greedy still
+    # scans all n stations and returns n - 1, which is what makes the answer's
+    # position a real test of "did you traverse".
+    #
+    # Values respect the statement: cost = n and gas <= n + 3 are both inside
+    # 0..10^4 for every probe size (the ladder tops out at n = 6400, so cost = n
+    # is comfortably legal; a shorter ladder would still work, a longer one would
+    # need a different base cost).
+    n = max(1, int(n))
+    if n == 1:
+        return [[4], [1]]  # single station, and it is the last one: 4 >= 1
+    cost = [n] * n
+    gas = [n + 1] * (n - 2) + [0, n + 3]
+    return [gas, cost]
+
+
+@oracle("valid-parenthesis-string")
+def _valid_parenthesis_string_oracle(s: str) -> bool:
+    """Brute force over the readings, memoized on (position, open count).
+
+    The definition is itself a search: each '*' may be '(', ')' or the empty
+    string, and the string is valid exactly when some choice of readings is a
+    correctly matched bracket string, i.e. when the running number of unmatched
+    '(' never goes negative and is zero at the end. This walks the string trying
+    all three readings at every star; the only thing it prunes is a prefix that has
+    already closed more brackets than it opened, which no later reading can repair.
+    `failed` remembers the (position, open) states already proven dead, which is
+    what turns 3^(number of stars) into O(n^2) states. Total on the empty string
+    (which the statement's length bound excludes)."""
+    failed: set[tuple[int, int]] = set()
+
+    def read(index: int, opens: int) -> bool:
+        if opens < 0:
+            return False
+        if index == len(s):
+            return opens == 0
+        if (index, opens) in failed:
+            return False
+        char = s[index]
+        if char == "(":
+            options = (opens + 1,)
+        elif char == ")":
+            options = (opens - 1,)
+        else:  # '*': read it as '(', as ')' or as the empty string
+            options = (opens + 1, opens, opens - 1)
+        for nxt in options:
+            if read(index + 1, nxt):
+                return True
+        failed.add((index, opens))
+        return False
+
+    return read(0, 0)
+
+
+def _valid_parenthesis_string_balanced(pairs: int, rng: random.Random) -> str:
+    """A random correctly matched bracket string with `pairs` pairs."""
+    if pairs == 0:
+        return ""
+    left = rng.randint(0, pairs - 1)
+    return (
+        "("
+        + _valid_parenthesis_string_balanced(left, rng)
+        + ")"
+        + _valid_parenthesis_string_balanced(pairs - 1 - left, rng)
+    )
+
+
+def _valid_parenthesis_string_valid(size: int, rng: random.Random) -> str:
+    """A valid string of exactly `size` characters.
+
+    A real bracket string is built first, then some of its brackets are rewritten
+    to '*' - so those stars MUST read as that bracket - and the remaining length is
+    filled with '*' that read as the empty string. Nothing here can produce an
+    invalid string: every '*' has the reading of the bracket it replaced, or reads
+    as empty."""
+    chars = [
+        "*" if char == "(" and rng.random() < 0.35
+        else "*" if char == ")" and rng.random() < 0.35
+        else char
+        for char in _valid_parenthesis_string_balanced(size // 2, rng)
+    ]
+    while len(chars) < size:
+        chars.insert(rng.randint(0, len(chars)), "*")
+    return "".join(chars)
+
+
+def _valid_parenthesis_string_pad(shape: str, size: int, rng: random.Random) -> str:
+    """Grow `shape` to `size` characters with stars, inserted at random positions.
+
+    Inserting a star that can read as the empty string cannot make a VALID string
+    invalid: the original reading is still available (and every reading of the
+    padded string restricts to a reading of the original). It can however rescue an
+    INVALID string - the inserted star brings two new readings with it - which is
+    why the invalid templates below are emitted unpadded."""
+    chars = list(shape)
+    while len(chars) < size:
+        chars.insert(rng.randint(0, len(chars)), "*")
+    return "".join(chars)
+
+
+@judge_case("valid-parenthesis-string")
+def _valid_parenthesis_string_case(n: int, rng: random.Random) -> tuple[list, bool]:
+    size = max(1, min(n, 12))  # statement: 1 <= s.length <= 100
+    roll = rng.random()
+    # The star-critical shapes: cases where a 'count the stars and compare'
+    # answer and the two-counter range disagree. In "(*))" the star must be a '('
+    # to close the pair, in "((*)" it must be a ')', in "(*)" and "*" it must be
+    # the empty string, and "**(" is false however the stars read - the three
+    # readings the low/high range keeps apart. The self-check proves those roles by
+    # enumerating every reading of every star, outside the fragment.
+    opens_shape = [
+        "*",          # true  - the star reads as empty
+        "(*",         # true  - the star reads as ')'
+        "*)",         # true  - the star reads as '('
+        "**",         # true
+        "(*)",        # true  - empty
+        "(*))",       # true  - '(' (statement example 3)
+        "((*)",       # true  - ')'
+        "((**",       # true  - two stars as ')'
+        "(**)",       # true
+        "*()",        # true  - empty
+        "(()*",       # true
+    ]
+    closed_shapes = [
+        "*(",         # false - nothing after the '(' can close it
+        "**(",        # false
+        "*))",        # false - two stars cannot close three brackets
+        "*)(",        # false
+        "(((*",       # false - one star cannot close three opens
+        "(((((****",  # false - four stars cannot close five opens
+    ]
+    if roll < 0.2:
+        # A valid shape, padded to length with extra stars: the padding is where
+        # the third role (a star reading as the empty string) comes from, and it
+        # cannot change the verdict - the shape's own reading survives.
+        shape = rng.choice([candidate for candidate in opens_shape if len(candidate) <= size])
+        s = _valid_parenthesis_string_pad(shape, size, rng)
+    elif roll < 0.35:
+        # A false shape, emitted at its own length: padding it with stars would add
+        # readings and could rescue it ("**))" is true while "*))" is false), and
+        # this case is here to be false.
+        usable = [candidate for candidate in closed_shapes if len(candidate) <= size]
+        if usable:
+            s = rng.choice(usable)
+        else:  # size == 1: no star-critical false shape fits, so take a valid one
+            s = rng.choice([candidate for candidate in opens_shape if len(candidate) <= size])
+    elif roll < 0.7:
+        # Valid by construction: a bracket string with some brackets rewritten to
+        # '*' (that star must read as the bracket it replaced) and the rest filled
+        # with '*' reading as empty. Exercises all three readings at once.
+        s = _valid_parenthesis_string_valid(size, rng)
+    elif roll < 0.85:
+        # One character of a valid string changed: usually invalid, and the change
+        # is usually adjacent to a star, which is where a range bug shows up.
+        chars = list(_valid_parenthesis_string_valid(size, rng))
+        index = rng.randrange(len(chars))
+        chars[index] = rng.choice([c for c in "()*" if c != chars[index]])
+        s = "".join(chars)
+    else:
+        # An unstructured draw.
+        s = "".join(rng.choice("()*") for _ in range(size))
+    return [s], _valid_parenthesis_string_oracle(s)
+
+
+@profiler_input("valid-parenthesis-string")
+def _valid_parenthesis_string_profiler(n: int, rng: random.Random) -> list:
+    # A valid string of length size: half '(' and half '*' that close them. Nothing
+    # can early-exit - the answer is true, no prefix pushes the minimum open count
+    # below zero, and every character moves both counters, which is the whole cost
+    # of the intended pass (a stack solution pays size pushes and pops on it).
+    #
+    # probe_max_n = 100 is a fidelity cap, not a preference: the statement bounds
+    # s at 100 characters, so the default ladder's 6400 would measure inputs the
+    # problem never promises (the merge-two-sorted-lists precedent). The cost is
+    # resolution - over a 1..100 ladder an O(n) solution can realistically only
+    # come back "agrees with the reference" or "unresolved", and unresolved is the
+    # honest reading rather than a curation bug. What it still buys is the digest
+    # check at 100 characters, ten times any generated case.
+    size = max(1, min(n, 100))
+    opens = size // 2
+    return ["(" * opens + "*" * (size - opens)]
+
+
+@oracle("partition-labels")
+def _partition_labels_oracle(s: str) -> list[int]:
+    """Brute force, straight off the definition: a cut is *allowed* only when no
+    letter occurs on both sides of it, and "as many parts as possible" is exactly
+    taking every allowed cut. O(n^2) — each candidate cut rebuilds both sides as
+    sets — and it builds the whole cut list before emitting a single size, so it
+    never stops early.
+
+    The empty string is excluded by 1 <= s.length; it returns [] there (there are
+    no parts), which is also what the reference returns."""
+    n = len(s)
+    if n == 0:
+        return []
+    cuts: list[int] = []
+    for i in range(n - 1):
+        if not (set(s[: i + 1]) & set(s[i + 1 :])):
+            cuts.append(i + 1)
+    sizes: list[int] = []
+    prev = 0
+    for cut in cuts + [n]:
+        sizes.append(cut - prev)
+        prev = cut
+    return sizes
+
+
+@judge_case("partition-labels")
+def _partition_labels_case(n: int, rng: random.Random) -> tuple[str, list[int]]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= s.length
+    # A small alphabet, so repeats, re-entries and single-letter parts all show
+    # up in a 12-character case; occasionally the whole alphabet, for the
+    # many-distinct-letters shape.
+    width = 26 if rng.random() < 0.25 else rng.randint(1, 4)
+    alphabet = "abcdefghijklmnopqrstuvwxyz"[:width]
+    s = "".join(rng.choice(alphabet) for _ in range(n))
+    return [s], _partition_labels_oracle(s)
+
+
+@profiler_input("partition-labels")
+def _partition_labels_profiler(n: int, rng: random.Random) -> list:
+    # The 26-letter cycle, truncated to n (probe_max_n = 500 keeps n inside the
+    # statement's own length bound). Every letter is still ahead of the current
+    # part's end, so the greedy's window stretches to the very end of the string
+    # and its merge loop visits all n indices before the single cut — nothing to
+    # early-exit on. A per-index forward scan for a letter's last occurrence (the
+    # obvious quadratic student) walks to the far end of the string from every
+    # index, Theta(n^2) at n = 500; the reference does its two linear passes.
+    # Values are lowercase English letters, inside the constraint.
+    alphabet = "abcdefghijklmnopqrstuvwxyz"
+    n = max(1, int(n))
+    return [(alphabet * (n // 26 + 1))[:n]]
+
+
+@oracle("hand-of-straights")
+def _hand_of_straights_oracle(hand: list[int], group_size: int) -> bool:
+    """Exhaustive search: peel one group off at a time, recursing on the rest.
+
+    A group is `group_size` *consecutive* cards, so the group holding the smallest
+    remaining card can only be the run that starts there. This does not take that
+    on trust: it enumerates every sub-multiset of that size from the remaining
+    cards, keeps the ones whose values are that run, and recurses on what is left.
+    With duplicates several index combinations are the same pick - a group's values
+    are forced once its smallest card is fixed, so the enumeration's alternatives
+    are all rejected and the search consumes cards rather than choosing between
+    readings.
+
+    What it does not reuse from the reference is any of the counting: no
+    multiplicities, no divisibility shortcut, no sorted sweep. Removing ONE card per
+    value (not every copy of those values - the hand is a multiset, and this is
+    where such a search usually goes wrong) is a merge walk over the two sorted
+    lists, and `failed` memoizes the multisets already proven impossible.
+
+    Total on the empty hand (excluded by the statement's length bound) and on
+    group_size 1, where every single card is a group of one. The recursion costs
+    one frame per group peeled, so it reaches ~2900 cards at group_size 3 and would
+    hit the interpreter's limit beyond that; every path that runs it stays far
+    below - generated cases are <= 12 cards and the probe's oracle-versus-reference
+    differential stops at 800 cards (the full 6400-card ladder measures the
+    reference alone)."""
+    cards = sorted(hand)
+    if group_size < 1 or len(cards) % group_size:
+        return False
+    failed: set[tuple[int, ...]] = set()
+
+    def peel(remaining: tuple[int, ...]) -> bool:
+        if not remaining:
+            return True
+        if remaining in failed:
+            return False
+        run = [remaining[0] + step for step in range(group_size)]
+        for picked in _hand_of_straights_groups(remaining, group_size):
+            if sorted(picked) != run:
+                continue
+            gone = sorted(picked)
+            rest: list[int] = []
+            taken = 0
+            for card in remaining:  # both lists are sorted: drop one copy per value
+                if taken < len(gone) and card == gone[taken]:
+                    taken += 1
+                    continue
+                rest.append(card)
+            if peel(tuple(rest)):
+                return True
+        failed.add(remaining)
+        return False
+
+    return peel(tuple(cards))
+
+
+def _hand_of_straights_groups(cards: tuple[int, ...], group_size: int):
+    """Lazily yield every `group_size`-card sub-multiset of `cards` that contains
+    its first card, as a value list. Index combinations, so two copies of the same
+    value are two distinct choices."""
+
+    def tails(start: int, need: int):
+        if need == 0:
+            yield ()
+            return
+        for index in range(start, len(cards) - need + 1):
+            for rest in tails(index + 1, need - 1):
+                yield (index,) + rest
+
+    for indexes in tails(1, group_size - 1):
+        yield [cards[0]] + [cards[index] for index in indexes]
+
+
+@judge_case("hand-of-straights")
+def _hand_of_straights_case(n: int, rng: random.Random) -> tuple[list, bool]:
+    size = max(1, min(n, 12))  # statement: 1 <= hand.length <= 10^4
+    group_size = rng.randint(1, size)  # statement: 1 <= groupSize <= hand.length
+    roll = rng.random()
+    if roll < 0.45 and size % group_size == 0:
+        # A hand that IS a partition: size / group_size groups of consecutive
+        # cards laid down at random starts. Groups may share values - the hand is a
+        # multiset, so [1,2,3,1,2,3] is two groups of three.
+        hand: list[int] = []
+        for _ in range(size // group_size):
+            start = rng.randint(0, 9)
+            hand.extend(range(start, start + group_size))
+    elif roll < 0.75:
+        # A partitionable-looking hand with one card bumped by +1: the runs are
+        # right but a count is off. This is the near miss the examples miss (they
+        # fail on divisibility), and whether it is really unpartitionable is the
+        # oracle's call, not the construction's.
+        hand = []
+        for _ in range(max(1, size // group_size)):
+            start = rng.randint(0, 9)
+            hand.extend(range(start, start + group_size))
+        hand = hand[:size]
+        hand[rng.randrange(len(hand))] += 1
+    else:
+        # No structure at all: duplicates and gaps in any arrangement.
+        hand = [rng.randint(0, 9) for _ in range(size)]
+    rng.shuffle(hand)
+    return [hand, group_size], _hand_of_straights_oracle(hand, group_size)
+
+
+@profiler_input("hand-of-straights")
+def _hand_of_straights_profiler(n: int, rng: random.Random) -> list:
+    # A hand that IS partitionable and has all-distinct values: the run 0, 1, ...,
+    # size-1 cut into groups of three, inside the statement's 0..10^9 range.
+    # Nothing can early-exit - the answer is true, no value of a run is missing and
+    # every card is consumed - and ~n distinct values are what makes the counting
+    # sweep sort a key per card, which is the intended solution's real cost (a
+    # heap-based solution pays the same n log n, and a per-card rescan is what the
+    # probe is there to catch).
+    #
+    # The ladder's smallest points bottom out at three cards, the fewest that can
+    # form a group at all; the values stay distinct, so no duplicate can mask a
+    # dropped or double-counted card and the digest changes with it.
+    group_size = 3
+    size = max(group_size, n - n % group_size)
+    return [[i for i in range(size)], group_size]
+
+
+@oracle("merge-triplets-to-form-target-triplet")
+def _merge_triplets_oracle(triplets: list[list[int]], target: list[int]) -> bool:
+    """Brute force by running the stated operation to its end.
+
+    A merge writes a componentwise max into one of the two slots, so a triplet
+    that is already above `target` in some coordinate can never come back down.
+    Nor can one ever help: follow the lineage of the element that ends up equal to
+    `target` back through the merges that built it and every value on that lineage
+    is the componentwise max of some subset of the original triplets - hence at
+    most `target` componentwise, because the final value is `target`. So only
+    triplets that stay inside `target` can take part in a sequence that works.
+
+    Merging *all* of those into a single slot is a legal sequence of the stated
+    operation, and it leaves their componentwise maximum in that slot: the largest
+    triplet any legitimate sequence can hold. The target is obtainable exactly when
+    that maximum is the target itself - if it is below the target in some
+    coordinate, every subset's maximum is too. One pass, O(1) extra space, total on
+    an empty triplet list (which the statement's length bound excludes)."""
+    size = len(target)
+    best = None
+    for row in triplets:
+        if all(row[k] <= target[k] for k in range(size)):
+            best = list(row) if best is None else [max(best[k], row[k]) for k in range(size)]
+    return best is not None and best == list(target)
+
+
+@judge_case("merge-triplets-to-form-target-triplet")
+def _merge_triplets_case(n: int, rng: random.Random) -> tuple[list, list]:
+    size = max(1, min(n, 12))  # statement: 1 <= triplets.length <= 10^5
+    # Every coordinate stays inside the statement's 1..1000 (these are 1..11), and
+    # the target's own values are >= 2 so that "one below it" is still >= 1.
+    target = [rng.randint(2, 8) for _ in range(3)]
+    roll = rng.random()
+    if roll < 0.4:
+        # Obtainable: one triplet per coordinate, each one inside the target and
+        # matching it on its own axis.
+        triplets = [
+            [target[axis] if k == axis else rng.randint(1, target[k]) for k in range(3)]
+            for axis in range(3)
+        ]
+    elif roll < 0.55:
+        # Obtainable the easy way: the target is already a triplet.
+        triplets = [list(target)]
+    elif roll < 0.8:
+        # Every triplet stays inside the target, yet one coordinate is never hit
+        # exactly - so the answer is false although nothing overshoots.
+        axis = rng.randrange(3)
+        triplets = [
+            [rng.randint(1, target[k] - 1) if k == axis else rng.randint(1, target[k])
+             for k in range(3)]
+            for _ in range(size)
+        ]
+    elif roll < 0.9:
+        # Every triplet overshoots the target in the same coordinate: none of them
+        # may take part, and no merge can repair a value that is already too big.
+        axis = rng.randrange(3)
+        over = target[axis] + rng.randint(1, 3)
+        triplets = [
+            [over if k == axis else rng.randint(1, target[k]) for k in range(3)]
+            for _ in range(size)
+        ]
+    else:
+        # An unstructured draw: random triplets against a random target.
+        triplets = [[rng.randint(1, 8) for _ in range(3)] for _ in range(size)]
+    triplets = triplets[:size]
+    while len(triplets) < size:
+        # Filler rows, drawn like the unstructured branch: they may add coverage or
+        # overshoot, and the oracle decides what that does to the answer.
+        triplets.append([rng.randint(1, 8) for _ in range(3)])
+    rng.shuffle(triplets)
+    return [triplets, target], _merge_triplets_oracle(triplets, target)
+
+
+@profiler_input("merge-triplets-to-form-target-triplet")
+def _merge_triplets_profiler(n: int, rng: random.Random) -> list:
+    # n triplets, every one of them inside the target (so a correct solution must
+    # look at all of them - it cannot discard a row and stop), but the third
+    # coordinate is drawn from 1..999 against a target of 1000, so that coordinate
+    # is never matched and the answer is false: no implementation can return early
+    # on a success either. Values stay inside the statement's 1..1000 and ~n rows of
+    # three coordinates are the input's whole size.
+    target = [1000, 1000, 1000]
+    triplets = [
+        [rng.randint(1, 1000), rng.randint(1, 1000), rng.randint(1, 999)]
+        for _ in range(n)
+    ]
+    return [triplets, target]
+
+
 # ----------------------------------------------------------------- class mode
 # min_stack: an "ops" problem — the case replays a method sequence on a fresh
 # instance and compares the per-op outputs. The replay oracle below is a
@@ -8571,3 +9207,182 @@ def _non_overlapping_intervals_reference(intervals: list[list[int]]) -> int:
             kept += 1
             last_end = end
     return len(intervals) - kept
+
+
+# --- canonical reference (gas-station) ---
+
+@reference("gas-station")
+def _gas_station_reference(gas: list[int], cost: list[int]) -> int:
+    """Canonical greedy: total >= 0 decides *whether* a start exists, and the
+    start is the station right after the last prefix whose tank went negative —
+    one pass, O(1) extra space. A tank that goes negative on the way to i rules
+    out every start in [start, i], which is what lets a single scan replace the
+    n simulations. The empty input is excluded by n >= 1; the guard keeps the
+    reference identical to the oracle (which answers -1) if it ever arrives."""
+    if not gas:
+        return -1
+    total = 0
+    tank = 0
+    start = 0
+    for i in range(len(gas)):
+        delta = gas[i] - cost[i]
+        total += delta
+        tank += delta
+        if tank < 0:
+            start = i + 1
+            tank = 0
+    return start if total >= 0 else -1
+
+
+# --- canonical reference (hand-of-straights) ---
+
+@reference("hand-of-straights")
+def _hand_of_straights_reference(hand: list[int], group_size: int) -> bool:
+    """The intended O(n log n): count the cards, then sweep the distinct values in
+    ascending order.
+
+    Each distinct value is a group *start* as many times as it is still
+    outstanding when the sweep reaches it (`need`), because the groups that
+    contain the smallest unfinished value must all start exactly there. Those
+    `need` groups then need `need` cards of each of the next `group_size - 1`
+    values, which is what the inner loop charges. O(n) space for the counts, at
+    most one entry per distinct card."""
+    if group_size < 1 or len(hand) % group_size:
+        return False
+    counts: dict[int, int] = {}
+    for card in hand:
+        counts[card] = counts.get(card, 0) + 1
+    for start in sorted(counts):
+        need = counts[start]
+        if need == 0:  # already consumed by the groups that started below it
+            continue
+        for value in range(start, start + group_size):
+            if counts.get(value, 0) < need:
+                return False
+            counts[value] -= need
+    return True
+
+
+# --- canonical reference (jump-game) ---
+
+@reference("jump-game")
+def _jump_game_reference(nums: list[int]) -> bool:
+    """Canonical greedy: one pass, carrying the farthest index reachable so far;
+    an index beyond that frontier means the array cannot be finished, and if the
+    pass survives every index then the last one was reachable.
+
+    Deliberately written without the mid-loop `reach >= n - 1 -> True` shortcut,
+    so the probe's baseline always reads the whole array (on the profiler input
+    the shortcut would fire two indices early); the answer is the same either way.
+    The empty list is excluded by the constraint, but the guard keeps the
+    reference identical to the oracle on every input the gate could hand it."""
+    if not nums:
+        return False  # no last index to reach
+    reach = 0
+    for i, jump in enumerate(nums):
+        if i > reach:
+            return False  # unreachable, and so is everything past it
+        reach = max(reach, i + jump)
+    return reach >= len(nums) - 1
+
+
+# --- canonical reference (jump-game-ii) ---
+
+@reference("jump-game-ii")
+def _jump_game_ii_reference(nums: list[int]) -> int:
+    """Canonical level-BFS greedy: one pass remembering where the current jump
+    lands (cur_end) and the farthest index the whole level can reach (farthest);
+    each time the scan reaches cur_end, one more jump has been spent.
+
+    The reachability guard keeps the reference total and makes it agree with the
+    oracle (which answers -1) on an array the statement's guarantee excludes; on
+    graded and measured inputs it never fires."""
+    jumps = 0
+    cur_end = 0
+    farthest = 0
+    for i in range(len(nums) - 1):
+        if i > farthest:
+            return -1  # index i is unreachable: there is no route to the end
+        farthest = max(farthest, i + nums[i])
+        if i == cur_end:
+            jumps += 1
+            cur_end = farthest
+    return jumps
+
+
+# --- canonical reference (merge-triplets-to-form-target-triplet) ---
+
+@reference("merge-triplets-to-form-target-triplet")
+def _merge_triplets_reference(triplets: list[list[int]], target: list[int]) -> bool:
+    """The intended single pass: one sweep, three flags.
+
+    Keep only the triplets that stay inside the target - anything above it is stuck
+    above it and can never be part of a merge that ends at the target - and record
+    which coordinates of the target one of those already matches. A coordinate that
+    no surviving triplet matches can never be reached, because every value a merge
+    can produce is a componentwise max of original triplets and this one is below
+    the target everywhere. O(n) time over the triplets and O(1) extra space."""
+    size = len(target)
+    seen = [False] * size
+    for row in triplets:
+        if all(row[k] <= target[k] for k in range(size)):
+            for k in range(size):
+                if row[k] == target[k]:
+                    seen[k] = True
+    return all(seen)
+
+
+# --- canonical reference (partition-labels) ---
+
+@reference("partition-labels")
+def _partition_labels_reference(s: str) -> list[int]:
+    """Canonical greedy: one pass records each letter's last index, a second
+    extends the current part's end to every last occurrence seen inside it and
+    closes the part exactly when the scan reaches that end. The scan therefore
+    visits every index and never stops before the string does; the table holds at
+    most 26 entries, which is O(1) for the statement's fixed alphabet."""
+    last: dict[str, int] = {}
+    for i, ch in enumerate(s):
+        last[ch] = i
+    sizes: list[int] = []
+    start = 0
+    end = 0
+    for i, ch in enumerate(s):
+        if last[ch] > end:
+            end = last[ch]
+        if i == end:
+            sizes.append(i - start + 1)
+            start = i + 1
+    return sizes
+
+
+# --- canonical reference (valid-parenthesis-string) ---
+
+@reference("valid-parenthesis-string")
+def _valid_parenthesis_string_reference(s: str) -> bool:
+    """The intended one pass, two counters.
+
+    `low` is the fewest '(' that can still be open if every '*' seen so far is read
+    as ')' (never below zero: a star that closed a bracket could have been read as
+    empty instead), and `high` is the most that can be open if every star is read
+    as '('. The readings of a prefix leave it at every open count in [low, high]
+    and at no other, so a prefix whose `high` is negative is a ')' that no reading
+    can match, and the string is valid exactly when the whole string can end with
+    nothing open - which the clamped `low` reports. O(n) time, O(1) space."""
+    low = 0
+    high = 0
+    for char in s:
+        if char == "(":
+            low += 1
+            high += 1
+        elif char == ")":
+            low -= 1
+            high -= 1
+        else:  # '*': ')' lowers the floor, '(' raises the ceiling
+            low -= 1
+            high += 1
+        if high < 0:
+            return False
+        if low < 0:
+            low = 0
+    return low == 0

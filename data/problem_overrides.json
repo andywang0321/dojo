@@ -8446,5 +8446,408 @@
       }
     ],
     "lc_number": 1851
+  },
+  "jump-game-ii": {
+    "function_name": "jump",
+    "signature": "(nums: list[int]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            2,
+            3,
+            1,
+            1,
+            4
+          ]
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            2,
+            3,
+            0,
+            1,
+            4
+          ]
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            0
+          ]
+        ],
+        "expected": 0
+      }
+    ],
+    "lc_number": 45
+  },
+  "jump-game": {
+    "function_name": "can_jump",
+    "signature": "(nums: list[int]) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            2,
+            3,
+            1,
+            1,
+            4
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            3,
+            2,
+            1,
+            0,
+            4
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            0
+          ]
+        ],
+        "expected": true
+      }
+    ],
+    "lc_number": 55
+  },
+  "gas-station": {
+    "function_name": "can_complete_circuit",
+    "signature": "(gas: list[int], cost: list[int]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          [
+            3,
+            4,
+            5,
+            1,
+            2
+          ]
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          [
+            2,
+            3,
+            4
+          ],
+          [
+            3,
+            4,
+            3
+          ]
+        ],
+        "expected": -1
+      },
+      {
+        "args": [
+          [
+            3
+          ],
+          [
+            3
+          ]
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            0,
+            5
+          ],
+          [
+            2,
+            2
+          ]
+        ],
+        "expected": 1
+      }
+    ],
+    "lc_number": 134
+  },
+  "valid-parenthesis-string": {
+    "function_name": "check_valid_string",
+    "signature": "(s: str) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          "()"
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          "(*)"
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          "(*))"
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          "("
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          "(*"
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          "*("
+        ],
+        "expected": false
+      }
+    ],
+    "lc_number": 678,
+    "probe_max_n": 100
+  },
+  "partition-labels": {
+    "function_name": "partition_labels",
+    "signature": "(s: str) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          "ababcbacadefegdehijhklij"
+        ],
+        "expected": [
+          9,
+          7,
+          8
+        ]
+      },
+      {
+        "args": [
+          "eccbbbbdec"
+        ],
+        "expected": [
+          10
+        ]
+      },
+      {
+        "args": [
+          "a"
+        ],
+        "expected": [
+          1
+        ]
+      }
+    ],
+    "lc_number": 763,
+    "probe_max_n": 500
+  },
+  "hand-of-straights": {
+    "function_name": "is_n_straight_hand",
+    "signature": "(hand: list[int], group_size: int) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            6,
+            2,
+            3,
+            4,
+            7,
+            8
+          ],
+          3
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          4
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            1
+          ],
+          1
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            6,
+            7
+          ],
+          3
+        ],
+        "expected": false
+      }
+    ],
+    "lc_number": 846
+  },
+  "merge-triplets-to-form-target-triplet": {
+    "function_name": "merge_triplets",
+    "signature": "(triplets: list[list[int]], target: list[int]) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              2,
+              5,
+              3
+            ],
+            [
+              1,
+              8,
+              4
+            ],
+            [
+              1,
+              7,
+              5
+            ]
+          ],
+          [
+            2,
+            7,
+            5
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            [
+              3,
+              4,
+              5
+            ],
+            [
+              4,
+              5,
+              6
+            ]
+          ],
+          [
+            3,
+            2,
+            5
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            [
+              2,
+              5,
+              3
+            ],
+            [
+              2,
+              3,
+              4
+            ],
+            [
+              1,
+              2,
+              5
+            ],
+            [
+              5,
+              2,
+              3
+            ]
+          ],
+          [
+            5,
+            5,
+            5
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              1,
+              1
+            ]
+          ],
+          [
+            1,
+            1,
+            1
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            [
+              2,
+              2,
+              2
+            ]
+          ],
+          [
+            2,
+            2,
+            3
+          ]
+        ],
+        "expected": false
+      }
+    ],
+    "lc_number": 1899
   }
 }

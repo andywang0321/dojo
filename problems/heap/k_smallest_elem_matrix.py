@@ -19,6 +19,9 @@ Constraints:
 
 Both rows and columns are sorted — a heap over the first k rows and columns
 avoids flattening and sorting the entire matrix.
+
+You should aim for a solution with O(k log k) time and O(k) space, where k is
+the rank asked for (flattening and sorting the whole matrix is O(n^2 log n)).
 """
 
 from heapq import heappush

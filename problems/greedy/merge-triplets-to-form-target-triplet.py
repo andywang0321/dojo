@@ -25,4 +25,7 @@ The target triplet [5,5,5] is now an element of triplets.
 Constraints:
 * 1 <= triplets.length <= 10^5
 * triplets[i].length == target.length == 3
-* 1 <= ai, bi, ci, x, y, z <= 1000"""
+* 1 <= ai, bi, ci, x, y, z <= 1000
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the number of triplets: the intended solution makes one pass over the triplets and remembers three flags.
+"""

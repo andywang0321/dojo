@@ -155,25 +155,71 @@ Two findings came out of the content work rather than the code:
   adjacency is what `bank._COMPLEXITY_RE` reads, and both interpolated words
   between the two halves, so their Expected column had always been blank.
 
-Status (each group is a commit; "✓" = assembled, gated, probe-smoked, verified):
+Status (each group is committed once assembled, gated and probe-smoked):
 
 | group | problems | status |
 |---|---|---|
-| sliding_window | 6 | ✓ |
-| binary_search | 7 | ✓ |
-| linked_list | 11 | in flight |
-| trees | 14 | |
-| tries | 3 | in flight |
-| heap | 6 | in flight |
-| backtracking | 9 | |
-| graphs | 13 | (4 premium statements need authoring) |
-| advanced_graphs | 6 | (1 premium statement) |
-| dp_1d | 12 | |
-| dp_2d | 11 | |
-| greedy | 7 | |
-| intervals | 6 | (2 premium statements) |
-| math_and_geometry | 8 | |
-| bit_manipulation | 7 | |
+| sliding_window | 6 | ✓ committed, verified |
+| binary_search | 7 | ✓ committed, verified |
+| tries | 3 | ✓ committed, verified |
+| linked_list | 11 | ✓ committed, verification running |
+| trees | 14 | ✓ committed, verification running |
+| heap | 6 | ✓ committed |
+| backtracking | 9 | ✓ committed |
+| bit_manipulation | 7 | ✓ committed |
+| math_and_geometry | 8 | ✓ committed |
+| intervals | 6 | ✓ committed |
+| greedy | 7 | fragments in flight |
+| graphs | 13 | fragments in flight (3 premium statements authored) |
+| advanced_graphs | 6 | fragments in flight (1 premium statement authored) |
+| dp_1d | 12 | fragments in flight |
+| dp_2d | 11 | fragments in flight |
+
+At the commit that landed the first ten groups (`985de4a`, version `0.13.17`):
+**101 of the 150 ladder problems are curated** (up from 24), the suite is 562
+passing, and `dojo roadmap --table` no longer skips a group — `sliding_window`
+became the ladder's next group the moment its six problems landed, where before
+the prereq gate treated the empty group as satisfied and served a later ladder
+instead.
+
+## 6b. What the batches turned up in the product
+
+Curating 126 problems exercised paths the 31-problem corpus never had, and each of
+these is a fix that landed with the content:
+
+* **Class stubs with constructor arguments.** `render_template` hard-coded
+  `def __init__(self):`, so `LRUCache`/`KthLargest` stubs had the wrong arity and a
+  student filling them in met a `TypeError` on their first `check`. `signature["ctor"]`
+  now carries the parameters, and `tests/test_registry.py` fails a class problem
+  whose cases pass `ctor_args` without declaring one.
+* **The oracle/reference side of a design problem.** `curator._case_findings` calls
+  them with the op list only, so a parameterized constructor has to be replayed as a
+  leading `["__init__", *ctor_args]` op — two authors invented the same convention
+  independently, and it is now documented.
+* **`_oracle_confirms` was vacuous under `"mutates"`**: it compared two `None`
+  returns, so the "the oracle confirms the mismatch" line confirmed anything,
+  including a mismatch caused by a broken reference. Each side now gets its own
+  deepcopy and the mutates mode compares the arguments left behind.
+* **`_case_findings` consumed the caller's case objects** for an in-place reference,
+  so a second gate call on the same list reported a false finding.
+* **Two complexity lines never parsed** (`O(max(m, n))`, `O(4^n / sqrt(n))`):
+  `bank._COMPLEXITY_RE` now accepts one level of nested parentheses, so the Expected
+  column is populated for the two statements that had been blank since they were
+  written.
+* **A profiler input that clamps below the ladder top** measures the identical input
+  at every size above the clamp, flattening the ratio series by construction — a
+  deliberately quadratic solution read as "matches" (found by an author on their own
+  fragment, then swept corpus-wide; the two affected fragments now carry a matching
+  `probe_max_n`).
+* **A generator that could not run**: LC 74's called `math.isqrt` without importing
+  `math`, and LC 287's raised `ValueError` on a legal size. The first is now caught
+  corpus-wide by a profiler-input smoke in `tests/test_registry.py`; the second by
+  the registry gate it turned red.
+* **The verifiers' own findings** were folded in rather than logged: LC 212's
+  generator only emitted square boards and LC 211's dotted queries only ever had an
+  added word's length (both now vary); the tries batch's committed registry drifted
+  from its fragment (the assembler is the only writer, and re-assembly is
+  byte-idempotent).
 
 ## 7. What this audit did not do
 

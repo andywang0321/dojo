@@ -12,4 +12,7 @@ Output: false
 Explanation: You will always arrive at index 3 no matter what. Its maximum jump length is 0, which makes it impossible to reach the last index.
 Constraints:
 * 1 <= nums.length <= 10^4
-* 0 <= nums[i] <= 10^5"""
+* 0 <= nums[i] <= 10^5
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the nums array.
+"""

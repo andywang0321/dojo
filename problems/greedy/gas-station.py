@@ -28,4 +28,7 @@ Constraints:
 * n == gas.length == cost.length
 * 1 <= n <= 10^5
 * 0 <= gas[i], cost[i] <= 10^4
-* The input is generated such that the answer is unique."""
+* The input is generated such that the answer is unique.
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the number of stations (n == gas.length == cost.length).
+"""

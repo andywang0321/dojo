@@ -15,4 +15,7 @@ Output: 2
 Constraints:
 * 1 <= nums.length <= 10^4
 * 0 <= nums[i] <= 1000
-* It's guaranteed that you can reach nums[n - 1]."""
+* It's guaranteed that you can reach nums[n - 1].
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the nums array.
+"""

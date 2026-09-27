@@ -20,4 +20,7 @@ Input: s = "("
 Output: false
 Constraints:
 * 1 <= s.length <= 100
-* s[i] is '(', ')' or '*'."""
+* s[i] is '(', ')' or '*'.
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the string s: the intended solution makes one pass tracking the smallest and the largest number of parentheses a prefix can still leave open.
+"""
