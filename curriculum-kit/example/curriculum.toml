@@ -1,0 +1,51 @@
+[curriculum]
+id = "demo"
+title = "Demo curriculum"
+version = "0.1.0"
+format = 1
+dojo = ">=1.14,<2"
+language = "python"
+interpreter = "dojo"            # dojo-venv | curriculum | system
+source = "written for curriculum-kit; not a course"
+license = "private"             # an example, never published
+
+[display]
+topic = "Topic"
+item = "Exercise"
+outline = "Outline"
+difficulty = ["intro", "core"]
+
+[warmup]
+policy = "re-solve"
+budget = 2
+
+[[topic]]
+id = "basics"
+title = "Trading off time against space"
+prereqs = []
+summary = "Two items: one measured (a pair of implementations that differ by one class), one judged (the reasoning behind choosing between them)."
+
+[[item]]
+id = "has_pair"
+topic = "basics"
+title = "Is there a pair that sums to the target?"
+difficulty = "intro"
+evidence = "measured"           # executable + measured: cases and a paired comparison
+external_id = "demo/has-pair"
+statement = "items/has_pair.md"
+artifact = "items/has_pair.py"
+checks = "checks/has_pair.py"
+assessment = "assessment/has_pair.py"
+
+[[item]]
+id = "explain_the_tradeoff"
+topic = "basics"
+title = "When is the slow version the right one?"
+difficulty = "core"
+evidence = "judged"             # no machine-checkable answer; a rubric, and it says so
+statement = "items/explain_the_tradeoff.md"
+artifact = "items/explain_the_tradeoff.answer.md"
+assessment = "assessment/explain_the_tradeoff.py"
+
+[aliases]
+items = { "sum_pair" = "has_pair" }

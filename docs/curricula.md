@@ -33,7 +33,6 @@ my-curriculum/
   assessment/<item>.py     # QUARANTINED: oracle, generated cases, reference,
                            #   rubric, measurement policy
   measure/<item>.py        # optional measurement policy (may live in assessment/)
-  tools/<tool>.py          # optional curriculum commands (`dojo curriculum run`)
   README.md                # how to use it, what it claims, what it does not
   .dojo-source.json        # written at install time: URL, commit, installed-at
 ```
@@ -101,14 +100,8 @@ evidence = "executable"          # executable | measured | judged | self-reporte
 external_id = "jax-docs/tracing/random-walk"   # optional, unique in this curriculum
 checks = "checks/trace_a_random_walk.py"
 assessment = "assessment/trace_a_random_walk.py"
-measure = "assessment/trace_a_random_walk_measure.py"
+# no separate measurement key: the assessment module registers @measure too
 tags = ["jit", "pytree"]
-
-[[tool]]
-id = "fetch"
-title = "Fetch an item from the source"
-run = "tools/fetch.py"
-help = "dojo curriculum run jax fetch <slug>"
 
 [aliases]                        # renames, so history survives a curator's tidying
 topics = { "jit" = "tracing" }
@@ -247,20 +240,24 @@ Fail loudly, never half-work:
   key the engine does not know.
 - A dropped topic/item with history and no `retired = true`.
 
-`dojo curriculum validate <path>` runs all of it and prints every problem, not the
-first.
+The **loader** runs all of it and prints every problem, not the first: enrolling a
+curriculum is the validation, so there is no separate `validate` command to forget to
+run. A curriculum the loader refuses is not servable, and the message names the file
+and the line (see §9).
 
 ## 9. Enrollment and installation
 
 ```bash
-dojo enroll github.com/<you>/dojo-curriculum-jax   # clone into CURRICULA_DIR, validate, enroll
+dojo enroll github.com/<you>/dojo-curriculum-jax   # clone into CURRICULA_DIR, validate, import, enroll
 dojo enroll ./my-curriculum                        # a local working copy (symlinked, not copied)
 dojo curricula                                     # installed + enrolled, versions, health
 dojo unenroll jax                                  # pause; history and cards stay
-dojo curriculum update jax                         # pull the source, re-validate, re-import
-dojo curriculum run jax fetch two-sum              # a tool the curriculum declares
-dojo curriculum new my-subject                     # scaffold from the engine's fixture
 ```
+
+That is the engine's whole curriculum surface. There is no `new`, `validate`,
+`update` or `run`: **enrolling is validating**, re-enrolling the same source is how a
+curriculum is updated, and a curriculum's own maintenance scripts live in its
+repository and run there. The engine does not create curricula — see §10.
 
 Installed curricula live in `config.CURRICULA_DIR`
 (`~/.local/share/dojo/curricula/<id>/` by default), each with a `.dojo-source.json`
@@ -270,16 +267,32 @@ user. Un-enrolling is reversible and touches no history.
 
 The engine ships exactly one curriculum — the fixture under
 `tests/fixtures/curriculum-demo/` — which is the format's executable specification,
-the loader's test double, and the skeleton `dojo curriculum new` copies. A fresh
-install with nothing enrolled says so and names the one command that changes it.
+the loader's test double, and the skeleton a new curriculum starts from (copy it).
+A fresh install with nothing enrolled says so and names the one command that changes
+it.
 
-## 10. Authoring
+## 10. Authoring is third-party
 
-By hand is the reference path: write the manifest, write the items, write the
-checks, register an oracle and a reference, run `dojo curriculum validate .`, and
-enroll it locally. The fixture curriculum is the smallest complete example.
+**The engine does not author curricula.** It provides the specification, enrolls what
+you built, and runs it — deliberately, because content tooling ages at a different
+rate than the engine, and because a curriculum someone else wrote must be auditable
+rather than modifiable in place.
 
-With AI is the fast path, and it is the fourth claim in dojo's definition — see
-[authoring.md](authoring.md) for the item-level curator and the curriculum-level
-bootstrap (propose an outline from a source you trust, author items, gate them,
-hand you a candidate to review).
+Third parties get, in this repository:
+
+- this specification (the normative contract the loader enforces);
+- `curriculum-kit/example/` — a complete, tiny curriculum in the format;
+- `curriculum-kit/AGENTS.template.md` — the conventions a curriculum repository
+  should start from;
+- `curriculum-kit/prompts/` — prompts for an AI agent that plans a curriculum from a
+  source, authors an item, audits a curriculum, or ports an existing corpus.
+
+The fourth claim in dojo's definition — *AI curriculum generation* — lives out there
+with them: it is a use of those prompts, not a feature of the engine. The engine's
+only obligations toward it are that the specification be honest, that the gates be
+enforceable, and that `dojo report` be able to audit what a generator produced.
+
+Authoring by hand is the reference path: copy the example, write the manifest and the
+items, register the oracle/cases/reference (and a rubric or a measurement policy where
+the evidence kind calls for one), then `dojo enroll .` — which validates everything
+and refuses the whole curriculum if anything dangles.

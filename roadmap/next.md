@@ -47,16 +47,38 @@ phase 15 makes it behavioural, then proves the format with a second curriculum.
 - The curriculum's own repository documents what it measures, what it does not, and
   what a warm-up means for it.
 
-## Phase 16 — AI curriculum generation (the fourth claim)
+## Phase 16 — AI curriculum generation (third-party, kit-driven)
 
-- `dojo curriculum bootstrap <source>`: ingest (URL, local docs, a syllabus) →
-  propose a topic graph → author items through the curator pipeline → gate each item
-  → audit the whole against the source → hand over a candidate curriculum in a
-  directory.
-- Provenance per item: which source passage, which model, which gate result. Coverage
-  reported as *missing* where the outline skipped material.
-- A read-only spike is worth running during phase 15: propose an outline from a JAX
-  documentation page, with no format commitment, to learn what the prompt needs.
+Generation happens **outside the engine** (AGENTS rule 13). What the engine owes it:
+
+- a specification honest enough that a generator can target it, and a validator strict
+  enough that a bad generation cannot install silently (`dojo enroll` is that gate);
+- `curriculum-kit/prompts/plan-a-curriculum.md` and `port-a-corpus.md` — the workflow,
+  written down;
+- `dojo report --curriculum` as the audit a generated curriculum must survive;
+- provenance that the format can *carry* per item (source, generator, gate results)
+  even though the engine never writes it.
+
+What a third-party generation project owns: ingest → outline → items → gates → the
+curriculum-level audit → the candidate handed over for review. Coverage is reported as
+*missing* where the outline skipped material, and every generated item's evidence kind
+is whatever it can actually deliver.
+
+A read-only spike is worth running during phase 15 — propose an outline from a JAX
+documentation page with the kit's planning prompt and no format commitment — to learn
+what the prompt needs.
+
+## The authoring-tooling port (owner: the curriculum side)
+
+The engine is losing its content tooling, and the NeetCode 150 corpus needs its
+equivalents: the LeetCode intake (today's `fetcher/`), the item curator (today's
+`curator/`, including the dual-oracle differential, the reference gate and the
+shape-repair stance), `dojo reference`, and `dojo report --fix`. Until they exist on
+the curriculum side, **curation continues on `main`**, where those commands still
+work — which is why `main` stays a live product through this phase. Porting them is a
+curriculum-side job built on `curriculum-kit/`; the engine's contribution is that its
+judge, its measurement framework and its validator are usable from outside (`python
+-c "from dojo.curriculum import validate"`), so the port does not reimplement them.
 
 ## Personalization (after generation exists)
 
@@ -67,8 +89,8 @@ phase 15 makes it behavioural, then proves the format with a second curriculum.
 - **Just-in-time items**: hitting an unknown concept offers `learn`, then generates
   the practice item that concept needs, gated like any other.
 - **Curriculum tuning as a text edit**: the manifest is the personalization surface —
-  difficulty ladder, warm-up policy, measurement axis, budgets — with
-  `dojo curriculum update` showing what changed.
+  difficulty ladder, warm-up policy, measurement axis, budgets — reviewed as a diff in
+  the curriculum's own repository before re-enrolling it.
 
 ## Parked deliberately
 

@@ -35,7 +35,9 @@ declares its topics, its exercises, how a submission is checked, what is worth
 measuring, what a warm-up means, and what to call all of that on screen.
 
 Curricula are their own repositories, so anyone can write one (the way you would
-write a Neovim plugin):
+write a Neovim plugin) — and **dojo does not build them**. It ships the
+specification and a kit for authors and their AI agents
+([`curriculum-kit/`](curriculum-kit/)); everything else is yours:
 
 ```bash
 dojo enroll github.com/<you>/dojo-curriculum-neetcode-150
@@ -222,7 +224,7 @@ uv run dojo                              # runs on Claude from here
 
 Override the model globally with `DOJO_MODEL`, or per agent with
 `DOJO_MODEL_<ROLE>` — the roles are `TUTOR`, `DISCUSSION`, `TEACHER`, `REVIEWER`,
-`AUDITOR`, `CURATOR`, `CURATION_AUDITOR`, `REFERENCER`. The leak auditor runs on
+`AUDITOR`. The leak auditor runs on
 every hint, so it is deliberately cheap (128-token budget, temperature 0); pointing
 `DOJO_MODEL_AUDITOR` at a small fast model is the intended economy.
 
@@ -265,20 +267,24 @@ my-curriculum/
 ```
 
 ```bash
-dojo curriculum new my-subject     # scaffold from the engine's fixture
-dojo curriculum validate .         # every refusal, before you enroll anything
-dojo enroll .                      # try it locally
+cp -r <dojo>/curriculum-kit/example my-subject   # start from the complete tiny example
+dojo enroll ./my-subject                        # enroll = install + validate; it refuses anything that dangles
 ```
 
-The whole format is documented in [`docs/curricula.md`](docs/curricula.md). The
-short version of what makes it honest: a curriculum declares what its evidence
+The whole format is documented in [`docs/curricula.md`](docs/curricula.md), and
+[`curriculum-kit/`](curriculum-kit/) is the authoring interface: the example
+curriculum, an `AGENTS.md` template for a curriculum repository, and four prompts for
+an AI agent — plan a curriculum from a source, author an item, audit a curriculum,
+port an existing corpus.
+
+The short version of what makes it honest: a curriculum declares what its evidence
 *means*, and the engine refuses to pretend otherwise. If your subject cannot be
 machine-graded, you say so and the items are judged or self-reported — clearly
 labelled, never dressed up as verification.
 
-And if you are learning the subject yourself, you do not have to author it from
-scratch: `dojo curriculum bootstrap <source>` is the fourth claim above, arriving
-in a later phase (`roadmap/next.md`).
+And if you are learning the subject yourself, you do not have to author it alone:
+point an agent at the source you trust with the kit's planning prompt, and that is the
+fourth claim above — generation as a third-party workflow, not an engine feature.
 
 ## Development
 
@@ -289,8 +295,9 @@ make version   # write the version this commit will have into pyproject.toml
 ```
 
 Two branches are live: `main` is the trainer people practise on every day, and
-`v0.14-curricula` is this rebuild. Read [`AGENTS.md`](AGENTS.md) §0 before you
-commit anything — the branch check is mandatory, not a formality.
+`v0.14-curricula` is this rebuild. If you are working on the rebuild, read
+[`HANDOFF.md`](HANDOFF.md) first and [`AGENTS.md`](AGENTS.md) §0 before you commit
+anything — the branch check is mandatory, not a formality.
 
 **Updating:** every `dojo` run fast-forwards the engine and refreshes dependencies
 automatically (nothing prints unless something changed). `dojo update` does it on

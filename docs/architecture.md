@@ -66,10 +66,10 @@ src/dojo/
   session/learn.py  # the teacher conversation + practice handoff
   tutor/backend.py  # Role-keyed protocol; OpenAI-compatible + Anthropic + mock
   tutor/{tutor,reviewer,prompts}.py
-  curator/          # item authoring and curriculum bootstrapping agents
   cli.py config.py guard.py proc.py debuglog.py version.py editor.py terminal.py
   render.py ui.py updater.py
-tests/fixtures/curriculum-demo/   # the format's executable specification
+curriculum-kit/   # the authoring interface (NOT engine code): the example
+                  #   curriculum, AGENTS.template.md, and four agent prompts
 ```
 
 ## 4. The loader and the two namespaces
@@ -232,9 +232,10 @@ reported as *not measurable here*.
 
 ## 10. AI roles and boundaries
 
-Roles: `tutor`, `discussion`, `teacher`, `reviewer`, `auditor` (leak check),
-`curator`, `curation_auditor`, `referencer`, and — with the evidence model — a
-review auditor. Every call names its role, and the role decides the request's system
+Roles: `tutor`, `discussion`, `teacher`, `reviewer`, `auditor` (leak check), and —
+with the evidence model — a review auditor. The authoring roles (`curator`,
+`curation_auditor`, `referencer`) do not exist here: authoring is third-party
+(`curriculum-kit/`). Every call names its role, and the role decides the request's system
 prompt, model, token budget, temperature, timeout and provenance record. Providers:
 DeepSeek (OpenAI-compatible), OpenAI (same wire) and Anthropic (its own wire, JSON
 via a forced tool call). A curriculum cannot add a role.
@@ -263,8 +264,9 @@ engine so notebook kernels and the debug adapter exist everywhere.
 ## 12. Extension points and deliberate gaps
 
 **Extension points (v1):** the manifest (content and policy), assessment modules
-(evaluators), measurement policies, curriculum tools (`dojo curriculum run`),
-display vocabulary, aliases.
+(evaluators), measurement policies, display vocabulary, aliases. There is no
+curriculum-supplied CLI: a curriculum's own scripts live in its repository, and the
+engine's curriculum surface is enrollment plus a read-only audit.
 
 **Deliberate gaps, documented rather than built:**
 
@@ -276,10 +278,13 @@ display vocabulary, aliases.
   compiled toolchain's runner is a different implementation with a diagnostics-shaped
   verdict vocabulary (`compile_failed`, error codes) that the case model does not
   express.
-- **A plugin API beyond the format.** Curricula declare content, policies and tools;
-  they cannot add CLI nouns, AI roles or scheduler behaviour. The format is
-  v1-unstable, not a public contract with a deprecation policy, until two real
-  curricula use it.
+- **A plugin API beyond the format — and no authoring API.** Curricula declare
+  content, policies and evaluators; they cannot add CLI nouns, AI roles or scheduler
+  behaviour. Authoring is third-party by design: the engine's authoring surface is
+  the specification, `dojo enroll` as the validator, and the importable
+  `dojo.curriculum` package for an external tool that wants to validate or render
+  without going through the CLI. The format is v1-unstable, not a public contract with
+  a deprecation policy, until two real curricula use it.
 - **Remote or multi-machine state.** One computer, one user, by design.
 
 ## 13. Known limitations

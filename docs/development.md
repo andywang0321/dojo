@@ -99,11 +99,11 @@ Ask the seam questions in `AGENTS.md` §5 first. Then:
 
 ## 6. Adding a curriculum
 
-Authoring is documented in [authoring.md](authoring.md) and the format in
-[curricula.md](curricula.md). From the engine's side, a curriculum is data plus
-declared policy; the only engine-side work is making sure the fixture still
-exercises every feature the format claims, because the fixture is the format's
-executable specification.
+Authoring is third-party (see [curricula.md](curricula.md) §10 and the
+`curriculum-kit/` directory), and the engine's side of it is deliberately small: it
+enrolls, validates, imports and runs. The engine-side work when the format changes is
+to keep `curriculum-kit/example/` exercising every feature the format claims, because
+that example is the format's executable specification and the loader's test double.
 
 To test a curriculum change end to end without touching the real state:
 

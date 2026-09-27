@@ -36,7 +36,7 @@ Rules, in order of severity:
    growing while this branch is open, so the migration is **rule-based and
    re-runnable**, never a snapshot script (see `roadmap/v0.14.md` §4).
 4. **The rebuild lands as one phase boundary.** Phase 14 completes when this branch
-   merges to `main` with the version bumped and tagged in the same commit (rule 8).
+   merges to `main` with the version bumped and tagged in the same commit (rule 10).
    Until then `main` keeps serving practice.
 
 `make check-branch` (planned with increment A) will run the same check as a
@@ -60,7 +60,8 @@ dojo is a local practice engine built on four claims:
 4. **AI curriculum generation** — a curriculum can be *bootstrapped* from a source
    you trust (a problem set, a library's own documentation) and then tailored to
    you, because you are not expected to be an expert in the thing you are trying to
-   learn.
+   learn. **This one happens outside the engine** (rule 13): dojo ships the
+   specification and the agent kit; it does not build curricula.
 
 The formula is a loop, not a list: practice produces evidence, evidence moves the
 schedule, the schedule chooses the next practice, and the agents adapt the
@@ -80,11 +81,12 @@ record, enrollment, the CLI, the SQLite schema and its migrations, the debug log
 the version, the IDE/debugging story.
 
 **Is not:** any problem statement, any test corpus, any oracle or reference
-solution, any topic taxonomy, any ladder, any language-specific intake (the
-LeetCode fetcher), any progression *policy*. Those live in a curriculum repository
-and arrive through the loader. The engine ships exactly one curriculum: the
-**fixture** under `tests/fixtures/curriculum-demo/`, which is the format's
-executable specification and the skeleton `dojo curriculum new` copies.
+solution, any topic taxonomy, any ladder, any language-specific intake, any
+progression *policy* — and **no authoring, curation or generation tooling**. Content
+lives in a curriculum repository and arrives through the loader; content *tooling*
+lives with it, guided by `curriculum-kit/`. The engine ships exactly one curriculum,
+`curriculum-kit/example/`, which is the format's executable specification, the
+loader's test double, and the skeleton a new curriculum copies.
 
 ## 3. Layout map (target — increment A brings it about)
 
@@ -108,18 +110,19 @@ src/dojo/
   measure/          # the paired-measurement framework + the growth verdict rule
   session/          # state machine, workbench/artifact views, flow, learn
   tutor/            # backend (roles/budgets/timeouts) + prompts + hint ladder + reviewer
-  curator/          # item authoring + curriculum bootstrapping agents
   editor.py terminal.py render.py ui.py proc.py guard.py debuglog.py version.py
-tests/
-  fixtures/curriculum-demo/   # the spec-by-example curriculum
-docs/               # architecture, curricula, grading, retention, authoring, development
+curriculum-kit/     # the authoring interface (NOT engine code): the example
+                    # curriculum, AGENTS.template.md, and the agent prompts
+tests/              # offline suite; the example curriculum is the loader's double
+docs/               # architecture, curricula, grading, retention, development
 roadmap/            # README (index), v0.14.md (this phase), next.md, history.md
 ```
 
-Gone from this repository once increment B lands (they move to curriculum
-repositories): `problems/`, `data/roadmap.toml`, `data/problem_overrides.json`,
-`patterns.py`, `fetcher/`, the LeetCode content of `judge/registry.py`, and the
-LeetCode-specific text in the curator prompts.
+Gone from this repository once increment B lands: `problems/`,
+`data/roadmap.toml`, `data/problem_overrides.json`, `patterns.py`, `fetcher/`, the
+LeetCode content of `judge/registry.py`, and `curator/` — the content and the
+authoring tooling both leave, the first to a curriculum repository and the second to
+that repository or to a separate authoring project built on `curriculum-kit/`.
 
 ## 4. Hard rules
 
@@ -168,7 +171,7 @@ LeetCode-specific text in the curator prompts.
    the live database** and proves the attempt history and the replayed cards are
    intact. Anything that cannot satisfy that protocol stays additive.
 7. **Tests are offline and deterministic.** No network; `MockBackend` everywhere;
-   the fixture curriculum is the loader's test double. **Never assert a class from
+   `curriculum-kit/example/` is the loader's test double. **Never assert a class from
    wall-clock timing** — the verdict rule is pinned on synthetic ratio series
    (`tests/test_growth.py`) and `tests/test_probe.py` asserts mechanism. A
    curriculum's own evaluators get the same treatment in its own repository.
@@ -203,6 +206,18 @@ LeetCode-specific text in the curator prompts.
     intake, JAX measurement, a curriculum's own oracle style) live in that
     curriculum's repository. A change that makes a doc wrong is an incomplete
     change.
+13. **The engine does not author content.** No curriculum creation, item curation,
+    generation or repair in this repository. The engine's entire curriculum surface is
+    `dojo enroll` (install + validate + enroll; re-enrolling is how it updates),
+    `dojo curricula` (list), `dojo unenroll` (pause), and `dojo report` (read-only
+    audit). Authoring tooling lives in a curriculum repository, guided by
+    `curriculum-kit/` in this one — the spec, the example, the AGENTS template and
+    the agent prompts. If a change here would create, curate, generate or fix
+    content, it belongs in that kit or in a curriculum repository instead. The
+    corollary matters for the seam: because authoring is external, the engine must
+    keep its *enforcement* honest (validation, the two namespaces, the evidence
+    kinds) rather than assuming a well-meaning author on the other side.
+
 
 ## 5. The curriculum seam: how to add capability without breaking it
 
@@ -237,17 +252,19 @@ each provider's env var (or its `DOJO_`-prefixed alias) and then the gitignored
 dotenv; `dojo setup` detects any provider's key, writes `DOJO_PROVIDER`, and
 `--provider X` pins the choice. **Never log or prompt-embed a key.**
 
-Roles today: `tutor`, `discussion`, `teacher`, `reviewer`, `auditor` (leak check),
-`curator`, `curation_auditor`, `referencer`. The evidence model adds at most a
-review auditor (phase 15, `docs/grading.md`); a curriculum may not add roles. Every
+Roles today: `tutor`, `discussion`, `teacher`, `reviewer`, `auditor` (leak check).
+The evidence model adds at most a review auditor (phase 15, `docs/grading.md`); a
+curriculum may not add roles, and the authoring roles that used to live here
+(`curator`, `curation_auditor`, `referencer`) left with the authoring tooling
+(rule 13). Every
 call names its role — `backend.chat_json(Role.TUTOR, …)` — and the role decides the
 system prompt's address, the token budget, the temperature, the timeout, the
 provenance record, and (for `MockBackend`) which canned answer comes back.
 
 ## 7. Configuration and state layout
 
-- `config.CONTENT_DIR` — engineered content that ships with the engine: the fixture
-  curriculum and templates. Read-only at runtime.
+- `config.CONTENT_DIR` — content that ships with the engine: `curriculum-kit/` (the
+  example curriculum, templates, the prompts). Read-only at runtime.
 - `config.DATA_DIR` (`DOJO_DATA_DIR`) — **user state**: `dojo.db`, `logs/`,
   `dojo.conf`, `curation/`. This is what `tests/conftest.py` redirects; a full run
   must leave the real directory byte-identical.

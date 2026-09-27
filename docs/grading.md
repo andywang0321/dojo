@@ -204,8 +204,12 @@ contract violations between the statement and the checks — ties graded by equa
 "unique answer" promises the generator does not enforce, constraint fidelity,
 verdict-tag mismatches. `dojo report --curriculum <id>` widens it to the curriculum:
 outline coverage, prereq sanity, gate results, provenance of every item. Findings
-land in gitignored `data/curation/` and print; `--fix` re-authors through the
-pipeline with rollback when the verdict is `fix`.
+land in gitignored `data/curation/` and print.
+
+**A report is read-only.** There is no `--fix`: the engine does not edit content
+(AGENTS rule 13). A finding is fixed where the curriculum lives — in its own
+repository, by whoever owns it — and re-enrolled; the report is the review you would
+otherwise leave, and it is machine-readable enough to send upstream.
 
 The student's words travel into the audit prompt under "WHAT THE STUDENT REPORTED",
 are recorded as `student_note`, and the auditor must address the claim by name —

@@ -1,6 +1,7 @@
 # roadmap
 
-The plan of record for this branch. One file per phase; a phase is done when its
+The plan of record for the branch `v0.14-curricula` — see `HANDOFF.md` in the
+repository root if you are picking this work up cold. One file per phase; a phase is done when its
 definition of done is met, the version is bumped and the commit is tagged
 (`docs/development.md` §7).
 
