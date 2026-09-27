@@ -101,6 +101,38 @@ def test_a_constant_reference_measures_the_student_directly():
     assert result.student_class == "O(n)"
 
 
+def test_a_sublinear_reference_cannot_support_a_better_claim():
+    """v0.14, measured live and pinned here: against an O(log n) reference the
+    improvement direction sits inside the constant-factor band.
+
+    Over the ladder the whole O(1) → O(log n) step spans ~1.9x, which is the same
+    magnitude as a constant-factor advantage — and the ratio exists precisely to
+    cancel constant factors. A correct student calling the C-implemented `bisect`
+    against a hand-written Python reference was named "better — O(1)" in 5 of 8
+    runs, on a ratio that drifted 1.78x → 1.05x while both sides did the same
+    logarithmic work. That series is what this test feeds in.
+    """
+    series = list(zip(LADDER, (1.78, 1.66, 1.50, 1.34, 1.22, 1.12, 1.05)))
+    result = verdict(series, declared_class="O(log n)")
+    assert result.kind == "unresolved"
+    assert result.student_class is None
+    assert result.trend is not None  # the ratio is still reported
+    assert "constant-factor" in result.note
+
+
+def test_a_sublinear_reference_still_reports_a_worse_class():
+    """Only the improvement claim is withheld: a linear scan against a log
+    reference grows ~60x across the ladder, so the worse direction stays
+    decidable."""
+    result = verdict(ratio_series("O(n)", "O(log n)"), declared_class="O(log n)")
+    assert result.kind == "worse"
+    assert result.student_class == "O(n)"
+    assert result.steps == 1
+    slower = verdict(ratio_series("O(n^2)", "O(log n)"), declared_class="O(log n)")
+    assert slower.kind == "worse"
+    assert slower.steps == 3  # n, n log n, n^2
+
+
 def test_a_shape_between_classes_is_unresolved_not_a_guess():
     """n^1.5 sits between n and n^2 (and closest to n log n). Naming it would be
     a guess, and guessing is what made the old profiler useless."""

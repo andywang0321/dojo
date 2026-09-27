@@ -75,6 +75,18 @@ produce, anchored on the problem's declared complexity, so the answer is a class
 | `failed` | the code broke at scale; the size and message are the finding |
 | `unreferenced` | no reference registered, so growth was not compared |
 
+**A sub-linear reference cannot support a `better` claim (v0.14).** Over the
+ladder the whole `O(1)` → `O(log n)` step spans ~1.9x, the same magnitude as a
+constant-factor advantage — and the ratio exists precisely to cancel constant
+factors. Measured, not theorized: a correct student calling the C-implemented
+`bisect` against a hand-written Python reference was named "better than the
+reference — O(1)" in 5 of 8 runs, on a ratio that drifted 1.78x → 1.05x while
+both sides did the same logarithmic work. So when the declared class is `O(1)` or
+`O(log n)`, the improvement direction returns `unresolved` (the ratio is still
+reported) while the worse direction stays decidable — a linear scan against a log
+reference grows ~60x. `tests/test_growth.py` pins both directions on synthetic
+series.
+
 `tests/test_growth.py` pins the rule on synthetic ratio series derived from real
 class pairs — including the counter-case (n^1.5, which sits between n and n² and
 must come back unresolved) — and never from wall-clock timing. Adding a

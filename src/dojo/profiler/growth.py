@@ -236,6 +236,30 @@ def verdict(
             reference_class=declared_class, steps=0,
             note=f"grows like the reference — consistent with {named}",
         )
+    if steps < 0 and ORDER.index(declared_class) <= ORDER.index("O(log n)"):
+        # The improvement direction is not decidable against a sub-linear
+        # reference. Over the ladder the whole O(1) -> O(log n) step spans ~1.9x,
+        # which is the same magnitude as a *constant-factor* advantage, and the
+        # ratio is supposed to cancel constant factors. Measured (v0.14): a
+        # correct student calling the C-implemented `bisect` against a
+        # hand-written Python reference came back "better than the reference —
+        # O(1)" in 5 of 8 runs, on a ratio that merely drifted 1.78x -> 1.05x
+        # while both sides did the same logarithmic work. The worse direction
+        # stays decidable (a linear scan against a log reference shows ~60x), so
+        # only the improvement claim is withheld.
+        return Verdict(
+            kind=UNRESOLVED,
+            trend=trend,
+            student_class=None,
+            reference_class=declared_class,
+            steps=None,
+            note=(
+                f"the cost ratio {shown} is below the reference's, but a "
+                f"{declared_class} reference is too flat across the ladder to "
+                "tell a better complexity class from a constant-factor "
+                "advantage — treat it as suggestive"
+            ),
+        )
     direction = "faster" if steps > 0 else "slower"
     word = "class" if abs(steps) == 1 else "classes"
     return Verdict(
