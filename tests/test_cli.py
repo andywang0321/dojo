@@ -1125,3 +1125,122 @@ def test_main_history_marks_a_problem_with_no_stated_target(cli_env):
     rec.out.clear()
     assert main(["history", "--slug", "two_sum"]) == 0
     assert "— / —" in rec.text
+
+
+# ---------------------------- `dojo <slug>` asks before serving other problems
+# An explicit slug is a request for *that* problem. Draining the warm-up queue
+# unasked served several unrelated slugs first, which read as dojo ignoring the
+# request (v0.13 follow-up).
+
+
+def _due_card(db_path, slug="contains_duplicate", pattern="arrays_and_hashing"):
+    from dojo import scheduler
+    from dojo.db import connect
+
+    conn = connect(db_path)
+    uid = get_or_create_user(conn, "andy")
+    scheduler.ensure_item_card(conn, uid, slug, pattern, due_immediately=True)
+    return conn, uid
+
+
+def test_an_explicit_slug_offers_the_due_warmups_and_serves_only_that_problem(cli_env):
+    from dojo.cli import main
+    from dojo.db import connect
+
+    rec, db_path, workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["list"]) == 0
+    conn, _uid = _due_card(db_path)
+    conn.close()
+
+    rec.out.clear()
+    rec.answers = ["n", "quit"]                    # decline the offer, then leave
+    assert main(["two_sum"]) == 0
+
+    text = " ".join(rec.text.split())
+    assert "You have 1 warm-up due — do them first? [y/N]" in text
+    assert "Warm-ups skipped" in text
+    # The requested slug was served, and the warm-up's problem was not.
+    assert (workbench / "two_sum.py").exists()
+    assert not (workbench / "contains_duplicate.py").exists()
+    conn = connect(db_path)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM attempts a JOIN problems p ON p.id = a.problem_id "
+        "WHERE p.slug = 'contains_duplicate'"
+    ).fetchone()[0] == 0
+
+
+def test_accepting_the_offer_runs_the_warmup_before_the_named_problem(cli_env):
+    from dojo.cli import main
+
+    rec, db_path, workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["list"]) == 0
+    _due_card(db_path)
+
+    rec.out.clear()
+    rec.answers = ["y", "quit", "quit"]            # do the warm-up, then your problem
+    assert main(["two_sum"]) == 0
+
+    assert "Warm-up: 1 card(s) due." in rec.text
+    assert (workbench / "contains_duplicate.py").exists()   # the warm-up ran
+    assert (workbench / "two_sum.py").exists()              # ... then the named problem
+
+
+def test_the_offer_says_how_many_this_session_will_run(cli_env):
+    """Saying yes to "5 due" must not promise five: the daily budget is two, and
+    the question says so (the queue's remainder is reported after it)."""
+    from dojo.cli import main
+
+    rec, db_path, _workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["list"]) == 0
+    for slug, pattern in (
+        ("contains_duplicate", "arrays_and_hashing"),
+        ("valid_anagram", "arrays_and_hashing"),
+        ("group_anagrams", "arrays_and_hashing"),
+        ("top_k_frequent_elements", "heap"),
+        ("k_closest_points", "heap"),
+    ):
+        conn, uid = _due_card(db_path, slug, pattern)
+        conn.close()
+
+    rec.out.clear()
+    rec.answers = ["n", "quit"]
+    assert main(["two_sum"]) == 0
+    assert "You have 5 warm-ups due — do the first 2 now? [y/N]" in " ".join(rec.text.split())
+
+
+def test_a_bare_dojo_still_starts_with_the_warmups_without_asking(cli_env):
+    """The offer exists because the *student* named a problem. With no slug the
+    daily routine keeps doing what it always did."""
+    from dojo.cli import main
+
+    rec, db_path, workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["list"]) == 0
+    _due_card(db_path)
+
+    rec.out.clear()
+    rec.answers = ["quit", "quit"]
+    assert main([]) == 0
+
+    text = " ".join(rec.text.split())
+    assert "Warm-up: 1 card(s) due." in text
+    assert "do them first?" not in text
+    assert (workbench / "contains_duplicate.py").exists()
+
+
+def test_skip_warmup_does_not_even_ask(cli_env):
+    from dojo.cli import main
+
+    rec, db_path, workbench, _problems = cli_env
+    _seed_user(db_path)
+    assert main(["list"]) == 0
+    _due_card(db_path)
+
+    rec.out.clear()
+    rec.answers = ["quit"]
+    assert main(["two_sum", "--skip-warmup"]) == 0
+    assert "do them first?" not in rec.text
+    assert not (workbench / "contains_duplicate.py").exists()

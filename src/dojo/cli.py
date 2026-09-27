@@ -476,8 +476,55 @@ def _run_practice_session(conn, console, backend, user, slug, open_editor=False)
     return outcome
 
 
+#: How many due cards one daily session drains. A capacity decision, not a memory
+#: claim: the ledger can hold several due cards, and `dojo warmup --limit N` is
+#: the way to do more (`dojo day` says so when cards remain).
+WARMUP_BUDGET = 2
+
+
+def _serve_warmups(
+    conn, console, backend, user, user_id, *, explicit_problem: bool
+) -> None:
+    """Start the session with the due warm-ups — or, when the student named a
+    problem, *offer* them first.
+
+    `dojo <slug>` used to drain the queue unasked, so asking for one problem served
+    several unrelated ones (v0.13 follow-up). The queue is still usually what a
+    student wants; it just may not be assumed. The question says how many are due
+    and how many this session will actually run, so "yes" never means more than it
+    said. A run with no stdin to answer from (a pipe, a script) serves the named
+    problem and leaves the queue alone: the explicit slug is the request."""
+    from dojo.session import run_warmups
+
+    if not explicit_problem:
+        run_warmups(conn, console, backend, user, limit=WARMUP_BUDGET)
+        return
+    due = scheduler.due_cards(conn, user_id)
+    if not due:
+        return
+    count = len(due)
+    noun = "warm-up" if count == 1 else "warm-ups"
+    if count <= WARMUP_BUDGET:
+        question = f"You have {count} {noun} due — do them first? [y/N] "
+    else:
+        question = (
+            f"You have {count} {noun} due — do the first {WARMUP_BUDGET} now? [y/N] "
+        )
+    try:
+        answer = make_prompt(console)(question).strip().lower()
+    except EOFError:
+        console.print(
+            "[dim]Input ended — serving your problem; the warm-ups stay due.[/dim]"
+        )
+        return
+    if answer not in ("y", "yes"):
+        console.print("[dim]Warm-ups skipped — they stay due.[/dim]")
+        return
+    run_warmups(conn, console, backend, user, limit=WARMUP_BUDGET)
+
+
 def _cmd_day(args) -> int:
-    from dojo.session import run_learn, run_warmups
+    from dojo.session import run_learn
     from dojo.tutor import get_backend
 
     console = Console()
@@ -493,9 +540,13 @@ def _cmd_day(args) -> int:
             return 1
         user_id = get_or_create_user(conn, user)
         console.print(f"[dim]Status: {scheduler.due_summary(conn, user_id)}.[/dim]")
-        if not args.skip_warmup:
-            run_warmups(conn, console, backend, user, limit=2)
         slug = args.slug
+        if not args.skip_warmup:
+            # An explicit slug is a request for *that* problem: the warm-up queue
+            # is offered rather than drained (v0.13 follow-up).
+            _serve_warmups(
+                conn, console, backend, user, user_id, explicit_problem=slug is not None
+            )
         if slug is None:
             problem = scheduler.pick_new_problem(conn, user_id)
             if problem is None:

@@ -32,9 +32,11 @@ The first `uv run dojo` builds the project environment (a minute or two); later 
 
 ```bash
 dojo                        # the daily routine: warm-ups + a scheduler-picked problem
-dojo <slug>                 # the same, on a specific problem
+dojo <slug>                 # that problem — with the warm-up queue *offered*, not assumed
 dojo warmup                 # due retrievals only
 ```
+
+**When you name a problem, you get that problem.** `dojo two_sum` does not quietly serve three other slugs first: if warm-ups are due it asks — `You have 3 warm-ups due — do the first 2 now? [y/N]` — and either way your problem is next. Nothing is lost by answering no (the cards stay due, FSRS is unaffected), and `--skip-warmup` skips even the question. With no slug, bare `dojo` keeps starting the day with the warm-ups it always did.
 
 Inside a session, the prompt shows the commands as **virtual text** right after your cursor — they vanish the moment you type: `open`, `check`, `learn`, `submit`, `quit`. Anything else you type is a question to the tutor — the `hint` command is gone; you just ask. **Submitting records an attempt; `quit` records nothing at all** — no row, no hints, no lapse. That is deliberate: glancing at a problem, poking at a feature, or changing your mind should not land in your history. A session that dies (crash, closed laptop) is resumed by running the same command again; the workbench state survives.
 

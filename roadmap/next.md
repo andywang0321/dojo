@@ -205,6 +205,15 @@ Three live reports, each with a diagnosis that turned out to be the second one:
    the list view (one cell wrapped over four rows); `dojo show <id>` still has
    them.
 
+## Reported (2026-09-26) — `dojo <slug>` served unrelated problems
+
+`dojo two_sum` opened with two or three warm-ups for *other* problems before
+reaching the one that was asked for. It now offers them: `You have 3 warm-ups
+due — do the first 2 now? [y/N]` — the count due and the count this session will
+run, so "yes" is not a promise of five. "No" costs nothing (the cards stay due; a
+skipped warm-up is not a lapse), `--skip-warmup` skips the question, input that
+ends is treated as "no", and bare `dojo` still starts with the warm-ups unasked.
+
 ## v0.11 work — shipped
 
 - Warm-up picks rotate (per-problem `MAX(submitted_at)` aggregation).
