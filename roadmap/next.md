@@ -214,6 +214,16 @@ run, so "yes" is not a promise of five. "No" costs nothing (the cards stay due; 
 skipped warm-up is not a lapse), `--skip-warmup` skips the question, input that
 ends is treated as "no", and bare `dojo` still starts with the warm-ups unasked.
 
+## Reported (2026-09-26) — `<major>.<phase>.<commit>` versioning
+
+`pyproject.toml` holds the base (`<major>.<phase>.0`); the third component is the
+commit distance from the tag that closed the phase, so `dojo --version` reads
+`0.13.6` and moves on its own with every commit. Completing a phase = bump the
+base **and** `git tag v<major>.<phase>.0` on that commit (v0.13's marker is
+`v0.13.0`). `PHASE_VERSION` (major.phase) still gates debug-log retention. AGENTS
+rule 9 is the contract; `tests/test_version.py` re-counts the distance in git
+instead of trusting it.
+
 ## v0.11 work — shipped
 
 - Warm-up picks rotate (per-problem `MAX(submitted_at)` aggregation).

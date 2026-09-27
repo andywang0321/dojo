@@ -1814,7 +1814,7 @@ AI review), and scheduled for spaced recall.
 Usage:
   dojo                  the daily routine
   dojo <problem-slug>   the routine on one specific problem
-  dojo --version        the version (pyproject.toml is its source of truth)
+  dojo --version        the version — <major>.<phase>.<commit>, one per commit
 
 Commands:
   learn [TOPIC]   study a topic with the teacher, then practice a problem

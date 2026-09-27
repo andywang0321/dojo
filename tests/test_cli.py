@@ -984,9 +984,12 @@ def test_main_version_flag_reports_the_pyproject_version(cli_env, capsys):
         main(["--version"])
     assert exit_info.value.code == 0
     assert f"dojo {VERSION}" in capsys.readouterr().out
+    # `pyproject.toml` supplies the base (major.phase); the commit component is
+    # git's (see tests/test_version.py).
     repo_root = Path(__file__).resolve().parents[1]
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text())
-    assert VERSION == pyproject["project"]["version"]
+    assert VERSION.split(".")[:2] == pyproject["project"]["version"].split(".")[:2]
+    assert VERSION.split(".")[2].isdigit()
 
 
 def test_main_report_writes_the_student_note_into_the_report(cli_env, monkeypatch):

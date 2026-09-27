@@ -1,20 +1,29 @@
-"""One source of truth for the version: `pyproject.toml` (audit F13).
+"""The version scheme: ``<major>.<phase>.<commit>``, from pyproject + git.
 
-There used to be three answers to one question — the tag said `0.13.0`,
-`version.MAJOR_VERSION` said `"0.10"`, and `dojo.__version__` said `0.1.0`.
-`MAJOR_VERSION` gates debug-log retention, so the drift had a cost: the guard
-its own docstring mandates had not fired for two stages.
+`pyproject.toml` is the source of truth for the base — ``<major>.<phase>.0`` —
+and the third component is how many commits have landed since the tag that
+completed the phase, so it is a fact about the checkout rather than a number
+somebody remembers to edit. These tests pin the derivation *and* the fact: the
+last one re-counts the commits in git and compares.
+
+(There used to be three answers to one question — the tag said `0.13.0`,
+`MAJOR_VERSION` said `"0.10"`, and `dojo.__version__` said `0.1.0` — and the
+drift silently disabled the debug-log retention gate for two stages. F13.)
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 import dojo
 from dojo import version as version_mod
-from dojo.debuglog import MAJOR_VERSION as DEBUGLOG_MAJOR
+from dojo.debuglog import PHASE_VERSION as DEBUGLOG_PHASE
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,17 +33,116 @@ def _project_version() -> str:
     return data["project"]["version"]
 
 
-def test_version_is_the_pyproject_version():
-    assert version_mod.VERSION == _project_version()
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True
+    )
+
+
+# ------------------------------------------------------------ what it reads
+
+
+def test_the_base_comes_from_pyproject():
+    """`pyproject.toml` decides major and phase. The third component is git's —
+    so the assertion is on the base, not on whole-string equality."""
+    assert version_mod.VERSION.split(".")[:2] == _project_version().split(".")[:2]
+    assert version_mod.VERSION.split(".")[2].isdigit()
     # `dojo.__version__` is the same value, not a second opinion.
-    assert dojo.__version__ == _project_version()
+    assert dojo.__version__ == version_mod.VERSION
 
 
-def test_major_version_is_the_derived_major_minor():
-    """The debug-log guard compares major.minor, so a patch release keeps the
-    log and a new stage clears it."""
-    assert version_mod.MAJOR_VERSION == ".".join(_project_version().split(".")[:2])
-    assert DEBUGLOG_MAJOR == version_mod.MAJOR_VERSION
+def test_phase_version_is_major_dot_phase_and_gates_the_debug_log():
+    """A phase is a stage: completing one clears `data/logs/`, the commits inside
+    it do not."""
+    assert version_mod.PHASE_VERSION == ".".join(version_mod.VERSION.split(".")[:2])
+    assert DEBUGLOG_PHASE == version_mod.PHASE_VERSION
+
+
+def test_parse_accepts_two_or_three_components_and_rejects_nonsense():
+    assert version_mod._parse("1.15.5") == (1, 15, 5)
+    assert version_mod._parse("0.13") == (0, 13, 0)
+    assert version_mod._parse(" 2.04.10 ") == (2, 4, 10)
+    for bad in ("", None, "banana", "0.13.0rc1", "v0.13.0", "1.15.5.2", "-1.2.3"):
+        assert version_mod._parse(bad) is None
+
+
+# ------------------------------------------------------- the commit distance
+
+
+def test_the_third_component_is_the_distance_from_the_phase_tag(monkeypatch):
+    """The reported example: `1.15.5` = major 1, phase 15 complete, five commits
+    since. Nothing in the tree stores that `5` — git answers it."""
+    monkeypatch.setattr(version_mod, "commits_since_phase", lambda *a, **k: 5)
+    monkeypatch.setattr(version_mod, "_pyproject_version", lambda: "1.15.0")
+    assert version_mod._resolve() == "1.15.5"
+
+
+def test_the_query_names_this_phases_tag():
+    """`git describe` must be asked for *this* phase's tag, not the nearest tag of
+    any phase — otherwise the count would span phases."""
+    seen: list[list[str]] = []
+
+    def runner(cmd):
+        seen.append(cmd)
+        return SimpleNamespace(returncode=0, stdout="v0.13.0-7-gabc1234\n")
+
+    assert version_mod.commits_since_phase(0, 13, run=runner) == 7
+    cmd = seen[0]
+    assert cmd[:2] == ["git", "describe"]
+    assert "--long" in cmd                    # the distance, not just the tag name
+    assert "v0.13" in cmd and "v0.13.*" in cmd
+
+
+def test_a_describe_for_another_phase_is_refused():
+    """A tag left over from a previous phase must not be mistaken for this one's."""
+    stale = SimpleNamespace(returncode=0, stdout="v0.12.0-31-gdeadbee\n")
+    assert version_mod.commits_since_phase(0, 13, run=lambda cmd: stale) is None
+
+
+def test_a_wheel_or_a_shallow_clone_falls_back_to_pyproject(monkeypatch):
+    """No tag, no git, a git that errors: the string in `pyproject.toml` stands
+    as written. The base is always pyproject's; git only refines it."""
+    monkeypatch.setattr(version_mod, "commits_since_phase", lambda *a, **k: None)
+    monkeypatch.setattr(version_mod, "_pyproject_version", lambda: "1.15.0")
+    assert version_mod._resolve() == "1.15.0"
+    # ... and a hand-written third component is kept verbatim in that case.
+    monkeypatch.setattr(version_mod, "_pyproject_version", lambda: "1.15.3")
+    assert version_mod._resolve() == "1.15.3"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        SimpleNamespace(returncode=128, stdout=""),          # no such tag
+        SimpleNamespace(returncode=0, stdout="garbage"),     # not describe output
+        SimpleNamespace(returncode=0, stdout="v0.13.0-x-g1"),  # not a number
+    ],
+)
+def test_unusable_git_output_is_not_an_error(result):
+    assert version_mod.commits_since_phase(0, 13, run=lambda cmd: result) is None
+
+
+def test_a_missing_git_binary_is_not_an_error():
+    def runner(cmd):
+        raise FileNotFoundError("git")
+
+    assert version_mod.commits_since_phase(0, 13, run=runner) is None
+
+
+def test_the_commit_count_matches_the_history_it_describes():
+    """The number claims to be a fact, so re-count it: the checkout's version must
+    equal `git rev-list --count v<major>.<phase>.0..HEAD`. Skipped where there is
+    no checkout or no phase tag (a wheel, a shallow clone, a fresh fork)."""
+    major, phase, commit = version_mod.VERSION.split(".")
+    if version_mod.commits_since_phase(int(major), int(phase)) is None:
+        pytest.skip("no git checkout carrying this phase's tag")
+    counted = _git("rev-list", "--count", f"v{major}.{phase}.0..HEAD")
+    if counted.returncode != 0:
+        pytest.skip(f"tag v{major}.{phase}.0 is not in this checkout")
+    assert int(commit) == int(counted.stdout.strip())
+
+
+# ------------------------------------------------------------- the fallbacks
 
 
 def test_a_missing_checkout_falls_back_to_installed_metadata(monkeypatch, tmp_path):
@@ -52,8 +160,11 @@ def test_unreadable_pyproject_is_not_fatal(monkeypatch, tmp_path):
 
 def test_nothing_hardcodes_a_version_literal():
     """The failure mode was a *hardcoded* second answer, not a missing import:
-    a literal assignment is what drifts."""
-    pattern = re.compile(r'''^(MAJOR_VERSION|VERSION|__version__)\s*=\s*["'][^"']*["']\s*$''')
+    a literal assignment is what drifts. The derived `0.13.N` must never be
+    written down anywhere — it would be stale one commit later."""
+    pattern = re.compile(
+        r'''^(MAJOR_VERSION|PHASE_VERSION|VERSION|__version__)\s*=\s*["'][^"']*["']\s*$'''
+    )
     offenders = [
         f"{path.relative_to(REPO_ROOT)}: {line.strip()}"
         for path in (REPO_ROOT / "src").rglob("*.py")

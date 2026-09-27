@@ -34,7 +34,7 @@ def test_maybe_clear_on_version_bump(tmp_path, monkeypatch):
     assert (tmp_path / "logs" / "dojo.log").exists()
 
     # same version: nothing cleared
-    assert debuglog.maybe_clear_logs(tmp_path / "logs", debuglog.MAJOR_VERSION) is False
+    assert debuglog.maybe_clear_logs(tmp_path / "logs", debuglog.PHASE_VERSION) is False
     assert (tmp_path / "logs" / "dojo.log").exists()
 
     # major version bump: log wiped, marker rewritten

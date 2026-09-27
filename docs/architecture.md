@@ -37,8 +37,9 @@ src/dojo/
                     # migrations + attempt-history and trends queries
   bank.py           # seed importer: problems/**/*.py docstrings -> problems, plus
                     # the prune that keeps the bank a mirror (v0.13 follow-up)
-  version.py        # VERSION/MAJOR_VERSION, derived from pyproject.toml (the single
-                    # source of truth; MAJOR_VERSION gates debug-log retention)
+  version.py        # VERSION = <major>.<phase>.<commit>: pyproject.toml holds the
+                    # base, `git describe` counts commits since the phase tag
+                    # (PHASE_VERSION = major.phase gates debug-log retention)
   complexity.py     # O(...) normalization + mismatch logic
   patterns.py       # the pattern taxonomy + LeetCode tag -> pattern mapping
   static.py         # radon cyclomatic complexity + ruff at submit
