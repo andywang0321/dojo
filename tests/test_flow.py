@@ -1185,7 +1185,7 @@ def test_a_registered_reference_yields_a_growth_verdict(
 
     The measurement is injected (an exact cost model) and the verdict is not: the
     wall-clock version of this test failed 33% of the time at 6-way concurrency,
-    which is exactly what AGENTS.md rule 5 forbids."""
+    which is exactly what AGENTS.md rule 7 forbids."""
     import dojo.judge
     from dojo.judge import REFERENCES
 

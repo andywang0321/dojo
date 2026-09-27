@@ -1,179 +1,325 @@
-# AGENTS.md
+# AGENTS.md — working on the dojo engine
 
-Guidance for humans and AI agents working on this repository.
+Guidance for humans and AI agents working in this repository. This checkout is the
+**engine**, not a curriculum: it schedules practice, produces evidence, and hosts
+the AI agents. What you practise comes from a curriculum, which lives in its own
+repository.
 
-## What this is
+Read this file first, then `README.md` (the user-facing pitch), `docs/curricula.md`
+(the format — the seam everything else hangs off), and `roadmap/v0.14.md` (the
+phase in flight).
 
-dojo is an AI-guided interview-prep trainer: a CLI (`dojo`) that runs a daily loop of warm-up retrievals → solve → judge → self-report complexity → empirical profiler → AI review → reflection, persisted to SQLite, with FSRS-4.5 spaced repetition deciding what comes back when. Its defining constraint is the **never-solve rule**: the tutor agent guides, it never solves. Read `README.md` first (the user-facing pitch + guide); design docs live in `docs/`, delivered and planned stages in `roadmap/`, and everything below assumes that split.
+---
 
-## Layout map
+## 0. Which branch are you on? (read before every commit)
+
+**This repository has two live lines of work, and this is the rebuild line.**
+
+| branch | what it is | who is on it |
+|---|---|---|
+| `main` | the working trainer: the students practise here **every day**, on the NeetCode 150 curriculum | daily use; bug fixes, problem curation, small corrections |
+| `v0.14-curricula` | the curricula rebuild: splits the engine from the curriculum, moves NeetCode 150 out | this phase's work |
+
+Rules, in order of severity:
+
+1. **Before committing, run `git branch --show-current` and read it.** Rebuild work
+   must never land on `main`; a fix meant for the live trainer must never land only
+   here. If the answer is not the branch you meant to be on, stop — do not commit,
+   and do not "fix it up in the next commit".
+2. **No breaking feature work on `main`.** `main` is a product two people use
+   daily: bug fixes, curation, doc corrections and other non-breaking changes are
+   fine; nothing that changes the shape of the schema, the curriculum assumption,
+   or the CLI contract of an existing command.
+3. **`main` is not frozen and will drift.** Merge `main` into this branch regularly
+   (never rebase a shared branch), and treat the *current* `main` as the source of
+   truth for the behaviour the rebuild must preserve. The live database keeps
+   growing while this branch is open, so the migration is **rule-based and
+   re-runnable**, never a snapshot script (see `roadmap/v0.14.md` §4).
+4. **The rebuild lands as one phase boundary.** Phase 14 completes when this branch
+   merges to `main` with the version bumped and tagged in the same commit (rule 8).
+   Until then `main` keeps serving practice.
+
+`make check-branch` (planned with increment A) will run the same check as a
+pre-commit hook so it cannot be skipped by accident; until it exists, the check is
+manual and mandatory.
+
+---
+
+## 1. What dojo is
+
+dojo is a local practice engine built on four claims:
+
+1. **Spaced repetition** — FSRS-4.5 over what you actually practised decides what
+   comes back and when.
+2. **Evidence** — dojo produces the strongest honest evidence it can about what you
+   just did, states its strength, and lets *only that evidence* move the schedule.
+   Never a claim the evidence does not support; "unresolved", "unjudged" and "not
+   measurable here" are first-class outcomes.
+3. **AI personalization** — a coach that guides and never solves, a teacher for
+   topics you have not met, a reviewer that critiques what you wrote.
+4. **AI curriculum generation** — a curriculum can be *bootstrapped* from a source
+   you trust (a problem set, a library's own documentation) and then tailored to
+   you, because you are not expected to be an expert in the thing you are trying to
+   learn.
+
+The formula is a loop, not a list: practice produces evidence, evidence moves the
+schedule, the schedule chooses the next practice, and the agents adapt the
+curriculum around it.
+
+Corollary — the sentence that decides most design questions here:
+**dojo is the engine; a curriculum is what you practise.** Anything that only makes
+sense for one body of content belongs in that curriculum's repository, not here.
+
+## 2. What this repository is, and what it is not
+
+**Is:** the scheduler (FSRS), the session loop and its state machine, the workbench
+and its artifact views, the judge harness (subprocess isolation, verdict modes, the
+JSON protocol), the measurement *framework* (paired measurement, ratio-based
+verdicts, stated uncertainty), the AI roles and their boundaries, the evidence
+record, enrollment, the CLI, the SQLite schema and its migrations, the debug log,
+the version, the IDE/debugging story.
+
+**Is not:** any problem statement, any test corpus, any oracle or reference
+solution, any topic taxonomy, any ladder, any language-specific intake (the
+LeetCode fetcher), any progression *policy*. Those live in a curriculum repository
+and arrive through the loader. The engine ships exactly one curriculum: the
+**fixture** under `tests/fixtures/curriculum-demo/`, which is the format's
+executable specification and the skeleton `dojo curriculum new` copies.
+
+## 3. Layout map (target — increment A brings it about)
 
 ```
 src/dojo/
-  cli.py            # argparse entry: bare `dojo` = the daily routine; visible
-                    # commands list / learn / progress / history / user / setup /
-                    # fetch + hidden power tools (day / warmup / check / show /
-                    # curate / report; profile = history alias); custom minimal help
-  setup.py          # the setup wizard: pure injectable logic (key -> .env, user,
-                    # PATH wrapper + rc consent); first run triggers it
-  config.py         # paths + the PROVIDERS table (deepseek/openai/anthropic),
-                    # DOJO_AI_BACKEND / DOJO_PROVIDER, DOJO_MODEL[_<ROLE>],
-                    # DOJO_TIMEOUT (one bound for every role),
-                    # CONTENT_DIR (authored) vs DATA_DIR (user state, DOJO_DATA_DIR)
-  guard.py          # the exception boundary for AI/subprocess calls (v0.13);
-                    # is_network_error/network_message tell "unreachable" from
-                    # "the service answered"
-  proc.py           # bounded subprocess execution: capped output, rlimits, killpg
-  version.py        # VERSION = <major>.<phase>.<commit>; pyproject.toml carries the
-                    # number (`make version`) and `git describe` proves it;
-                    # PHASE_VERSION (major.phase) gates debug-log retention
-  debuglog.py       # JSONL log of raw AI traffic (gitignored data/logs/), version-gated
-  editor.py         # $EDITOR launching: GUI -> detached process; terminal ->
-                    # tmux new-window / macOS osascript; unknown -> blocking
-  db.py             # schema (users, problems, attempts, item_cards) +
-                    # migrate() + attempt-history queries; MIGRATIONS MUST BE ADDITIVE
-  bank.py           # problems/**/*.py docstring -> problems importer (upsert on slug)
-                    # + prune_stale_problems: the bank mirrors problems/ BOTH ways
-  complexity.py     # O(...) canonicalization + three-valued compare()
-                    # (agree / disagree / incomparable, v0.11)
-  patterns.py       # pattern taxonomy + LeetCode topic-tag -> pattern mapping (one source of truth)
-  static.py         # radon cyclomatic complexity + ruff at submit; evidence, never a verdict
-  scheduler.py      # FSRS-4.5 (published equations + default weights), item cards,
-                    # record_grade, the card rebuild, warmup + new-problem picks
-  judge/
-    registry.py     # ORACLES (brute-force correctness anchors) + REFERENCES
-                    # (canonical solutions, the probe's baseline) + test
-                    # generators + probe inputs + predicate checkers
-    compare.py      # per-case verdict semantics, shared by the judge harness and
-                    # the curator's reference gate (one implementation, v0.12)
-    runner.py       # subprocess isolation; JSON protocol; per-case verdict modes
-  profiler/
-    probe.py        # paired scale measurement: student vs reference, interleaved,
-                    # per-size time/space/exception/output-digest (v0.12)
-    growth.py       # ratio trend -> a class relative to the reference, or an
-                    # explicit "unresolved" (v0.12)
-  tutor/
-    backend.py      # AIBackend protocol keyed by Role (tutor/discussion/teacher/
-                    # reviewer/auditor/curator/…); OpenAICompatBackend (DeepSeek +
-                    # OpenAI) + AnthropicBackend + MockBackend; per-role budgets
-                    # (tokens, temperature, timeout) + one retry per request
-    prompts.py      # TUTOR_SYSTEM / LEAK_CHECK_SYSTEM / REVIEWER_SYSTEM /
-                    # TEACHER_SYSTEM + builders
-    tutor.py        # hint ladder (tiers 0-5), leak audit, de_markdown terminal cleanup
-    reviewer.py     # post-submission rubric review
-  curator/
-    prompts.py      # CURATOR_SYSTEM (separate agent; never tutor context)
-    curator.py      # propose / validate / apply-with-rollback + verification gate
-  fetcher/
-    htmltext.py     # HTML -> plain text for LeetCode content (stdlib HTMLParser)
-    leetcode.py     # GraphQL intake, snippet -> signature, land() into the bank
-  session/
-    state.py        # workbench/<slug>.state.json (tier, hints, attempt id, kind,
-                    # phase, agent); unknown keys stay loadable (crash resume)
-    workbench.py    # the artifact + its views: template, the fenced examples block,
-                    # student_view() for every AI reader (v0.13)
-    flow.py         # run_day: ONE loop, phase-driven (solving | post_solve) + run_warmups
-    learn.py        # run_learn (teacher conversation + practice handoff), resolve_pattern
-  roadmap.py        # parses data/roadmap.toml (18 groups x ordered ladders)
-  updater.py        # dojo update + per-run auto-update (injectable runner; offline tests)
-data/problem_overrides.json   # curated metadata: function_name + visible_tests + signatures
-data/roadmap.toml           # vendored NeetCode 150 structure (provenance header; private use)
-problems/           # seed corpus: one problem per file, prompt in module docstring,
-                    # grouped by pattern — the 18 NeetCode groups in roadmap order
-                    # (arrays_and_hashing .. bit_manipulation; empty groups carry .gitkeep)
-tests/              # offline; mock backend
-# workbench/ lives OUTSIDE the repo (~/.local/share/dojo/workbench, v0.10.1) —
-# the gitignored workbench/ entry below only covers pre-v0.10.1 leftovers.
-workbench/          # gitignored scratch; attempt code persists in the DB, not here
-Makefile            # sync/test/seed/demo/version targets, workspace-local UV_CACHE_DIR
-docs/               # technical docs: architecture, grading, retention, curation, development
-roadmap/            # delivered stages (v0.1..v0.13) and next.md (backlog)
-                    # docs/audit-v0.12.md is the audit those stages respond to
+  cli.py            # argparse entry; bare `dojo` = the daily routine; custom HELP_TEXT
+  config.py         # paths, env, PROVIDERS, DOJO_MODEL[_<ROLE>], DOJO_TIMEOUT,
+                    # DATA_DIR (user state) vs CURRICULA_DIR (user content)
+  curriculum/       # NEW: the seam
+    manifest.py     # curriculum.toml -> dataclasses, strict
+    validate.py     # every refusal in docs/curricula.md §Validation
+    loader.py       # install/load/alias resolution; the two namespaces
+    catalog.py      # tutor-safe view: topics, items, statements, templates, display words
+    assessment.py   # QUARANTINE: checks, oracles, generators, references, measurement
+    registry.py     # the generic decorators an assessment module registers with
+  evidence.py       # NEW: tiers, provenance, gates vs advisories, the audit policy
+  db.py             # schema + reconciling migrate() + queries; MIGRATIONS ADDITIVE
+  bank.py           # item importer: a curriculum's catalog -> rows (prunes both ways)
+  scheduler.py      # FSRS-4.5, cards, due queue, enrollment-aware picks
+  judge/            # runner (isolation, protocol) + compare (verdict semantics)
+  measure/          # the paired-measurement framework + the growth verdict rule
+  session/          # state machine, workbench/artifact views, flow, learn
+  tutor/            # backend (roles/budgets/timeouts) + prompts + hint ladder + reviewer
+  curator/          # item authoring + curriculum bootstrapping agents
+  editor.py terminal.py render.py ui.py proc.py guard.py debuglog.py version.py
+tests/
+  fixtures/curriculum-demo/   # the spec-by-example curriculum
+docs/               # architecture, curricula, grading, retention, authoring, development
+roadmap/            # README (index), v0.14.md (this phase), next.md, history.md
 ```
 
-## Setup and commands
+Gone from this repository once increment B lands (they move to curriculum
+repositories): `problems/`, `data/roadmap.toml`, `data/problem_overrides.json`,
+`patterns.py`, `fetcher/`, the LeetCode content of `judge/registry.py`, and the
+LeetCode-specific text in the curator prompts.
 
-```bash
-make sync                  # uv sync with UV_CACHE_DIR=.uv-cache (sandbox-safe)
-make test                  # uv run pytest -q
-make seed                  # scripted first-run: dojo setup --user andy --skip-key --no-path
-make version               # write the version this commit will have into pyproject.toml (rule 9)
-uv run dojo                # bare entry = the daily routine; first run opens the setup wizard
-DOJO_AI_BACKEND=mock uv run dojo   # offline demo of the full pipeline
-uv run dojo warmup         # due retrievals only
-uv run dojo progress       # per-pattern proficiency + cards + score trends
-```
+## 4. Hard rules
 
-Python ≥ 3.13. Deps are managed by uv; add new ones with `uv add`, never by hand-editing the lockfile. **Always route uv through `make` targets or set `UV_CACHE_DIR=$(pwd)/.uv-cache` yourself** — the default uv cache lives outside the workspace and trips sandbox file policies.
+1. **Never-solve is structural.** A curriculum ships reference solutions, oracles
+   and generators — exactly the material the tutor must never see. The loader
+   therefore exposes **two namespaces**: `catalog` (statements, templates, topic
+   metadata — tutor-safe) and `assessment` (checks, oracles, references,
+   measurement — quarantined). The tutor path may import only `catalog`; assessment
+   code is loaded lazily, runs only inside a bounded subprocess, and is never
+   reachable from a prompt builder. `tests/test_never_solve.py` asserts this as an
+   **import graph per installed curriculum**, not as a string grep. The one
+   documented narrowing stays the v0.8 teacher (topic + conversation only).
+2. **Copyright and privacy.** dojo is a private-use tool: the students' own data,
+   the live database, the workbench and the debug log are never published, quoted in
+   a public issue, or committed. Curricula *are* meant to be publishable — which is
+   why a curriculum declares its `license`, why `license = "private"` means "never
+   publish this", and why material drawn from a paid or proprietary source (a
+   course's problem set, a book's exercises) belongs in a private curriculum
+   repository only. Never publish a curriculum whose source you do not have the
+   right to redistribute, and never let a bootstrap ingest a source whose terms
+   forbid it.
+3. **Secrets.** Provider keys (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
+   `ANTHROPIC_API_KEY`, or their `DOJO_`-prefixed aliases) live in the environment
+   or a gitignored `.env`. Never log one, never put one in a prompt, a test, a
+   fixture or a curriculum manifest.
+4. **Curriculum code is external and untrusted.** The engine imports no curriculum
+   at module scope, executes assessment or tool code only through `proc.run_capped`
+   with child limits, and validates a manifest loudly before use. A curriculum can
+   add content and evaluators; it can never add an AI role, reach the tutor
+   context, or change the scheduler.
+5. **Evidence honesty.** Every piece of evidence records its kind, source and
+   strength (`docs/grading.md`). Machine-checked beats measured beats judged beats
+   self-reported, and the display says which. An AI judgment is **advisory** unless
+   it gates something, and a gating judgment needs an independent audit pass. An
+   unreachable AI never blocks the loop: the work is recorded as *submitted,
+   unjudged*, scheduled from the self-report, and disclosed. Never launder weak
+   evidence into a stronger claim; never claim a measurement the ratio does not
+   support; never reintroduce an absolute curve fit (v0.11's `fit.py` is the
+   cautionary tale).
+6. **User data is real, and one migration in this phase is not additive.** Schema
+   changes are additive by default, and `migrate()` reconciles a migrated DB
+   against a fresh one column-for-column. The split needs three **renames**
+   (`problems`→`items`, `problem_id`→`item_id`, `pattern`→`topic`); SQLite supports
+   renames in place, so the exception is allowed but protocol-bound: a `--dry-run`,
+   a mandatory backup, and a test that runs the whole migration against a **copy of
+   the live database** and proves the attempt history and the replayed cards are
+   intact. Anything that cannot satisfy that protocol stays additive.
+7. **Tests are offline and deterministic.** No network; `MockBackend` everywhere;
+   the fixture curriculum is the loader's test double. **Never assert a class from
+   wall-clock timing** — the verdict rule is pinned on synthetic ratio series
+   (`tests/test_growth.py`) and `tests/test_probe.py` asserts mechanism. A
+   curriculum's own evaluators get the same treatment in its own repository.
+8. **Prompt changes require test updates in the same commit.** Role routing is by
+   `Role`, never by prompt text, so wording is free — the assertions that depend on
+   behaviour are not.
+9. **Every AI and subprocess call runs behind a boundary.** `dojo/guard.py` turns a
+   transport or API failure into one printed line, a `degraded` debug-log event and
+   a session that keeps going. Network failures are reported as the network
+   (`is_network_error` / `network_message`, classified by name and never by
+   importing an SDK), an answered error (401/429/5xx) keeps its technical line,
+   every request carries its role's timeout, and the client carries one retry.
+10. **The version is `<major>.<phase>.<commit>`; `pyproject.toml` carries it and git
+    proves it.** `make version` writes the version of the state you are in, and
+    `tests/test_version.py` accepts exactly two values (HEAD's, or the commit in
+    flight) and fails otherwise with "run `make version`". The third component counts
+    commits since the last phase tag **on this branch**, so the two branches show
+    different counts off the same tag — expected, not drift. Phase 14 completes by
+    setting `pyproject.toml` to the phase version and tagging that commit; the major
+    is a manual epoch bump and this phase is the natural place for one (see
+    `roadmap/v0.14.md` §7).
+11. **Identity is `(curriculum, item)` with an optional external id.** Two rows may
+    never share an `external_id` inside one curriculum — an invariant the schema
+    enforces, because the live bank still carries four LeetCode problems twice
+    (curated under one name, dead under another) and the roadmap's curated/missing
+    flag was decided by dict-iteration order as a result. Renames are declared in
+    the manifest's `aliases`, and a manifest that drops a topic or item **with
+    history** warns and keeps that history addressable rather than silently
+    orphaning it — the same stance as the bank prune.
+12. **Docs are part of the product.** This file, `README.md` and `docs/` describe
+    the engine and never one body of content. Curriculum conventions (LeetCode
+    intake, JAX measurement, a curriculum's own oracle style) live in that
+    curriculum's repository. A change that makes a doc wrong is an incomplete
+    change.
 
-## Hard rules
+## 5. The curriculum seam: how to add capability without breaking it
 
-1. **Never-solve is an architectural property, not a prompt detail.** Reference implementations (oracles in `judge/registry.py`) must never enter tutor context. The tutor prompt (`tutor/prompts.py`) receives only: statement, student code, tier, hint history. If a change adds a new file with solution code, keep it outside anything the tutor imports or reads. **One deliberate narrowing (v0.8):** learning mode's teacher may show *topic-canonical* code — its context is the topic name + conversation only, never a problem statement (never-solve protects solves, not knowledge). The narrowing is pinned by `test_teacher_prompt_carries_topic_only` and does not extend to the tutor, reviewer, or curator.
-2. **Copyright — private use.** dojo serves two PhD students' private practice. Statements, visible tests, and other data may draw on public sources (LeetCode, books) and live in the bank as normal; the repo stays private — never publish the bank or its data. The seed corpus is the users' own writing where it exists.
-3. **Secrets.** Provider keys (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or their `DOJO_`-prefixed aliases) live in the environment or a gitignored `.env`. Never log one, never put one in a prompt, a test, or a fixture.
-4. **User data is real.** `data/dojo.db` and `workbench/` are personal state. Don't delete or reset them as a side effect; DB migrations are additive only (`ALTER TABLE ... ADD COLUMN` or new tables). **`migrate()` reconciles** (v0.13): it runs the idempotent schema (repairing a partially-created DB), then adds every missing *addable* column from `SCHEMA` itself — nullable, or NOT NULL with a DEFAULT; constraints and NOT NULL-without-default are skipped because SQLite cannot add them. So a migrated DB equals a fresh one column-for-column, which `tests/test_db.py` asserts; the old hand-kept ALTER list left an old DB permanently short of the schema with nothing able to notice.
-5. **Tests are offline and deterministic.** No network calls in tests; always use `MockBackend`. **Don't assert a complexity class from wall-clock timing:** the verdict rule is pinned on synthetic ratio series in `tests/test_growth.py` (built from real class pairs), and `tests/test_probe.py` asserts mechanism properties (no tracer in the timed window, the argument copy outside it, a constant-work function measuring flat) plus coarse outcomes. A timing-based class assertion is a test of the machine and will flake.
-6. **Prompt changes require test updates.** The leak-check behavior, tier gating, and mock canned responses are asserted in `tests/test_tutor.py` and `tests/test_flow.py`. Change a prompt → update the assertions in the same commit. (The mock no longer routes on prompt *text* — roles do that since v0.13 — so wording is free, but the assertions that depend on it are not.)
-7. **Every AI and subprocess call runs behind a boundary.** `dojo/guard.py` — `with guard(console, "the tutor") as g: g.value = …` — turns a transport/API failure into one printed line, a `degraded` debug-log event, and a session that keeps going (`cli.main` catches `KeyboardInterrupt` and `EOFError`; anything else is a bug in a call site). The curator wraps its backend calls in `CuratorError` for the same reason, and the scale probe degrades to "no measurement" rather than ending the session. **A network failure is reported as the network** (v0.13 follow-up): `is_network_error` classifies the failure *and its whole cause chain* (SDK wrapper → httpx-ish error → socket error) and the student gets the plain sentence from `network_message()` — "I'm having trouble connecting to the AI backend — is the network connection ok?" — plus a dim line naming what didn't answer, instead of `the tutor unavailable (APIConnectionError: Connection error.)`. Classification must stay **name-based** (never `import openai`/`httpx` to classify: `openai` 3.8 ships `httpx2`, and a missing import must not change how a failure is reported), and a service that *answered* always wins over an inner transport cause: 401 (wrong key), 429 (quota), 5xx and any dojo bug keep their technical line, because sending a student to check their router over a wrong API key is a wrong trail. `Guarded.network` carries the flag for callers with their own follow-up wording (learn mode, the leak audit), and `HintResult.audit_network` distinguishes "the auditor couldn't be reached" from "the auditor read nothing" — a hint the tutor *did* produce is not blamed on the tutor.
-8. **Respect the honesty contract.** The probe reports evidence — a paired cost ratio, a class relative to the reference, and an explicit "could not resolve" — never proofs. **Never reintroduce an absolute curve fit** (v0.11's `fit.py`): it cannot separate O(n) from O(n log n) at feasible sizes, and the honest output of trying was a bracket nobody could use. And never claim a class the ratio does not support.
-9. **The version is `<major>.<phase>.<commit>` — pyproject.toml carries it, git proves it.** `1.15.5` reads: the major was decided by hand as **1**, **15** phases are complete, and **5** commits have landed since phase 15 was completed.
+The seam is `docs/curricula.md`. Three questions decide where new code goes:
 
-   - **`pyproject.toml` carries the current version, and every commit keeps it in step: run `make version`.** It writes the version of the state you are in — with uncommitted work, the number that work will be committed as (`commits_since_phase() + 1`); on a clean tree, the current one, so a casual run cannot invent a commit that does not exist — and the file a shell prompt, a packaging tool or a human reads therefore shows the real version (`0.13.8`) rather than a phase base — the user's terminal prompt reads that file for a glanceable version. `tests/test_version.py::test_pyproject_is_kept_in_step_with_the_history` accepts exactly two values (the version of HEAD, if you already committed, and the version of the commit in flight, if you have not) and fails otherwise with "run `make version`" — so a forgotten bump is caught by the suite, never by a stale prompt. **Do this as part of preparing any commit, in the same commit as the work.**
-   - **git is authoritative for the third component**, and pyproject mirrors it: `version.commits_since_phase()` runs `git describe --tags --long --match v<major>.<phase> --match v<major>.<phase>.*` and takes the distance, so the number cannot drift from the history it describes. `tests/test_version.py` re-counts it with `git rev-list --count v<major>.<phase>.0..HEAD` and compares, and fails on any hardcoded `VERSION`/`PHASE_VERSION`/`__version__` literal under `src/`: the number is written in exactly one place (`pyproject.toml`, by `make version`) and derived everywhere else. With no tag, no git, or a shallow clone, the version is the exact string in `pyproject.toml` — which is why the file is kept current rather than left at a phase base.
-   - **Completing a phase** is that same `make version` plus two manual touches, all in one commit: set `pyproject.toml` to `<major>.<phase>.0` (the phase number is the completed roadmap phase — v0.13 → `0.13.0`; the major is a manual epoch bump) **and** `git tag v<major>.<phase>.0` on that commit. The tag is what the next phase's commits are counted from, and at that boundary `make version` correctly changes nothing: the commit *is* the tag, so the count is still zero. (v0.13's marker is `v0.13.0`, tagged on the commit that set the version to `0.13.0`.)
-   - **Wire-level:** `version.VERSION` is the full triple (`dojo --version`, `dojo.__version__`); `version.PHASE_VERSION` (`<major>.<phase>`) is what `debuglog.maybe_clear_logs` compares against, so finishing a phase clears `data/logs/` while the commits inside a phase accumulate without throwing history away. Three answers to one question (`0.13.0` in the tag, `"0.10"` in the old `MAJOR_VERSION`, `0.1.0` in `__init__`) silently disabled that gate for two stages (audit F13) — the whole reason this is one derived value.
-10. **A bank row without a problem file is pruned, never silently.** `bank.prune_stale_problems` (run from `ensure_seeded`) deletes only a row that has no seed file, no curation, no attempt and no card; anything that carries value is kept and *reported*, and a doomed row's LeetCode number is handed to the seed row for the same roadmap entry first. Duplicates from two naming conventions (kebab fetched vs snake corpus) had accumulated 21 invisible-value rows and made `dojo list` show problems twice — a cleanup that shrinks the bank must say so at startup.
-11. **Every AI request carries a timeout, and the client carries one retry** (v0.13 follow-up). The SDKs default to a 600-second read timeout with two retries; against a connection that *opens and never answers* (captive portal, dropped VPN, sleeping router) that is up to half an hour of a frozen terminal for one hint — measured at >600 s for a single call, and how "dojo crashed offline" was actually experienced. `ROLE_BUDGETS` carries `timeout` in two tiers (`INTERACTIVE_TIMEOUT = 60` for tutor/discussion/auditor, `LONG_TIMEOUT = 180` for reviewer/teacher/curator/curation_auditor/referencer), `REQUEST_RETRIES = 1` is set on the client at construction, and `DOJO_TIMEOUT` (seconds) overrides every role for a slow provider or model — unparseable values are ignored, never fatal. A request that times out reports as a network failure (`APITimeoutError` is name-matched), which is why the student sees the connection line rather than a class name.
+- **Does it only make sense for one body of content?** → the curriculum repository.
+- **Is it a *policy* (which topic next, what to measure, what "pass" means)?** →
+  declared in the manifest, implemented by the curriculum.
+- **Is it a *mechanism* (isolation, scheduling math, evidence storage, prompting,
+  display)?** → the engine.
 
-## AI providers
+Two standing cautions, both earned:
 
-`config.PROVIDERS` is the table: DeepSeek (OpenAI-compatible, `api.deepseek.com`), OpenAI (same wire, SDK default base URL) and Anthropic (its own messages wire: top-level `system`, no `response_format`, JSON via a forced `emit_json` tool call with the tolerant parser as the fallback). `DOJO_AI_BACKEND` / `DOJO_PROVIDER` picks one (`mock` for offline), `DOJO_MODEL` overrides the model, and `DOJO_MODEL_<ROLE>` overrides it per role — the leak audit runs on *every* hint and gets a 128-token, temperature-0 budget, while the reviewer gets 4096. Keys come from each provider's env var (or its `DOJO_`-prefixed alias) and then the gitignored dotenv; `dojo setup` detects any provider's key, writes `DOJO_PROVIDER`, and `--provider X` pins the choice. **Never log or prompt-embed a key.**
+- **Do not generalize ahead of the second implementation.** The format is **v1 and
+  explicitly unstable** until two real curricula (NeetCode 150 and JAX) use it.
+  Rust — the case that would break the "the artifact is one Python file" and "the
+  runner is Python" assumptions — was deliberately tabled; the seams it would need
+  are documented as gaps in `docs/architecture.md`, not built.
+- **Do not let the engine learn a curriculum's words.** Core vocabulary is
+  curriculum → topic → item → attempt → evidence → card. A curriculum supplies its
+  display words (`Ladder`, `Pattern`, `Module`) and its own difficulty labels.
 
-Adding a provider: one row in `PROVIDERS` (+ its key alias). Adding a *wire format* is a new backend class; the protocol is `chat(role, system, user)` / `chat_json(role, system, user)` / `identity()`, and `identity()` is what lands in `attempts.ai_provenance`, so a mock row can never be mistaken for a live one. `tests/test_backend.py` pins request construction with injectable fake clients — no test touches the network.
+## 6. AI providers
 
-## Configuration and state layout
+`config.PROVIDERS` is the table: DeepSeek (OpenAI-compatible, `api.deepseek.com`),
+OpenAI (same wire, SDK default base URL) and Anthropic (its own messages wire:
+top-level `system`, no `response_format`, JSON via a forced `emit_json` tool call
+with the tolerant parser as the fallback). `DOJO_AI_BACKEND` / `DOJO_PROVIDER` picks
+one (`mock` for offline), `DOJO_MODEL` overrides the model, `DOJO_MODEL_<ROLE>`
+overrides it per role, `DOJO_TIMEOUT` overrides the per-role bounds. Keys come from
+each provider's env var (or its `DOJO_`-prefixed alias) and then the gitignored
+dotenv; `dojo setup` detects any provider's key, writes `DOJO_PROVIDER`, and
+`--provider X` pins the choice. **Never log or prompt-embed a key.**
 
-`config.CONTENT_DIR` (`repo/data`) holds **authored content** (roadmap.toml, problem_overrides.json); `config.DATA_DIR` holds **user state** (dojo.db, logs/, dojo.conf). They coincide in a normal checkout, but `DOJO_DATA_DIR` moves only the state — which is how the suite and any throwaway run stay off the real DB. `tests/conftest.py` redirects `DOJO_DATA_DIR`, `DOJO_WORKBENCH_DIR` and `DOJO_NO_AUTO_UPDATE` **before dojo is imported** and re-asserts `dojo.config` afterwards (one test deliberately reloads it with the override unset); a full run leaves `data/` and the real workbench byte-identical. **Read paths at module scope** (`from dojo.config import WORKBENCH_DIR`), never inside a function: an in-function import re-reads the module attribute and silently escapes every monkeypatch — which is why `dojo check`/`dojo report` used to read the real workbench under test. Product-level tests live in `tests/test_cli.py` behind the `cli_env` fixture (temp DB + workbench + canned console input, driving `cli.main`), and `FakeConsole` **raises** when a script runs out of answers instead of silently answering "quit".
+Roles today: `tutor`, `discussion`, `teacher`, `reviewer`, `auditor` (leak check),
+`curator`, `curation_auditor`, `referencer`. The evidence model adds at most a
+review auditor (phase 15, `docs/grading.md`); a curriculum may not add roles. Every
+call names its role — `backend.chat_json(Role.TUTOR, …)` — and the role decides the
+system prompt's address, the token budget, the temperature, the timeout, the
+provenance record, and (for `MockBackend`) which canned answer comes back.
 
-## Conventions
+## 7. Configuration and state layout
 
-- **Judge protocol:** `runner.py` writes `solution.py` + `cases.json` + a harness into a temp dir and executes it with a timeout. Case dicts: `{"args": [...], "expected": any, "label": str}` plus optional verdict tags — `"compare": "sorted"` (deep-sorted equality for any-order outputs), `"compare": "approx:1e-4"` / `"rounded:n"` (float tolerance), `"predicate": name` (a `@checker` in the registry validates `(module, got, args)`), or `{"ops": [...], "expected": [...]}` (class problems: instantiate `function_name`, replay the method sequence). Default is strict JSON equality with `sort_keys` — don't "fix" it to approximate float equality without updating README and tests. **Channel hygiene (v0.10.1, hardened v0.13):** the harness runs user code inside `isolated()`, which now swaps BOTH `sys.stdout` and **file descriptor 1** (fd output goes to a temp file, read back capped) — `os.write(1, …)`, `print(..., file=sys.__stdout__)`, and output a child process inherits all corrupted the protocol JSON, and the resulting `json.loads` exception escaped `run_cases` and killed the session. The parent reads the **last parseable line** (a late `atexit`/thread print is ignored), output is bounded on both sides, and per-case handlers still catch `BaseException`. Parent-side execution goes through `dojo/proc.py:run_capped` — temp-file output, `start_new_session=True`, `killpg` on timeout (a spawned grandchild once outlived a `timed_out` run); harnesses call `apply_child_limits()`. `run_cases` **never raises**, **refuses an empty case list** (status "error": `all_passed` is true for zero cases, which once made an uncurated problem a free solve), and reads `case["expected"]` inside the per-case try. **Verdicts (v0.13):** a case that raised is `status="error"`, not `wrong_answer`. `run_cases(..., python=…)` is the runner seam for a curriculum with its own interpreter (v0.14). **Shebang lint (v0.10.10):** `static.analyze` runs ruff with `--ignore EXE001,EXE002,EXE004` — the template shebang is dojo's chrome, not user code, so 'file not executable' is silenced.
-- **Registries:** per-slug decorators in `judge/registry.py`: `@oracle(slug)` (correctness reference), `@judge_case(slug)` (small random cases with expected values; may return a third extras dict carrying the same verdict tags), `@profiler_input(slug)` (worst-case-shaped inputs of size n — never early-exit inputs; see the random-bracket lesson in docs/grading.md), and `@checker(name)` (predicate verdicts). Generators must clamp n into the problem's constraints (the caller sends 0..12).
-- **Measurement protocol (v0.11):** one measurement per subprocess (the boundary contains hangs — never in-process timing), median across repeats. Inside it, three calls in a fixed order: an untimed/untraced warm-up, **the timed call with no tracer running** (GC disabled), then the space call with tracemalloc active and untimed. Each call gets a fresh deepcopy of the args, so an in-place `sort()` cannot change what later calls do. **Never put tracemalloc inside the timed region** — its per-allocation bookkeeping is superlinear, which is exactly what made allocation-heavy O(n) code measure as O(n log n) (slope 1.164 traced vs 0.889 untraced on one real solution). `tests/test_probe.py` pins the mechanism, not a timing outcome.
-- **Space needs no staircase correction any more** (v0.12): v0.8.1's `staircase_safe_points` subsample existed because an absolute fit aliased a power-of-two container staircase as O(n^2). A *ratio* against a reference carries the same staircase on both sides, so it cancels — the workaround and its module are gone.
-- **Growth is measured against a reference, not fitted (v0.12).** `probe.run_probe` measures the student and the reference interleaved at each size; `growth.verdict` turns the ratio trend into a class *relative to the reference*. A ratio cancels everything the two share, which is why one class of difference (a ~1.9x trend) is decidable here and was not decidable from a single fitted curve. The rule is pinned on synthetic ratio series built from real class pairs in `tests/test_growth.py` — including the counter-case (n^1.5 between n and n^2 must come back unresolved) — never from wall-clock timing.
-- **A reference is admitted only against the oracle.** `curator.reference_findings` is the gate; `tests/test_registry.py` re-runs it corpus-wide. A wrong reference is worse than a missing one: the probe would derive confident verdicts about the student from a broken baseline. `judge.reference_source` extracts the source for the probe subprocess, which injects no-op registry decorators into the *loaded module* (a decorated snippet resolves them in its own globals, not the harness's).
-- **Curating a new problem:** add `function_name` + `visible_tests` + a `signature` (string for one function, `{"functions": {...}}` for multi-function problems, `{"methods": {...}}` for class problems) to `data/problem_overrides.json`, and a generator/oracle pair in `judge/registry.py` (a `@checker` for predicate problems, a `@profiler_input` unless measurement is meaningless). The startup auto-reseed keeps the DB fresh (an upsert, so it never deletes rows attempts reference). The judge's verdict modes mean prompts can honestly say "any order": tag those cases `"compare": "sorted"` and emit canonical form from the oracle. Trees are nested lists `[value, left, right]` (`None` = missing child / empty tree). `tests/test_registry.py` pins the contract — update it when the curated set changes. `dojo curate` automates the recipe via the curator agent (a separate agent from the tutor — its oracle output must never enter tutor context; `tests/test_never_solve.py` pins that boundary) and applies only when the verification gate passes, rolling back otherwise.
-- **Static analysis (v0.4):** runs automatically on every successful submit (`static.analyze`): radon cyclomatic complexity per function + ruff findings, stored on the attempt row (`static_analysis` JSON) and fed to the reviewer prompt as evidence. Complexity > 10 (McCabe convention) is a flag, never a failure; tool hiccups degrade into `notes`. Add new deps with `uv add` — never hand-edit the lockfile.
-- **Fetcher (v0.3):** `dojo fetch <title-slug>` pulls a LeetCode problem (GraphQL), converts content HTML to plain text (`fetcher/htmltext.py`, stdlib only), maps topic tags → pattern via `patterns.py` (unmapped tags fail loudly — never a silent wrong bucket), parses the python3 starter snippet into `function_name` + `signature` hints (annotation normalization: `List[int]` → `list[int]`, `Optional[X]` → `X | None`; empty snippet bodies get padded), lands the seed file via `fetcher.land()`, then auto-curates through the curator + verification gate. The HTTP transport is an injected callable — tests pin the contract against canned GraphQL fixtures and must never hit the network. **Bulk fetch (v0.10.10):** `dojo fetch --all` lands every roadmap problem without curating (idempotent — skips existing lc numbers; per-problem failures are counted, never fatal; polite pacing via an injectable `delay`), and tags each landed row with its lc number (the TOML is authoritative — the fetcher model doesn't carry it). **Tag by slug, not by presence** (v0.13 follow-up): "already in the bank" used to mean *the number exists somewhere in the table*, so a stale duplicate row could hold LC 50/208/235 while the seed row for the roadmap's own slug had none — the problem was then skipped forever and off the ladder. The skip path re-runs `_tag_lc_number(conn, slug, lc)` (a no-op unless that row's tag is NULL), pinned by `test_bulk_fetch_retags_when_a_stale_duplicate_owns_the_number`. `--no-curate` lands a single problem without curation. `roadmap.load_roadmap` keeps the raw TOML strings in `group["entries"]` alongside the parsed ints — the slug↔number mapping in `cli._roadmap_entries` is built from them. The bulk runner binds `DB_PATH`/`PROBLEMS_DIR` from `dojo.config` at call time — tests patch the config module.
-- **Tutor protocol (v0.6):** one `hint` command, two AI-classified modes — "ladder" (stuck: respond at the tier, advance; only ultra-short zero-information messages force tier 0) and "discussion" (exploring: answer directly, no tier). **ML-analogy split (v0.10.11):** pre-submission hints never get ML analogies (the TUTOR_SYSTEM instruction was removed — hints are for unblocking the problem, not for fun facts); the reviewer's broader-picture, post-solve discussion, and the teacher keep them. `ask_tutor` calls `chat_json` with a `{"kind", "tier", "text"}` schema; every response passes the leak audit, and one still rated >= 3 after retries is **discarded, never shown** — and so is one whose audit **could not be read** (v0.13). `_audit` returns None for a non-dict reply, a missing/None/string rating, and a bool (`True` is an int in Python, so it must be rejected explicitly); None means *unknown*, never clean. The audit is retried once before refusing, `HintResult.audit_failed` separates "the answer leaked" from "the auditor broke", and the flow says which. The old `int(leak.get("rating", 1))` failed **open**: a complete solution was delivered in all four failure modes. History entries record `kind`. The post-solve `discuss` command uses `DISCUSSION_SYSTEM` (boundary lifts after solving; the prompt carries the submitted code via `build_discussion_prompt`, so the model grounds on what actually ran) and persists the transcript. The reviewer returns a normalized rubric (bare-int dimensions wrapped by `reviewer.normalize_review`; scores clamped to 1-5). **JSON resilience (v0.9.1):** `backend.parse_json_content` tolerates fenced and prose-wrapped objects; `chat_json` caps output at 4096 tokens (a truncated mid-object response is exactly the "non-JSON" failure real sessions saw); and the reviewer's retry goes through the plain `chat` path (temperature 0.3) instead of repeating the identical temperature-0 request — change any prompt or parsing step → update the mock and tests in the same commit (rule 6). **Every call names its role** (v0.13): `backend.chat_json(Role.TUTOR, TUTOR_SYSTEM, prompt)`. Roles are the routing key — `MockBackend` keys its canned answers on the role, the live backends use it for the system prompt's address, the budget and the provenance record — so prompt wording is free again (the old substring convention forbade `TEACHER_SYSTEM` from containing "tutor"/"discussion" and let the discussion branch die silently once; `tests/test_prompt_routing.py` now pins routing-by-role *and* that routing ignores the text).
-- **Report command (v0.7, note + containment v0.13 follow-up):** `dojo report [slug]` (and in-session `report <your words>`) audits curation via `curator.audit_curation`: fresh curator run → cross-check fresh oracle vs live oracle on generated cases → audit agent hunts prompt-vs-judge contract violations (including **value-range fidelity** of probe inputs, v0.12 — shapes alone are not enough). The student's optional note (`report <text>` or `--note TEXT`) goes into the audit prompt as "WHAT THE STUDENT REPORTED" and into the report JSON as `student_note`; the auditor must address the claim by name and is explicitly allowed to say it is mistaken — a claim is evidence, never a verdict. Both call sites print the automated cross-check findings, so "no findings" and "the cross-check never ran" cannot be confused. `report` runs behind `dojo.guard` in **both** phases: it is a side errand, and a curator failure must never end a session (it once did — see the sanitize note below). `--fix` re-curates (`apply(overwrite=True)` — new registry block wins at import; rollback restores original files, overrides, registrations). Report JSON lands in `config.CURATION_DIR` (gitignored `data/curation/`, i.e. user state, so `DOJO_DATA_DIR` moves it).
-- **Curator code is repaired, never fatal** (`curator.sanitize_imports` + `_exec_proposal`, v0.13 follow-up): model-written snippets are executed twice before anything is written, so an import the exec namespace cannot satisfy is dropped (real modules like `heapq`/`typing` are kept, line numbers preserved) and the removed statements are announced — as `_repairs` on the proposal, in the reference's note, and as an automated finding in the audit. This is not hypothetical: the prompt's old wording ("may import only: random, math, and the decorators") invited `from decorators import oracle`, the decorators are *injected* rather than importable, and the `ModuleNotFoundError` escaped `audit_curation` as a traceback that killed a live session mid-solve (2026-09-23). Both the curator and the reference prompts now state that importing a decorator is a hard error. `_exec_proposal` raises `CuratorError` (field + original exception) instead of leaking whatever the snippet raises.
-- **Reference command (v0.12):** `dojo reference <slug>` / `--all` (power tool) generates a canonical solution, gates it against the oracle, and installs it; `--force` replaces one. The gate runs *before* any write, so a refusal leaves the registry untouched. Content backfill needs an API key — until a problem has a reference the probe still runs (failures at scale are reported) but cannot compare growth.
-- **The reference prompt must carry the slug and demand the decorator.** `build_reference_prompt` takes the slug and prints it as `SLUG: <slug>`; `REFERENCE_SYSTEM` requires `@reference("<slug>")` on the entry point. Both are pinned by `test_the_prompt_gives_the_model_the_slug_and_the_decorator`. This is not cosmetic: the first live backfill had all 48 proposals come back as a bare `def` — the prompt mentioned the decorator only as "already in scope" and never gave the slug — so nothing registered and every problem was reported as *failing a gate that had never compared anything*.
-- **Model shape variance in a reference is repaired, never fatal** (`curator._ensure_reference_registered`, the same stance as `reviewer.normalize_review`): a missing decorator is added, a wrong-slug decorator is renamed, and a class-form answer for an op-list problem (`min_stack`) gets the driver the judge harness already uses for the student's class. Any repair is written into the *source* too, because the file is the source of truth — a reference registered only in memory disappears on the next import. A runtime message that says the gate disagreed when nothing was registered is a wrong trail; keep those two failures distinct.
-- **Learning mode (v0.8):** a third agent, the teacher, for topic education (`dojo learn [TOPIC]`; picker without a topic, `difflib` did-you-mean on typos; in-session `learn` abandons the in-progress attempt and teaches the pattern — warm-ups reject `learn`, and leaving a warm-up records nothing either). `run_learn` persists the transcript to `learn_sessions` after **every exchange** (crash-safe), `completed` marks graceful ends. The teacher's context is topic + conversation only (rule 1's documented narrowing); it may show topic-canonical code, and is instructed to say so when unsure — there is no oracle for pedagogy. The teacher's call site names its role (`Role.TEACHER`) and the mock routes on that, so `TEACHER_SYSTEM` may be worded freely; changing it still means updating `tests/test_never_solve.py` (rule 6). `practice` inside learn mode hands off to the easiest unsolved curated problem in the pattern (`scheduler.pick_practice_problem`); accepted handoffs return `{"practice": slug}`, and `_cmd_day`/`_cmd_learn` loop solve sessions while the outcome is `"practice"` — always the same slug (an in-session learn restarts that problem fresh). The proactive offer fires only for scheduler picks from unstudied patterns (`db.unstudied`: no learn session AND no attempts) and is a fork, never a gate. `studied_patterns` (learn sessions ∪ attempts) is the one shared notion feeding the offer and the `dojo progress` markers.
-- **Terminal ergonomics:** interactive prompts use `dojo/terminal.make_prompt` (prompt_toolkit when on a TTY — arrow keys, wrapped-line editing, history; `console.input` otherwise, which tests exercise). `make_prompt` accepts a `default` for prefilled answers (TTY-only sugar; the non-TTY path ignores it — tests assert the plain path). **The default=None lesson (v0.10.10):** prompt_toolkit's `prompt(default=None)` raises TypeError — the kwarg must be OMITTED, never passed as None; the silent fallback hid that one line behind every session prompt for months (broken arrows, broken multibyte deletion, missing virtual text — the fallback log caught it, which is why prompt failures log). `test_prompt_omits_default_when_none` pins it. **The submit questions (v0.9.1):** time/space/reflection render via `flow.ask_question` — blank line, bold-cyan question, answer typed on its own line under a dim `❯`. **Virtual-text prompts (v0.10.1, v0.10.12):** `make_prompt(..., hint=...)` renders the command list as prompt_toolkit *placeholder* text — in-line right after the cursor while the input is empty, vanishing on the first keystroke (prompt_toolkit ≥ 3.0.53; the bottom toolbar parked it on its own line below the input and the rprompt detour right-aligned it — in-line at the cursor is the wanted spot, and the earlier toolbar "failure" was really the default=None fallback bug). The hint reads "Ask a question, or: …" per loop. Keep hints to one line. Non-TTYs print the hint above the prompt (which tests exercise), and any TTY-path exception now logs a `prompt_fallback` event to the debug log before degrading — prompt failures are never silent again. The `hint` and `discuss` commands are gone: any non-command input is a question, pre- and post-solve alike (a leading "hint " prefix is still stripped for muscle memory). **Typo guard (v0.10.8):** `terminal.confirm_typo` catches single-word non-question inputs that difflib-close-match a session command (cutoff 0.8) and asks "Did you mean X? [y/N]" before acting — the actions are too consequential (quit abandons the session, learn abandons it for study, submit records an attempt) to auto-correct; declined or unmatched inputs stay questions. `patch_console` wraps the rich Console in run_day/run_learn so prints between prompts route through prompt_toolkit.patch_stdout — the fullscreen prompt's repaint can otherwise visually truncate output (the reported "hist" cut-offs; the debug log proved those responses were complete, so the loss was terminal-side). The two complexity answers pass a **double-check gate** (Enter continues; `time`/`space` re-asks that one question, prefilled on a TTY) — they remain two separate questions feeding separate analyses; only the gate is shared. **Polish re-claims (v0.9.3, still true in v0.13's loop):** a re-submit after `polish` re-collects both claims through the same `_ask_complexity_claims` helper with the previous answers as prefilled defaults, and persists them on the new revision — comparing a new measurement against stale claims produced spurious flags. The double-check gate accepts Enter/`ok`/`y`/`quit`/`done` as "continue": anything else re-asks, and an unrecognized word used to loop forever (found by a test whose script ran out). Rich tables come from `dojo/ui.table` (vertical padding between rows). Tutor/discussion responses cap at 2048 tokens; `de_markdown` handles bullets, headers, blockquotes, horizontal rules, and dunder bolds — keep it updated as models invent new artifacts.
-- **Scheduler:** the model lives entirely in `scheduler.py` as the published **FSRS-4.5** equations with FSRS's default weights (`FSRS_W`, w0-w16) — the forgetting curve `(1 + 19/81·t/S)^-0.5`, per-grade initial stability/difficulty, the D/R-dependent lapse, hard penalty and easy bonus. Don't re-tune those constants by hand and keep describing them as FSRS: the previous version did exactly that and its stability increment was ~20x too small, so no card ever escaped sub-day intervals. One documented deviation: `MAX_INTERVAL_DAYS = 365`. Grades are 1-4 (Anki convention) and are **persisted on the attempt** (`attempts.recall_grade`) — the card aggregates alone cannot reconstruct a recall curve. `tests/test_scheduler.py` pins hand-computed values from the published equations, so a change to the model has to be deliberate. Seed a card with the grade the first solve's hint count implies (`ensure_item_card`) rather than a flat default. **The progression gate (v0.10):** `pick_new_problem` walks the roadmap groups in order under a hard prereq gate (`patterns.PREREQS`, a chain over the verified group order — the mirror carries the order, not the site's DAG edges) and serves the earliest unsolved ladder problem of the first eligible pattern; ladder matching runs on `problems.lc_number` (bank rows are only ladder-visible when curated), dojo's own problems are the fallback (weakest pattern first). `pick_practice_problem` respects ladder order within its pattern. `scheduler.ladder_state` exposes (solved lc, curated bank lc) to the roadmap view.
-- **Session phases (v0.13): one loop, two phases.** `run_day` has a single dispatcher; `WorkbenchState.phase` (`solving` | `post_solve`, persisted so a crash resumes in the right mode) decides which commands exist, and `state.agent` (`tutor` | `discussion`) decides who answers a question. Pre-submit: `open` · `check` · `learn` · `report` · `submit` · `quit`, questions → tutor (leak-audited). Post-solve: `polish` · `done`, questions → the post-solve agent. **`polish` is a mode switch, not a re-grade**: it returns to the solving phase with the discussion agent still answering, because the never-solve boundary lifted when the solve was graded and cannot be put back. A second `submit` then re-grades, appends a revision, asks "Review again? [y/N]" before paying for another review, and returns to post-solve. A solving-mode command typed post-solve (or `polish`/`done` typed pre-submit) gets a pointer line rather than being sent to the model as a question — that silent mis-send is what the v0.13 audit reproduced. `quit` with no attempt abandons (nothing recorded); with one it just ends the session and keeps the attempt and its versions. `_post_solve_loop` and `_polish` are deleted, not deprecated.
-- **Attempt revisions (v0.13): the head row plus an immutable stream.** `attempts` still holds the newest `code` (every existing query works); `attempt_revisions` holds every submitted version with the artifacts *that* version produced (claims, measurement, static analysis, review, judge summary). `_record_submit` writes the head update and the revision insert **in one transaction**; `_polish`'s old job is now the submit path with `phase == "polish"` (it bumps `attempts.polished`). The head keeps the **raw** artifact — the stripped student view goes to the AI, never to storage. CLI: `dojo show <id> --revisions | --rev N | --diff [A [B]] | --clean`.
-- **The workbench file and its views (v0.13).** `session/workbench.py` renders the template (shebang + statement + stub + a sentinel-fenced `if __name__ == "__main__"` examples block built from the problem's own `visible_tests`) and owns `student_view(source, problem)` — the chrome-stripped projection. **Every AI reader and `static.analyze` consume the student view** (the tutor, the reviewer, the discussion prompt, ruff/radon): handing the model the raw file produced shebang/docstring complaints in 15 of 18 live reviews, including a ruff finding dojo cannot emit. The examples block is stripped only when it is byte-identical to what dojo would render, and the statement literal only when it still equals the problem statement — a student's edit belongs to the student. The block is never executed by the judge or the probe (both load the module under a name that is not `__main__`, pinned by a test) and `template_for()` refuses to write a template that does not compile.
+- `config.CONTENT_DIR` — engineered content that ships with the engine: the fixture
+  curriculum and templates. Read-only at runtime.
+- `config.DATA_DIR` (`DOJO_DATA_DIR`) — **user state**: `dojo.db`, `logs/`,
+  `dojo.conf`, `curation/`. This is what `tests/conftest.py` redirects; a full run
+  must leave the real directory byte-identical.
+- `config.CURRICULA_DIR` (`DOJO_CURRICULA_DIR`, default
+  `~/.local/share/dojo/curricula/`) — **user content**: one directory per installed
+  curriculum, each with a `.dojo-source.json` recording where it came from and at
+  which commit. Moving it must never move the DB, and vice versa.
+- `config.WORKBENCH_DIR` (`DOJO_WORKBENCH_DIR`) — the editor/debugger workspace,
+  outside the repo.
 
-- **The attempt lifecycle (v0.11): an attempt row exists iff the student submitted.** `run_day` creates no row at session start; `_record_submit` inserts one on the first submit (pass *or* fail, with the judge's verdict as `status`) and updates it on later submits in the same session. **`quit` records nothing** — no row, no hints, no code, no lapse; `_persist_abandoned` is deleted, not patched. `WorkbenchState.attempt_id` is `None` until that first submit. The reason is semantic, not cosmetic: creating a row for *starting* a session conflated "looked at the tool" with "attempted a problem" and manufactured phantom `unsolved` rows (8 of 15 solve rows in the live DB).
-- **The memory unit is the solved problem (v0.13 follow-up).** `item_cards(user_id, slug, pattern, stability, …)` — one card per solved problem, with `pattern` as the rollup key. A pattern card reported one stability for problems with wildly different ones: in the live DB it hid ten solved problems that had never been recalled once, under a «34-day stable» pattern, and it diluted the well-recalled ones (a 91-day memory averaged down to 50). `ensure_item_card` is called on the first *successful* submit; `item_problem(card)` returns the card's own problem (None → the problem is uncurated/gone, and `run_warmups` says so and defers a day, never looping quietly). `due_cards` orders by `datetime(due_at), slug`. `pattern_cards` is legacy: not written any more, kept so nothing earned is destroyed. **Migration** (`scheduler.rebuild_item_cards`, run once per user via `migrate_cards_if_needed` from `cli.main`, and available as `dojo rebuild-cards`): the attempt log is the event source — each problem's own FSRS state is replayed from its submit rows (`kind`, `recall_grade` — v0.11's persisted grade is what makes this possible, `submitted_at`), assuming «good» for the 8 pre-v0.11 recalls that lost their grade. It then **spreads** the overdue never-recalled backlog over `spread_days` (default 7, one card a day) so a student is not handed the whole pile at once — a capacity decision, not a memory claim. Cards are derived, so the rebuild is idempotent and doubles as the repair path; due dates are the one thing it cannot derive.
-- **Warm-up semantics:** `run_warmups` forces a fresh template (re-solve from scratch) **on the card's own problem**, creates an attempt with `kind='warmup'`, skips reflection (the recall grade replaces it). `dojo day` drains 2 (`cli.WARMUP_BUDGET`), `dojo warmup --limit N` (default 3) drains more, and when cards remain due the session says how many — per-problem cards mean several can be due at once, and that backlog must never be invisible. Quitting a warm-up changes **nothing** — a lapse is recorded only on an explicit grade 1, so a glance at a due card cannot damage the schedule. Workbench state is per slug (carrying its kind) and lasts exactly one session; it is retired on submit and on quit. **Every new session writes a blank template over the workbench file**; submitted code lives on attempt rows (`dojo history` / `dojo show <id>`). **Crash recovery is now the only resume path** — a session killed before submitting leaves its state file behind and the next invocation resumes it, so keep `load_state` tolerant of unknown keys.
-- **Warm-up problem choice (v0.11 → v0.13 follow-up):** the v0.11 rotation (`GROUP BY p.id ORDER BY MAX(datetime(a.submitted_at)) ASC`) existed because one card had to represent a whole pattern; per-problem cards removed the question — the card *is* the problem, so there is no pick left to bias. If you ever reintroduce a pattern-level fallback, keep the per-problem aggregation: the raw-string `MAX(submitted_at)` and NULL-first ordering are both live hazards (the first selected the problem solved earliest ever, so `valid_parentheses` came back five times).
-- **AI prose rendering (v0.10.3):** the prompts now *require* Markdown (short `##` headings, plain-dash lists, `**bold**` terms, fenced code blocks — the tutor still never emits a full solution, and only at tier 5 may it fence code). `dojo/render.py` is the one display path: `render_ai(console, title, text, border_style=...)` prints a bordered Panel whose title is the context and whose content is rich Markdown (code fences syntax-highlighted, `CODE_THEME`), and `md_plain(text)` exports deterministic plain text for table cells and pipes. **The review is prose now (v0.10.11):** `review_markdown(review)` renders one "## Dimension — score/5" heading per rubric entry with the comment's markdown preserved — the old table flattened comments into one narrow column and produced wall-of-newline artifacts; `_show_review` and `dojo show` both use it. Border styles follow the pre-v0.10.3 conventions (blue for tutor/teacher, green for post-solve discussion, cyan for reflection feedback). Transcripts/reviews store the model's markdown **as-is**; `dojo show` renders history through the same path. `de_markdown` in `tutor/tutor.py` is retired from display duty (kept + tested as the legacy plain-text fallback); underscores are never stripped (identifiers like `two_sum`) — pin render behavior with `tests/test_render.py`.
-- **Debug logging (v0.9.2):** every live AI exchange is appended to the gitignored `data/logs/dojo.log` (JSONL: system prompt, user prompt, the raw response *before* parsing, latency, and transport errors). Only the *live* backends log (`OpenAICompatBackend` / `AnthropicBackend`) — MockBackend never writes, so tests stay offline; every event carries the role, provider and model; tests that exercise the logger monkeypatch `debuglog.LOG_PATH` onto tmp paths and never touch the real log. `dojo/version.py` supplies `PHASE_VERSION` (rule 9): the marker check per write clears the log when the *phase* changes — `0.13.N` → `0.14.0` wipes it, the commits inside a phase do not — so the size-explosion guard and the version scheme are the same fact. Never log the API key.
-- **Complexity table colors (v0.9.2):** `_show_complexity_table` renders cells as literal `rich.text.Text` — rich Tables strip markup in cells, so `[red]...[/red]` strings would silently render plain. A cell participating in a *disagreement* is red; a fully agreeing axis is green; an **unresolved** measurement never reddens a claim (it is not evidence), and an axis whose sides are incomparable is named in a dim note instead of staying silent. The functions are `_axis_outcomes` / `complexity.compare` — don't go back to a two-valued check. The measured column holds the class the *differential* derived, so a missing reference reads as "no reference" rather than as a blank. Cell values are literal text (never markup-parsed), so raw user strings from the polish path are safe. Tests render through a real `Console(no_color=False)` capture — the harness sets `NO_COLOR=1`, and `str(table)` is just an object repr.
-- **Workbench & VSCode (v0.10.1, v0.10.6):** the workbench lives OUTSIDE the repo at `~/.local/share/dojo/workbench` (`DOJO_WORKBENCH_DIR` overrides; `XDG_DATA_HOME` respected) — editor/debugger tooling (ipykernel etc.) never collides with git. **The debugging story (v0.10.6, v0.10.7):** every template starts with a shebang pointing at `config.VENV_PYTHON` (dojo's venv — editors/linters read it; it self-heals because sessions rewrite templates), `ensure_ide_config` generates `.vscode/{settings,launch}.json` + `workbench.code-workspace` + `.zed/debug.json` (Zed's debugpy adapter with the explicit `"python"` key, since toolchain detection can't see a venv outside the worktree) INSIDE the workbench dir (idempotent, self-healing), and `open_path` routes folder editors (`FOLDER_EDITORS`: code/codium/cursor/windsurf/zed) to the workbench *folder plus the file* (the folder carries the config, the file is the focused pane) so `dojo open` lands in a fully wired debug environment with zero repo knowledge. `ipykernel` and `debugpy` are dojo dependencies — notebook kernels and the debug adapter live in the venv. **User prints are captured, not discarded:** the judge harness records per-case stdout in `CaseResult.printed` (capped), `_show_printed` renders it at `check` and on failed submits — prints are debugging statements, and `check` is the debugging loop. The repo's own `.vscode/` stays for repo development. Tests monkeypatch WORKBENCH_DIR onto tmp paths everywhere — never the real location.
-- **Updater (v0.10.1):** `update_dojo` (in `updater.py`, injectable runner — offline tests) fast-forwards the repo (`--ff-only`, or `--force` = reset --hard) and runs `uv sync` only when the pull changed files; failures degrade into notes, never break the run. `auto_update()` runs on every CLI entry except `setup`/`update` (opt out with `DOJO_NO_AUTO_UPDATE=1` — the agent/dev escape hatch) and prints only when something changed. Never auto-update from tests — they call `_cmd_*` directly, and `main()` help paths return before the hook.
-- **Editor launching:** all `$EDITOR` behavior lives in `editor.py` — GUI editors detach via `Popen(start_new_session=True)`, terminal editors go through tmux/osascript, unknown editors block. Don't call subprocess directly from `flow.py`; tests cover the pure classification helpers only, never process spawning.
-- **SQLite:** `db.py` owns schema and connection. Keep `sqlite3.Row` access by name. JSON columns go through `dumps_json`/`loads_json`.
-- **CLI:** argparse subcommands in `cli.py`; each returns an exit code. `main` catches `KeyboardInterrupt` (130) and **`EOFError`** (1: Ctrl-D or a piped script running out at a prompt used to be a traceback; the state file is left so the same command resumes). Bare `dojo` runs the daily routine (argv normalization: a first non-flag, non-subcommand argument is a slug; `dojo day` is the alias). **A named slug is served, not padded:** `dojo <slug>` *offers* the due warm-ups (`_serve_warmups`; the question says how many are due and how many will run, `WARMUP_BUDGET = 2`) rather than draining the queue first — asking for one problem used to serve several unrelated ones (v0.13 follow-up). `--skip-warmup` skips even the question, a run whose input ends treats it as "no", and bare `dojo` keeps starting with the warm-ups unasked. **One computer, one user** — no `--user` flags: the active user resolves from gitignored `data/dojo.conf` → the DB's sole user; zero users = first run → the setup wizard (`dojo/setup.py`) runs, then the original command continues (non-TTY prints guidance instead of prompting). Every entry (except `setup`) runs `bank.ensure_seeded` first — the bank always mirrors `problems/` (additive upsert **plus the prune**, both directions since v0.13 follow-up; at the CLI layer, never in `db.connect()`; the prune note goes to `console.print`). `dojo user [name]` switches the active user (numbered picker without a name; an unknown name errors — never a silent typo'd account); `dojo learn [TOPIC]` is the learning-mode entry (USER_COMMANDS member; the `_choose` picker is shared with `dojo user`). **Help surface (v0.9):** `dojo help` = `dojo -h` = `dojo --help` is intercepted in `main` (any argv starting with those) and prints the hand-written `HELP_TEXT` — never argparse's listing. `roadmap` (v0.10) is a visible command: `_roadmap_rows` builds the pure row data (ladder counts, complete/next-up/locked-by) and `_roadmap_tree` extends it with per-problem ladder states (solved/next/ready/missing from `ladder_state` + `_roadmap_problem_map`). The default view (v0.10.9) is a rich `Tree` — groups as branches, ladders as leaves, the next-up group auto-expanded; `--expand PATTERN` (repeatable) and `--all` open more, `--table` restores the stats table. Test rendering through real Console captures (FakeConsole stores `str(Tree)` = an object repr). Power tools (`day`, `warmup`, `check`, `show`, `curate`, `report`) and `profile` (a hidden alias of `_cmd_history`) stay dispatchable but never appear in the guide; each still documents itself via `dojo <cmd> --help`. Don't use argparse's `help=SUPPRESS` — Python 3.13 prints `==SUPPRESS==` literals. **Setup key detection (v0.9, provider-aware v0.13):** `run_wizard(detect_env_key=True)` resolves env → *the injected dotenv* → prompt, checking every provider in `PROVIDERS`; a detected key skips the prompt, is persisted to the dotenv, and records `DOJO_PROVIDER`. `--provider X` pins the variable to store a pasted key under; `--skip-key` passes `detect_env_key=False` so scripted installs (`make seed`) never write a key. Interactive flows read from `console.input` — tests use the `FakeConsole` fixture (its `actions` hook simulates editing the workbench mid-session). `history` (the attempt list — rendered **oldest first**, so the newest attempt is the last line, with columns `expected` / `measured` / `submitted`: the first two are "Time / Space", the third is `scheduler.ago_phrase`; `--limit N` still selects the most recent N) and `show <id>` (full attempt detail: `--code`, `--clean` for the AI's view, `--revisions`, `--rev N`, `--diff [A [B]]`) render rows fetched by `db.list_attempts` / `db.get_attempt` — `get_attempt` also carries the problem's `function_name`/`visible_tests`/`signature`, because the clean view identifies dojo's scaffolding by re-rendering it.
+**Read paths at module scope** (`from dojo.config import WORKBENCH_DIR`); an
+in-function import re-reads the module attribute and silently escapes every
+monkeypatch. Product-level tests drive `cli.main` behind the `cli_env` fixture, and
+`FakeConsole` **raises** when a script runs out of answers rather than silently
+answering "quit".
 
-## Definition of done
+## 8. Engine conventions worth knowing before you touch them
 
-- `uv run pytest` passes; new behavior has tests.
-- The never-solve boundary is unchanged or deliberately narrowed with rationale in the PR description.
-- User-visible changes update `README.md` (guide) and the matching `docs/` file (technical); new stage work lands in `roadmap/`.
+- **Judge protocol.** `judge/runner.py` writes the artifact, the cases and a harness
+  into a temp dir and executes it with a timeout. A case is `{"args": …, "expected":
+  …}` plus optional verdict tags (`compare: sorted`, `compare: approx:1e-4`,
+  `rounded:n`, `predicate`), or an `ops` sequence for stateful class problems.
+  Default is strict JSON equality with sorted keys. The harness swaps `sys.stdout`
+  *and* file descriptor 1, reads the last parseable line, bounds both streams and
+  kills the whole process group on timeout; `run_cases` never raises and refuses an
+  empty case list. A case that raised is `status="error"`, not `wrong_answer`.
+  `run_cases(..., python=…)` is the interpreter seam a curriculum uses for its own
+  environment.
+- **Measurement.** One measurement per subprocess, medians across repeats, an
+  untimed warm-up, the timed call with **no tracer running**, then the space call
+  with tracemalloc active and untimed; arguments are deep-copied per call. The
+  verdict is a *ratio trend against a paired reference*, never an absolute fit, and
+  "unresolved" is a legitimate answer. A curriculum declares *what* to measure; the
+  framework decides how the verdict is reached and how uncertainty is stated.
+- **Evidence and scheduling.** An attempt row exists iff the student submitted;
+  `quit` records nothing. Cards are per `(user, curriculum, item)` and are derived
+  state: `rebuild_item_cards` replays the attempt log and is the repair path, which
+  is also how the migration proves itself. Grades are 1–4 and persisted on the
+  attempt; the FSRS equations are the published ones with default weights and are
+  not re-tuned by hand. Weak evidence seeds conservatively and is disclosed
+  (`docs/retention.md`).
+- **Session.** `run_day` is one loop with a persisted phase (`solving` |
+  `post_solve`); `polish` is a mode switch, not a re-grade; a solving-mode command
+  typed post-solve gets a pointer line rather than being sent to the model. Every
+  session writes a fresh artifact template; a session killed before submitting
+  leaves state behind and the next invocation resumes it, so `load_state` stays
+  tolerant of unknown keys.
+- **Workbench.** The artifact is written outside the repo, starts with a shebang
+  pointing at dojo's venv (or the interpreter the curriculum declares), carries a
+  fenced `if __name__ == "__main__"` examples block, and is rendered *by the
+  curriculum* through `session/workbench.py`. Every AI reader and the static layer
+  consume `student_view` — dojo's chrome stripped, the student's edits preserved.
+- **Terminal.** Prompts go through `terminal.make_prompt` (prompt_toolkit on a TTY,
+  `console.input` otherwise), AI prose renders through `render.render_ai`, and
+  numbered choices go through one shared picker — the same one enrollment uses.
+  Keep hints to one line.
+- **CLI.** Each subcommand returns an exit code. `main` catches `KeyboardInterrupt`
+  (130) and `EOFError` (1) and leaves the state file for a resume. Bare `dojo` runs
+  the daily routine; a first non-flag argument is an item id. Never use argparse's
+  `help=SUPPRESS` (Python 3.13 prints `==SUPPRESS==`). Power tools stay dispatchable
+  and out of the guide, each documenting itself via `--help`.
+- **Debug log.** Every live AI exchange is appended to gitignored
+  `data/logs/dojo.log` (JSONL, the raw response *before* parsing). Only live
+  backends write it. The phase component of the version gates retention, so
+  finishing a phase clears the log while the commits inside a phase accumulate.
+
+## 9. Definition of done
+
+- `uv run pytest` passes, offline, and new behaviour has tests that fail before the
+  change.
+- The never-solve boundary is unchanged, or narrowed deliberately with the rationale
+  written down and pinned by a test.
+- User-visible changes update `README.md` and the matching `docs/` file; phase work
+  lands in `roadmap/`.
+- The branch check in §0 was actually run before the commit.

@@ -1,25 +1,37 @@
-# Roadmap
+# roadmap
 
-Delivered and planned development stages. Each stage file records what shipped and what was learned; `next.md` holds what's planned and is the place design conversations start.
+The plan of record for this branch. One file per phase; a phase is done when its
+definition of done is met, the version is bumped and the commit is tagged
+(`docs/development.md` §7).
 
-| Stage | Status | Notes |
-|---|---|---|
-| [v0.1](v0.1.md) — never-solve tutor + empirical grader | ✅ delivered | The founding loop. |
-| [v0.2](v0.2.md) — retention engine | ✅ delivered | FSRS-lite; plus the later hardening (session lifecycle, history/show, full-bank curation, judge verdict modes, curator pipeline). |
-| [v0.3](v0.3.md) — the updating bank | ✅ delivered | LeetCode fetcher + auto-curation. |
-| [v0.4](v0.4.md) — deeper grading | ✅ delivered | Static analysis, score trends, dual-oracle differential. |
-| [v0.5](v0.5.md) — setup wizard, single-user ergonomics, bare `dojo` | ✅ delivered | First-run wizard, auto-reseed, `dojo user`, PATH wrapper. |
-| [v0.6](v0.6.md) — practice-run polish | ✅ delivered | Check-time lint, post-solve loop (polish/discuss), reviewer reasoning, tutor modes, leak-audit hardening. |
-| [v0.7](v0.7.md) — the trust fix and terminal ergonomics | ✅ delivered | k_closest validity checker, prompt_toolkit, bare-question hints, `dojo report`. |
-| [v0.8](v0.8.md) — learning mode | ✅ delivered | Topic teacher + in-session learn + proactive offer; the documented never-solve narrowing. |
-| [v0.9](v0.9.md) — onboarding | ✅ delivered | Minimal help (`dojo help`), new-user README, setup key detection, `profile` → history alias. |
-| [v0.10](v0.10.md) — systemic pattern progression | ✅ delivered | 18 NeetCode groups, hard prereq gate, ladder picks, `dojo roadmap`; content batches follow (126 of 150 still to fetch). |
-| [v0.11](v0.11.md) — the correctness stage | ✅ delivered | Attempt lifecycle (`quit` records nothing), FSRS-4.5 with default weights, rotating warm-ups + persisted recall grades, and a profiler that separates its instruments and reports ranges instead of guesses. |
-| [v0.12](v0.12.md) — the measurement stage | ✅ delivered | The profiler becomes a paired scale probe: failures at scale are first-class findings, and growth is measured against a gated canonical reference instead of fitted absolutely. |
-| [v0.13](v0.13.md) — session continuity, the workbench file, providers | 🔜 planned | One loop with phases (`check`/`open` after submit; `polish` becomes a mode switch), attempt revisions so the original submission survives, a workbench view layer (no more shebang/docstring noise for the AI) with a runnable examples block, and OpenAI/Claude alongside DeepSeek. |
-| [v0.14](v0.14.md) — curricula (JAX, Rust) | 🔜 planned | Curriculum-as-data (units, prereq DAGs, per-curriculum runner/measurement policy), with JAX first (Python, so the judge holds) and Rust second (a crate artifact, `cargo test`, and compile-failure as a first-class verdict). |
-| [next](next.md) — backlog | 🔜 | Audit proposals (judge ground-truth anchor, warm-up rotation, streak + reminder, …), TUI polish, sync, warm-up variants. |
+| file | what it is |
+|---|---|
+| [`v0.14.md`](v0.14.md) | **in flight** — the curricula rebuild: the engine/curriculum split, NeetCode 150 moving out, enrollment, the migration |
+| [`next.md`](next.md) | the backlog: phase 15 (the evidence model, then JAX), phase 16 (AI curriculum generation), and everything deliberately parked |
+| [`history.md`](history.md) | the delivered phases, condensed. The full records are on `main` — this branch retired them because they describe the pre-split design |
 
-The [v0.12 audit](../docs/audit-v0.12.md) is the current picture of what works
-and what does not; its §6 orders the work, and v0.13's Stage 0 is the subset that
-must land before anything else.
+## The arc
+
+- **Phase 14 — the split.** dojo becomes an engine and NeetCode 150 becomes a
+  curriculum in its own repository. No new subject, no new student-facing capability:
+  the same daily loop, with the LeetCode shape removed from the engine. This is a
+  breaking phase, and it is the reason the work happens on a branch while `main`
+  keeps serving practice (`AGENTS.md` §0).
+- **Phase 15 — evidence, then JAX.** The evidence tiers gain their behaviour
+  (disclosure, gating audits, conservative seeding), and the first curriculum written
+  against the new format arrives with its own measurement suite — the proof that the
+  format generalizes beyond the shape it was extracted from.
+- **Phase 16 — generation.** Bootstrapping a curriculum from a source you trust, the
+  fourth claim in dojo's definition, which is only credible once a hand-authored
+  second curriculum exists to compare it against.
+
+## How a phase doc is written
+
+Each one states: what the phase is for, what moves and what stays, the increments
+with their definition of done, the acceptance tests that prove it, the risks with
+their mitigations, the decisions taken (with dates), and what it deliberately does
+not do. `v0.14.md` is the model to copy.
+
+Decisions that shape future phases are recorded in the phase doc, not in chat — the
+five decisions that define this rebuild are in `v0.14.md` §7, and the reasoning
+behind them is in the discussion that produced them (summarised there).

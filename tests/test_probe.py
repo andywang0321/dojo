@@ -245,7 +245,7 @@ def test_end_to_end_verdict_matches_for_the_same_algorithm(tmp_path, synthetic_p
 
     The *measurement* is injected (an exact cost model), never the verdict: this
     pins pairing → ratio → naming without asserting anything about the machine
-    (rule 5 — the wall-clock version of this test failed 33% of the time under
+    (rule 7 — the wall-clock version of this test failed 33% of the time under
     6-way concurrency)."""
     synthetic_probe(lambda label, n: n)  # identical cost curves on both sides
     student = Target("yours", _write(tmp_path, "s", LINEAR), "f")

@@ -1,5 +1,15 @@
 # Audit — dojo at v0.12
 
+> **Historical.** This audit was written against the *pre-split* codebase — one
+> repository where the engine and the NeetCode 150 were the same thing — and it is
+> kept on this branch for two reasons only: its §4 is the coupling inventory that
+> phase 14 acts on, and its §S3.4/S5.5 record the persistence constraints the
+> curricula migration has to respect. Everything else in it has been consumed:
+> phase 13 closed its §6 ordering, and the rules it produced (channel hygiene in the
+> judge, the leak audit's fail-closed behaviour, the measurement rules, the terminal
+> fallbacks) are now pinned by tests. Read `docs/architecture.md` for the current
+> design, and `roadmap/history.md` for what each phase did.
+
 *Prepared 2026-09-19 against `465842c` (v0.12.1 + 23 registered references).
 Read-only: nothing in `src/`, `tests/`, or the data files was changed. Findings
 carry an evidence tag — **[X]** executed and observed, **[R]** read from the

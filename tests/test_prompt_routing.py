@@ -5,7 +5,7 @@ and that convention broke twice: the discussion branch died silently while long
 tests passed against the wrong fallback, and the reference branch shadowed the
 curator branch because both prompts happened to contain the same phrase. The
 deeper cost was that a *test fixture dictated product copy*: `TEACHER_SYSTEM` was
-forbidden from containing the words "tutor" or "discussion" (AGENTS.md rule 6),
+forbidden from containing the words "tutor" or "discussion" (AGENTS.md rule 8),
 and every prompt rewording risked re-routing a real call.
 
 The role is now an argument, so this file pins two things: each role reaches its

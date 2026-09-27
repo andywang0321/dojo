@@ -113,7 +113,7 @@ def synthetic_probe(monkeypatch):
 
     This is how a test may assert a complexity verdict at all: reading a class
     off wall-clock time is a test of the machine's load, not of the code
-    (AGENTS.md rule 5 — `tests/test_flow.py` failed 33% of the time at 6-way
+    (AGENTS.md rule 7 — `tests/test_flow.py` failed 33% of the time at 6-way
     concurrency exactly that way). Usage:
 
         synthetic_probe(lambda label, n: n)             # identical cost curves

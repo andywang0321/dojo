@@ -1,10 +1,70 @@
 # dojo
 
-An AI-guided interview-prep trainer for people who write production Python and know ML deeply, but never took a formal CS algorithms course. Every day, one command runs the whole loop: warm-up retrievals → a problem picked in roadmap order (the NeetCode 150 progression, prerequisites gated) → solve in your own editor with a tutor that never solves for you → an honest grader (isolated judge + empirical profiler + AI review) → reflection, all persisted. dojo is built on one conviction: **the tutor never solves the problem for you — it teaches you to recognize the pattern behind it.**
+A local practice engine, powered by AI, that turns "I want to learn X" into a daily
+habit that sticks.
+
+dojo is built on four claims:
+
+1. **Spaced repetition.** FSRS-4.5 over what you actually practised decides what
+   comes back, and when.
+2. **Evidence.** dojo produces the strongest honest evidence it can about what you
+   just did, says how strong that evidence is, and lets only that evidence move the
+   schedule. "Unresolved", "unjudged" and "not measurable here" are outcomes, not
+   failures — and nothing is ever claimed that the evidence does not support.
+3. **AI personalization.** A tutor that guides you and never solves for you, a
+   teacher for topics you have not met, a reviewer that critiques what you wrote.
+4. **AI curriculum generation.** You are not expected to be an expert in the thing
+   you are learning. Point dojo at a source you trust and it can help build the
+   curriculum — the outline, the exercises, the checks — and then tailor it to you.
+
+The result is a loop: you practise, dojo gathers evidence, the evidence moves the
+schedule, the schedule picks the next thing, and the agents adapt the curriculum
+around how you are actually doing.
+
+> **Status: this branch is the rebuild.** You are reading `v0.14-curricula`, where
+> dojo is being split into an **engine** (this repository) and **curricula**
+> (separate repositories you enroll). `main` still carries the working trainer with
+> the NeetCode 150 built in, and it is what to run today. Everything below describes
+> the engine as the split lands; see [`roadmap/v0.14.md`](roadmap/v0.14.md).
+
+## What you practise comes from a curriculum
+
+dojo itself is subject-agnostic: it schedules, asks, grades, measures, critiques and
+remembers. The subject arrives as a **curriculum** — a local, versioned bundle that
+declares its topics, its exercises, how a submission is checked, what is worth
+measuring, what a warm-up means, and what to call all of that on screen.
+
+Curricula are their own repositories, so anyone can write one (the way you would
+write a Neovim plugin):
+
+```bash
+dojo enroll github.com/<you>/dojo-curriculum-neetcode-150
+dojo enroll github.com/<you>/dojo-curriculum-jax
+dojo curricula                  # what is installed, what is enrolled
+dojo unenroll jax               # pause it; your history stays
+```
+
+The engine's vocabulary is **curriculum → topic → item → attempt → evidence →
+card**. Your curriculum supplies its own words for those — one calls them Patterns
+and Problems, another Modules and Labs — and dojo uses them on screen.
+
+**Enrolled in more than one?** dojo still starts with one command:
+
+```bash
+dojo
+# What would you like to study today?
+#   1. NeetCode 150
+#   2. JAX          [Enter = 2]
+```
+
+One keystroke, remembered until you change it. A bare `dojo` never asks twice, and
+`dojo history`, `dojo progress`, `dojo outline` and the like stay *global* — pulling
+up your history should not interrogate you about today's focus. The warm-up queue is
+global too: a card that is due is due, whichever curriculum it came from.
 
 ## Getting started
 
-You need Python ≥ 3.13, [uv](https://docs.astral.sh/uv/), and git. You run dojo from a checkout of this repo:
+You need Python ≥ 3.13, [uv](https://docs.astral.sh/uv/), and git.
 
 ```bash
 git clone <this-repo-url> dojo
@@ -14,91 +74,145 @@ uv run dojo
 
 That one command does everything on first run:
 
-1. **A one-time setup wizard** starts automatically. It looks for an API key you already have — DeepSeek, OpenAI or Anthropic, in your environment or a `.env` — and uses it with no prompt (otherwise you're asked, and Enter skips — more below). Then it asks your name, and finally offers to install a `dojo` command on your PATH.
-2. **The daily routine** begins right after: warm-ups (if any are due), then a problem.
+1. **A one-time setup wizard** looks for an API key you already have — DeepSeek,
+   OpenAI or Anthropic, in your environment or a `.env` — uses it with no prompt
+   (otherwise you are asked, and Enter skips), asks your name, and offers to install
+   a `dojo` command on your PATH.
+2. **It offers a curriculum to enroll in.** An engine with nothing to practise says
+   so and points at `dojo enroll`; it never pretends to have work for you.
+3. **The daily routine** begins: warm-ups if any are due, then the next item.
 
-After the wizard, every day is just:
+After that, every day is just:
 
 ```bash
 dojo                # the daily routine
 dojo learn          # prefer to study a topic first? (optional)
 ```
 
-The first `uv run dojo` builds the project environment (a minute or two); later runs are instant. If you decline the PATH install, start sessions with `uv run dojo` from the repo — or re-run `dojo setup` to install the command.
-
-**No API key?** The whole pipeline still works with canned AI: `DOJO_AI_BACKEND=mock uv run dojo`. The tutor/reviewer text is fake, everything else (judge, profiler, scheduler, persistence) is real.
+**No API key?** The whole pipeline runs with canned AI:
+`DOJO_AI_BACKEND=mock uv run dojo`. The tutor/reviewer text is fake; the judge, the
+measurement, the scheduler and the persistence are real.
 
 ## The daily loop
 
 ```bash
-dojo                        # the daily routine: warm-ups + a scheduler-picked problem
-dojo <slug>                 # that problem — with the warm-up queue *offered*, not assumed
-dojo warmup                 # due retrievals only
+dojo                        # the daily routine: warm-ups + the next item
+dojo <item>                 # that item — with the warm-up queue *offered*, not assumed
+dojo warmup                 # due retrievals only (--curriculum jax to narrow it)
 ```
 
-**When you name a problem, you get that problem.** `dojo two_sum` does not quietly serve three other slugs first: if warm-ups are due it asks — `You have 3 warm-ups due — do the first 2 now? [y/N]` — and either way your problem is next. Nothing is lost by answering no (the cards stay due, FSRS is unaffected), and `--skip-warmup` skips even the question. With no slug, bare `dojo` keeps starting the day with the warm-ups it always did.
+**When you name an item, you get that item.** `dojo two_sum` does not quietly serve
+three other things first: if warm-ups are due it asks — *You have 3 warm-ups due —
+do the first 2 now? [y/N]* — and either way your item is next. Answering no costs
+nothing (the cards stay due; FSRS is unaffected), and `--skip-warmup` skips even the
+question.
 
-Inside a session, the prompt shows the commands as **virtual text** right after your cursor — they vanish the moment you type: `open`, `check`, `learn`, `submit`, `quit`. Anything else you type is a question to the tutor — the `hint` command is gone; you just ask. **Submitting records an attempt; `quit` records nothing at all** — no row, no hints, no lapse. That is deliberate: glancing at a problem, poking at a feature, or changing your mind should not land in your history. A session that dies (crash, closed laptop) is resumed by running the same command again; the workbench state survives.
+Inside a session the prompt shows its commands as **virtual text** right after your
+cursor — they vanish the moment you type: `open`, `check`, `learn`, `submit`,
+`quit`. Anything else you type is a question to the tutor; the `hint` command is
+gone, you just ask. **Submitting records an attempt; `quit` records nothing at
+all** — no row, no hints, no lapse. Glancing at something, poking at a feature or
+changing your mind should not land in your history. A session that dies (crash,
+closed laptop) resumes by running the same command again; the state survives.
 
-After the review the training wheels come off: **`polish`** takes you *back to solving* — `open`, `check` and `submit` are yours again, but questions now go to the post-solve tutor (solutions allowed), which is what you want when you're chasing a better approach. Your next `submit` re-grades the edited code and adds a **version** to the attempt; **`done`** closes the session. Every version you submit is kept, so polishing is never destructive:
+After the review the training wheels come off: **`polish`** takes you *back to
+solving* — `open`, `check` and `submit` are yours again, but questions now go to the
+post-solve tutor (solutions allowed), which is what you want when you are chasing a
+better approach. Your next `submit` re-grades the edited work and adds a **version**
+to the attempt; **`done`** closes the session. Polishing is never destructive:
 
 ```bash
 dojo show 42 --revisions     # every version, with its own measurement and review
 dojo show 42 --diff          # what changed between the last two
 dojo show 42 --rev 1         # the original submission, as it was
-dojo show 42 --clean         # the code as the AI read it (dojo's scaffolding removed)
+dojo show 42 --clean         # the work as the AI read it (dojo's scaffolding removed)
 ```
 
-**The hint ladder** — each question advances one rung when you're stuck; a vague "stuck" forces rung 0 (articulating the blockage is metacognition). The tutor classifies your query: if you're *exploring* rather than blocked — asking conceptual questions, trade-offs, "is this interview-appropriate?" — it answers directly without advancing tiers. Every AI answer renders as **Markdown** in the terminal — headings, lists, and syntax-highlighted code blocks — under a dim title line (`tutor · tier 2 — pattern recognition`):
+**The hint ladder** — each question advances one rung when you are stuck; a vague
+"stuck" forces rung 0, because articulating the blockage is the metacognition. A
+curriculum declares what its rungs are allowed to say, and every rung is audited for
+leaks before you see it:
 
 | Tier | Name | What it may do |
 |------|------|----------------|
 | 0 | Articulate the blockage | Ask what you've tried and where exactly you're stuck |
 | 1 | Conceptual nudge | Point at a property or invariant, no names |
-| 2 | Pattern recognition | Name the problem family |
+| 2 | Pattern recognition | Name the family of technique |
 | 3 | Data structure / invariant | Name the tool and the invariant it maintains |
-| 4 | Edge cases | Point at input shapes the code must survive |
+| 4 | Edge cases | Point at input shapes the work must survive |
 | 5 | Skeleton (no code) | Outline the steps in words |
+
+Every AI answer renders as **Markdown** in the terminal — headings, lists,
+syntax-highlighted code — under a dim title line (`tutor · tier 2 — pattern
+recognition`).
 
 ## Learning mode
 
-`dojo learn [topic]` opens a conversation with the **teacher** — a different agent from the tutor. It opens with a short primer (the concept, why it exists, core operations with their complexity, one canonical example), then answers freely, Socratic-style, with ML/statistics analogies. `practice` hands off to the easiest unsolved problem in the topic; `done` ends the session.
+`dojo learn [topic]` opens a conversation with the **teacher**, a different agent
+from the tutor. It opens with a short primer (the concept, why it exists, core
+operations with their complexity, one canonical example), then answers freely,
+Socratic-style, with ML/statistics analogies. `practice` hands off to the easiest
+unsolved item in the topic; `done` ends the session.
 
-Inside a solve, `learn` **abandons** the in-progress attempt (nothing recorded) and opens the same conversation on the problem's pattern — accepting the handoff retries **the same problem** with a fresh blank template, so the graded solve stays honest. When the daily scheduler picks a problem from a pattern you've never studied or attempted, dojo offers to learn first — one keystroke declines, and the session proceeds either way.
+Inside a solve, `learn` **abandons** the in-progress attempt (nothing recorded) and
+opens the same conversation on the item's topic — accepting the handoff retries
+**the same item** with a fresh template, so the graded solve stays honest. When the
+scheduler picks an item from a topic you have never studied or attempted, dojo
+offers to learn first; one keystroke declines, and the session proceeds either way.
 
-The never-solve boundary narrows here, deliberately: the teacher's context is the topic and the conversation only — never a problem statement — so it may show topic-canonical code (implementing a heap is legitimate teaching). Grading oracles still never enter any agent's context.
+The never-solve boundary narrows here, deliberately: the teacher's context is the
+topic and the conversation only — never an item's statement — so it may show
+topic-canonical code (implementing a heap is legitimate teaching). Grading oracles
+never enter any agent's context, in any curriculum, ever.
 
 ## Everyday commands
 
 ```bash
-dojo list                   # the problem bank (✓ = curated, ready for the daily loop)
-dojo roadmap                # the progression tree: solved · next up · locked
-dojo learn [TOPIC]          # learning mode: a topic primer with a practice handoff
-dojo progress               # per-pattern proficiency, card schedule, score trends
-dojo history                # your attempts, oldest first (newest last);
-                            #   expected / measured are Time / Space, dated "3 days ago"
-dojo show <id>              # one attempt in full (hints, code, review; --code for code only)
-dojo fetch <slug>           # fetch a LeetCode problem and auto-curate it
-                             #   `dojo fetch --all` lands the whole roadmap without curating
-dojo user [<name>]          # switch the active user (numbered picker without a name)
+dojo list                   # everything enrolled, ✓ = ready for the daily loop
+dojo outline                # the progression tree: done · next up · locked
+dojo learn [TOPIC]          # learning mode: a primer with a practice handoff
+dojo progress               # per-topic proficiency, card schedule, score trends
+dojo history                # attempts, oldest first (newest last); --limit N
+dojo show <id>              # one attempt in full (--code, --clean, --revisions, --diff)
+dojo curricula              # installed + enrolled curricula, with their health
+dojo enroll <url|path>      # install and enroll a curriculum
+dojo user [<name>]          # switch the active user
 dojo setup                  # re-run the setup wizard (change key, reinstall PATH)
 ```
 
-## The progression
+## What dojo knows about what you did
 
-The daily pick follows the **NeetCode 150 roadmap** (`data/roadmap.toml`, vendored with provenance): 18 technique groups in prerequisite order, each an ordered problem ladder. The scheduler walks the groups top-down and serves the earliest unsolved ladder problem of the first group whose prerequisites are all complete — `dojo roadmap` draws the tree itself — groups as branches, each group's ladder as leaves (✓ solved · → next up · ○ ready · · not fetched), the next-up group expanded by default (`--expand <pattern>` / `--all` open more, `--table` restores the stats view). Problems fetched but not yet on the ladder, and dojo's own hand-written problems, are served after the ladder in the bank is done. Explicit `dojo <slug>` always bypasses the gate — deliberate choices are exempt.
+Every attempt carries **evidence**, and evidence has a kind and a strength:
 
-`dojo help` (or `-h`/`--help`) shows the same short guide in the terminal.
+| kind | what it establishes | how |
+|---|---|---|
+| **verified** | the work is correct | cases run against an oracle in an isolated subprocess |
+| **measured** | how it scales | a paired comparison against a reference — a ratio, never an absolute fit |
+| **judged** | how good it is | an AI review against the curriculum's rubric |
+| **self-reported** | what you say | your claimed complexity, your recall grade |
 
-**Power tools** — reachable, just not in the guide: `dojo day <slug>` (the alias for `dojo <slug>`), `dojo check [<slug>]` (visible tests against the active workbench), `dojo report [<slug>] [--note "…"] --fix` (AI-audit a problem's curation and re-curate it — normally reached from inside a session), `dojo curate --text "…"` (AI-curate a new problem from a pasted statement), `dojo --version`. Each documents itself via `dojo <command> --help`.
+dojo displays which one it has and never upgrades it silently. A judgment is
+*advisory*: it shapes the review you read, and it does not become a fact because a
+model said so. If a judgment would *gate* something — mark a unit complete, or let
+an interval grow — an independent audit pass has to agree, and disagreement is
+reported as unresolved rather than smoothed over.
 
-Something about a problem's *grading* looks wrong — the judge disagrees with your passing solution, the cases don't respect the stated constraints, a claim you made got flagged? Say so in a session: **`report <what you noticed>`** audits that problem's curation (a fresh curator pass cross-checked against the live one, then an audit agent hunting prompt-vs-judge contract violations) and prints the verdict. Your words go to the auditor, which must answer the claim — including telling you it's wrong. It is a side errand: whatever fails inside it, your session keeps going.
-
-**If your network drops mid-session, dojo says so and carries on.** No stack trace, no lost session: you get "I'm having trouble connecting to the AI backend — is the network connection ok?" and one line saying what didn't answer (the tutor, the review, the leak check). Nothing is recorded for the call that failed, your tier doesn't move, and `dojo check`, the judge, the profiler and the scheduler keep working offline — only the AI calls need the network. A stalled connection can't freeze the session either: each AI call gives up after its role's bound (60s interactive, 180s long-form) rather than the SDK's default ten minutes. A *rejected* call is still reported as itself, so a wrong API key or an exhausted quota never reads as bad wifi.
+**If your network drops mid-session, dojo says so and carries on.** You get
+"I'm having trouble connecting to the AI backend — is the network connection ok?"
+and one line saying what did not answer (the tutor, the review, the leak check).
+Nothing is recorded for the call that failed, your tier does not move, and `dojo
+check`, the judge, the measurement and the scheduler keep working offline. A stalled
+connection cannot freeze a session either: each AI call gives up after its role's
+bound (60s interactive, 180s long-form) instead of the SDK's default ten minutes. A
+*rejected* call is still reported as itself, so a wrong API key or an exhausted
+quota never reads as bad wifi. Work whose judgment could not run is recorded as
+**submitted, unjudged** — never blocked, never faked.
 
 ## Models
 
-dojo talks to DeepSeek by default and also speaks OpenAI and Anthropic. Pick one with `DOJO_AI_BACKEND` (or `DOJO_PROVIDER`), and let `dojo setup` detect whichever key you already have:
+dojo talks to DeepSeek by default and also speaks OpenAI and Anthropic. Pick one
+with `DOJO_AI_BACKEND` (or `DOJO_PROVIDER`), and let `dojo setup` detect whichever
+key you already have:
 
 ```bash
 export ANTHROPIC_API_KEY=...      # or OPENAI_API_KEY, or DEEPSEEK_API_KEY
@@ -106,30 +220,82 @@ uv run dojo setup --provider anthropic   # optional: pin the choice
 uv run dojo                              # runs on Claude from here
 ```
 
-Override the model globally with `DOJO_MODEL`, or per agent with `DOJO_MODEL_<ROLE>` — the roles are `TUTOR`, `DISCUSSION`, `TEACHER`, `REVIEWER`, `AUDITOR`, `CURATOR`, `CURATION_AUDITOR`, `REFERENCER`. The leak auditor runs on every hint, so it is deliberately cheap (128-token budget, temperature 0); pointing `DOJO_MODEL_AUDITOR` at a small fast model is the intended economy. `DOJO_AI_BACKEND=mock` still runs the entire pipeline offline with canned text.
+Override the model globally with `DOJO_MODEL`, or per agent with
+`DOJO_MODEL_<ROLE>` — the roles are `TUTOR`, `DISCUSSION`, `TEACHER`, `REVIEWER`,
+`AUDITOR`, `CURATOR`, `CURATION_AUDITOR`, `REFERENCER`. The leak auditor runs on
+every hint, so it is deliberately cheap (128-token budget, temperature 0); pointing
+`DOJO_MODEL_AUDITOR` at a small fast model is the intended economy.
 
-Every request is also **time-bounded**, because the SDKs are not: they default to a 600-second read timeout with two retries, which a connection that opens and never answers (captive portal, dropped VPN) turns into half an hour of a frozen terminal for one hint. The interactive roles — tutor, discussion, the leak audit — give up after 60 seconds (one retry); the long-form ones — review, teacher, curator, reference — after 180. Set `DOJO_TIMEOUT=<seconds>` to use one number for every role, e.g. for a slow reasoning model.
+Every request is also **time-bounded**, because the SDKs are not: they default to a
+600-second read timeout with two retries, which a connection that opens and never
+answers (captive portal, dropped VPN) turns into half an hour of a frozen terminal.
+The interactive roles give up after 60 seconds; the long-form ones after 180.
+`DOJO_TIMEOUT=<seconds>` overrides every role.
 
-Every attempt records which backend and model produced its review (`ai_provenance`), so a mock run can never be mistaken for a live one.
+Every attempt records which backend and model produced its review
+(`ai_provenance`), so a mock run can never be mistaken for a live one.
 
-## Honest caveats
+## Your workbench and debuggers
 
-- **The scale probe** runs your code at increasing sizes (n = 100 … 6,400) and does two things: it reports *failure at scale* — a crash or timeout on an input the judge never reaches, since the judge's cases top out at n ≈ 12 — and it compares your cost curve against the **reference solution's**, measured back-to-back on the same inputs. Comparing the two cancels every constant factor they share, which is why it can tell "grows like the intended solution" from "grows one class faster" when measuring your code alone could not (see docs/grading.md).
-- The probe needs a reference to say anything about growth: `dojo reference <slug>` (or `--all`) generates one and refuses to install it unless it agrees with the brute-force oracle everywhere the oracle can run. Without one you still get the scale test, and dojo says so rather than guessing.
-- **Warm-ups are per problem**: every problem you solve gets its own memory card, and a warm-up re-solves *that* problem from a blank template. Several can come due at once (`dojo warmup --limit N` drains more, and the session tells you what is left). Quitting a warm-up records nothing — mark a lapse yourself with grade 1.
-- `dojo fetch` / `dojo curate` need the API key (the curated oracle is AI-generated and gated by an automated verification suite).
-- The teacher has no grader behind it — it's instructed to be humble about uncertainty, but pedagogy is unverified by construction. If a definition feels off, double-check it elsewhere.
-- One computer, one user: dojo remembers you in a gitignored config; `dojo user` switches the rare exception.
+Sessions edit files in `~/.local/share/dojo/workbench/` — outside any repository, so
+editor and debugger tooling never collides with git. Every artifact starts with a
+shebang pointing at the interpreter the curriculum declares, ends with a fenced
+`if __name__ == "__main__"` block built from that item's own visible examples, and
+dojo generates self-contained IDE config *inside* the workbench folder — so **Run
+and Debug do something on every item**: Run prints one line per example
+(`case 1: ok  got=True want=True`), and Debug breaks inside your function on the
+same inputs. `dojo open` opens that folder in VSCode-family editors and Zed with the
+debugger already wired (VSCode: "dojo: debug the active workbench file" + F5; Zed:
+run `debugger: start` and pick the dojo profile). The examples block is dojo's, not
+yours: it is stripped from everything the AI reads, and the judge never runs it.
+`check` shows everything your work prints — prints are debugging statements, and the
+checking loop is the debugging loop.
+
+## Writing a curriculum
+
+A curriculum is a directory with a `curriculum.toml` and some Python:
+
+```
+my-curriculum/
+  curriculum.toml     # topics, items, policies, display words
+  items/              # what the student opens and submits
+  checks/             # the visible tests they can run
+  assessment/         # oracles, generators, references — never shown to any agent
+  measure/            # how this subject is measured (optional)
+```
+
+```bash
+dojo curriculum new my-subject     # scaffold from the engine's fixture
+dojo curriculum validate .         # every refusal, before you enroll anything
+dojo enroll .                      # try it locally
+```
+
+The whole format is documented in [`docs/curricula.md`](docs/curricula.md). The
+short version of what makes it honest: a curriculum declares what its evidence
+*means*, and the engine refuses to pretend otherwise. If your subject cannot be
+machine-graded, you say so and the items are judged or self-reported — clearly
+labelled, never dressed up as verification.
+
+And if you are learning the subject yourself, you do not have to author it from
+scratch: `dojo curriculum bootstrap <source>` is the fourth claim above, arriving
+in a later phase (`roadmap/next.md`).
 
 ## Development
 
 ```bash
 make sync      # install dojo into the project venv (uv sync)
-make test      # run the offline test suite (uv run pytest)
+make test      # the offline test suite (uv run pytest)
+make version   # write the version this commit will have into pyproject.toml
 ```
 
-**Updating:** every `dojo` run fast-forwards the repo and refreshes dependencies automatically (nothing is printed unless something changed). `dojo update` does it on demand; `dojo update --force` discards local changes. `DOJO_NO_AUTO_UPDATE=1` opts out.
+Two branches are live: `main` is the trainer people practise on every day, and
+`v0.14-curricula` is this rebuild. Read [`AGENTS.md`](AGENTS.md) §0 before you
+commit anything — the branch check is mandatory, not a formality.
 
-**Your workbench and debuggers:** sessions edit files in `~/.local/share/dojo/workbench/` — outside the repo, so editor/debugger tooling never collides with git. Every workbench file starts with a shebang pointing at dojo's venv, ends with a fenced `if __name__ == "__main__"` block built from that problem's visible examples, and dojo generates self-contained IDE config *inside* the workbench folder — so **Run and Debug do something on every problem**: pressing Run prints one line per example (`case 1: ok  got=True want=True`), and pressing Debug breaks inside your function on the same inputs. `dojo open` opens that folder in VSCode-family editors and Zed with the debugger already wired (VSCode: "dojo: debug the active workbench file" + F5; Zed: run `debugger: start` or F4 and pick the dojo profile). The block is dojo's, not yours: it's stripped from everything the AI reads, and the judge never runs it. `ipykernel` and `debugpy` ship in dojo's venv, so notebook kernels and the debug adapter are already present. `check` shows everything your code prints — prints are debugging statements, and the checking loop is the debugging loop.
+**Updating:** every `dojo` run fast-forwards the engine and refreshes dependencies
+automatically (nothing prints unless something changed). `dojo update` does it on
+demand, `dojo update --force` discards local changes, and `DOJO_NO_AUTO_UPDATE=1`
+opts out. Enrolled curricula update from their own sources.
 
-The bank seeds from `problems/**/*.py` on every run and follows the corpus in both directions: seeds are additive (your attempts are never reset), and a row whose problem file is gone *and* that nothing points at — no curation, no attempt, no warm-up card — is pruned, with the prune announced at startup. Every live AI exchange (prompts + raw responses) is appended to the gitignored debug log at `data/logs/dojo.log` for post-hoc debugging; it clears automatically when a **phase** completes — the version is `<major>.<phase>.<commit>` (major · phases completed · commits since the phase closed), and `pyproject.toml` carries the current one — `make version` keeps it in step with the git history, so a shell prompt reading that file shows the same number `dojo --version` does). Technical docs live in `docs/` (architecture, grading, retention, curation, development); delivered and planned stages live in `roadmap/`.
+Technical docs live in [`docs/`](docs/) — architecture, curricula, grading,
+retention, authoring, development — and the phase plan in [`roadmap/`](roadmap/).

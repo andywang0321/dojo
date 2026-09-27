@@ -8,7 +8,7 @@ can never grow unbounded — and the commits inside a phase accumulate without
 throwing the history away.
 
 Only the live backend logs: MockBackend never writes, so tests stay
-offline and deterministic (rule 5). Tests that exercise this module
+offline and deterministic (rule 7). Tests that exercise this module
 monkeypatch ``debuglog.LOG_PATH`` onto tmp paths.
 """
 

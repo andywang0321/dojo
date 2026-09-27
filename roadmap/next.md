@@ -1,283 +1,104 @@
 # next — backlog
 
-The v0.10 progression, the [v0.11](v0.11.md) correctness stage (attempt
-lifecycle, warm-up, retention) and the [v0.12](v0.12.md) measurement stage have
-shipped. The profiler is now a paired scale probe against a canonical reference,
-and its failures are findings rather than blanks.
+Phase 14 is in flight ([`v0.14.md`](v0.14.md)). What follows is what comes after it,
+in the order it should, plus what is deliberately parked. Items that belong to a
+*curriculum* rather than the engine (curating the remaining NeetCode ladder rungs,
+the JAX content itself) live in that curriculum's repository and appear here only
+where they constrain the engine.
 
-**2026-09-19 — a full audit of the v0.12 codebase landed in
-[docs/audit-v0.12.md](../docs/audit-v0.12.md).** It re-checked every finding
-below, added ~40 more (with reproduced evidence), and ordered the work in its §6.
-Two stages are planned from it: [v0.13](v0.13.md) (session continuity, the
-workbench file, providers — its Stage 0 is the trust subset) and
-[v0.14](v0.14.md) (curricula: JAX, then Rust). **Fuzzing with shrinking**,
-deferred from v0.12 to "v0.13", is deliberately *not* on that path: it stays
-here, below the stages, rather than blocking the curriculum work.
+## Phase 15 — evidence, then JAX
 
-## v0.11 audit findings (from the handoff code audit)
+The evidence *model* lands in phase 14 (the record, the kinds, the strength field);
+phase 15 makes it behavioural, then proves the format with a second curriculum.
 
-Ordered roughly by how much trust they cost. Items marked **→ v0.11** are
-being fixed in the current stage rather than deferred.
+**15.A — the evidence model, behavioural.**
 
-*Status after the v0.12 audit, updated when v0.13 Stage 0 shipped: items **1, 3,
-4, 5 and 7 are closed**, item 11 is **half-closed** (the CLI smoke tests exist;
-`_cmd_curate`/`_cmd_report`/`_cmd_reference`/`_cmd_update`/`_cmd_user` still have
-no direct test), and items 2 (the never-solve guard is still a five-string grep),
-6, 8, 9, 10, 12 and 13 remain open — 8/12/13 are content and provenance, handled
-in [v0.14](v0.14.md) Increment 1.*
+- Tiers in the display: `dojo progress`, `dojo history` and the session summary say
+  which kind of evidence a card or a class rests on, and `unverified` is a visible
+  state rather than a blank.
+- The gating rule: a judgment that marks a unit complete or lets an interval grow
+  requires an independent audit pass (the `Role.AUDITOR` precedent — the leak audit
+  and the curator's dual-oracle differential are the two existing examples). Audit
+  disagreement is recorded as `unresolved`, never smoothed into a pass.
+- Cost discipline: audits are for gates, never for advisory prose.
+- "Submitted, unjudged": an unreachable reviewer records the work, schedules from the
+  self-report, discloses the gap, and offers a re-review. An AI outage never blocks
+  the loop and never counts as a pass.
+- Conservative seeding for weak evidence, and the display that says so
+  (`docs/retention.md` §3).
+- A `dojo evidence <attempt-id>` view: every piece of evidence for one attempt, with
+  its source and its strength. (The debugging tool for the next time a verdict looks
+  wrong.)
 
-1. **The leak audit is fail-open.** `tutor._audit` returns `1` ("clean") when
-   the auditor returns non-JSON, omits `rating`, or returns a non-int — so a
-   tutor response containing a complete solution is **delivered** in all three
-   failure modes (verified by execution: a `two_sum` implementation reached the
-   student in 3/3 cases). Make the audit fail-closed with a visible signal, and
-   add one test per failure mode. Related: a discarded leak is already in
-   `data/logs/dojo.log` (`chat_json` logs the raw response *before* the discard
-   decision), so "discarded, never shown" is false with respect to the log.
-2. **The never-solve guard test is a token grep, not a boundary check.**
-   `tests/test_never_solve.py` greps five literal strings; it stays green if a
-   full solution is passed as the `statement` argument, if a new module name
-   appears (`dojo/solutions.py`), if `JUDGE_CASES`/`PROFILER_INPUTS` are used
-   (not in the list), or via a transitive import through `dojo.db`/`dojo.config`
-   (never scanned). Replace with an import-graph assertion plus a provenance
-   check on the tutor call site.
-3. **The judge's stdout channel is only half-isolated.** `isolated()` swaps
-   `sys.stdout` but not file descriptor 1: `os.write(1, …)`, `os.system`, or a
-   child process inherits into the protocol channel, corrupts the result JSON,
-   and `json.loads` then raises **out of `run_cases`** — killing the session.
-   Same bug class as the v0.10.1 print fix. Capture at the fd level.
-4. **Case-level errors are mislabeled.** `JudgeReport.status` is computed from
-   `n_passed` alone, so a case whose handler caught an exception reports
-   `wrong_answer`; the `error` status is unreachable for case errors.
-5. **No transport-error handling in the daily loop.** `cli.main` catches only
-   `KeyboardInterrupt`; ~11 AI call sites re-raise; `flow.py` has two `try`
-   blocks. One transient API/network failure ends a session with a traceback.
-   Degrade tutor/reviewer to "unavailable" and keep the loop alive; test with a
-   backend that raises.
-6. **The prereq gate degrades to "content exhausted."** `_prereqs_satisfied`
-   asks whether a prerequisite has an unsolved *curated* ladder problem left, so
-   an empty bank satisfies it trivially — 12 of 18 groups report OPEN with only
-   7 problems solved. Either gate on roadmap coverage with uncurated rows
-   counted, or document the degradation; today the status line promises
-   "prerequisites gated."
-7. **The curator prompt still enumerates the pre-v0.10 taxonomy.**
-   `CURATOR_SYSTEM` lists `dynamic_programming`, `math`, `graph` (9 old
-   patterns) while `curator.validate` enforces the 18 NeetCode slugs — so
-   `dojo curate` cannot curate any DP/Math/Geometry problem at all. `dojo fetch`
-   survives only because it passes a pattern hint. Fix the prompt's enum.
-8. **Mock and live reviews are indistinguishable in the learner model.**
-   Nothing records which backend produced a review; a `DOJO_AI_BACKEND=mock`
-   row sits in `attempts` next to live ones (attempt 2 in the live DB is canned
-   mock text, and it lacks `complexity_reasoning`/`reflection_feedback`). Add a
-   backend/model provenance column before any analysis of the model.
-9. **`duration_seconds` measures wall-clock since session start** (one sample:
-   84,773 s ≈ 23.5 h across a closed laptop) and is consumed by nothing. Either
-   measure real solve time or document it as a session span.
-10. **MockBackend keys canned branches on system-prompt substrings**, so a test
-    fixture constrains production prompt wording — `TEACHER_SYSTEM` is forbidden
-    from containing "tutor"/"discussion", and the discussion branch has already
-    silently died once. Replace with an explicit role argument on the backend
-    protocol, and delete the `or len(tutor) > 0` escape hatch at
-    `tests/test_flow.py:435` (it makes the assertion unfalsifiable).
-11. **The CLI command layer is untested.** 11 of 15 `_cmd_*` functions are never
-    invoked by the suite, and no test drives `main()` into a real `run_day`.
-    Add one `main(["day", slug])` smoke test plus tests for
-    `show`/`history`/`check`/`warmup`/`report --fix`.
-12. **Content, not code: 121 of 150 ladder problems are landed but uncurated**
-    (29 curated + ladder-tagged), so the ladder and the prereq gate operate over
-    a 29-problem subset. The "126 still to fetch" note is really "121 still to
-    curate."
-13. **`problems.source` is a dead column** — always `'seed'`, even for the 155
-    fetched/lc-numbered rows, so provenance is unrecoverable.
+**15.B — JAX, the first new curriculum.**
 
-## Reported: "no warm-up for days" (2026-09-21)
+- Hand-authored items for the first unit (tracing/JIT semantics): the curator is
+  unproven on transformation semantics, and the point of phase 15 is a curriculum
+  someone *trusts*, not one generated quickly.
+- **Its own measurement suite**, on the engine's framework: first-call compile time
+  in its own region, steady-state step time after `block_until_ready()`, device
+  memory or an explicit "not measurable on CPU", and a naive-but-correct baseline so
+  "jitted versus the same loop in Python" is a paired claim rather than a bare number.
+- Verdict vocabulary that says something pedagogical: `RETRACED`,
+  `HOST_ROUNDTRIP`, `PYTHON_LOOP_IN_TRACE`.
+- **Spike before API.** The mechanism for re-trace detection is unsettled (`jax.monitoring`
+  counters vs lowered-HLO identity). Half a day of throwaway experiment decides it;
+  no verdict ships whose mechanism is a heuristic dressed as a fact.
+- The curriculum's own repository documents what it measures, what it does not, and
+  what a warm-up means for it.
 
-A live session reported "tomorrow: 1 card(s) due" and then got no warm-up the next
-morning. Diagnosis: the card was created at 23:48 and due at 23:48 *the next
-evening* — the footer counted a rolling 24 h and called it "tomorrow", and a
-morning session never sees a card that comes due at night. Fixed: the status
-line, the footer and `dojo warmup` now name the actual next due moment
-(`scheduler.due_phrase` / `due_summary` / `due_hint`), and `dojo progress`'s "due
-now" column normalizes with `datetime()` like the scheduler does.
+## Phase 16 — AI curriculum generation (the fourth claim)
 
-**Decision (2026-09-21): keep exact instants, keep per-pattern cards.** The
-deeper mechanism is real — due instants inherit the *time of day* you practised,
-so a 23:48 session schedules a 23:48 warm-up and a morning session sees nothing —
-but the two candidate fixes were both declined in favour of the honest report:
-- *day-granular due dates* (Anki-style: due on day D means due from the start of
-  day D, with a "day starts at" hour) — declined; continuous-time FSRS stays.
-- *per-problem cards* (or several problems per due card) — declined; the pattern
-  stays the card unit (v0.11).
+- `dojo curriculum bootstrap <source>`: ingest (URL, local docs, a syllabus) →
+  propose a topic graph → author items through the curator pipeline → gate each item
+  → audit the whole against the source → hand over a candidate curriculum in a
+  directory.
+- Provenance per item: which source passage, which model, which gate result. Coverage
+  reported as *missing* where the outline skipped material.
+- A read-only spike is worth running during phase 15: propose an outline from a JAX
+  documentation page, with no format commitment, to learn what the prompt needs.
 
-What this means in practice: a warm-up can land in the evening when you practise
-in the morning, and the status line now tells you exactly when it will land
-instead of calling it "tomorrow". Two levers remain, both cheap if wanted later:
-an explicit opt-in to serve a card that is due later today (`dojo warmup --any`,
-which is *correct* FSRS — an early review simply grows stability less, because
-`(1 - R)` shrinks as R rises), and the recall grade, since grade 4 multiplies the
-grown stability by 2.61 — three of the four warm-ups in the live DB were graded
-"easy", which is most of why the intervals now read 23/34/50 days.
+## Personalization (after generation exists)
 
-## v0.13 Stage 0 — shipped (the trust subset)
+- **Placement probes**: a curriculum declares, per topic, a few items whose verified
+  outcome lets the outline skip what the student already knows. Skipped is recorded
+  as skipped, never as completed.
+- **Evidence-driven reordering**: topics whose cards keep lapsing are offered earlier.
+- **Just-in-time items**: hitting an unknown concept offers `learn`, then generates
+  the practice item that concept needs, gated like any other.
+- **Curriculum tuning as a text edit**: the manifest is the personalization surface —
+  difficulty ladder, warm-up policy, measurement axis, budgets — with
+  `dojo curriculum update` showing what changed.
 
-See [v0.13](v0.13.md) for the full record. In one line each: the leak audit fails
-**closed** (an unreadable rating discards the hint and says so); the judge
-captures file descriptor 1 and never raises (a malformed protocol is a verdict,
-not a traceback); output is bounded and process groups are killed
-(`dojo/proc.py`); a case that raised is `status="error"`, not `wrong_answer`; an
-empty case list is refused; every AI call runs behind `dojo.guard`; `dojo report
---fix` can no longer delete a row attempts reference; the warm-up grade is one
-transaction and cannot be applied twice; `dojo curate`'s prompt enum comes from
-the taxonomy it is validated against; `static.analyze` cannot raise and keeps its
-ruff cache out of the repo; the trend table counts solves as solves; templates
-that would not compile are refused loudly; the timing flake is gone (the probe's
-measurement is injected in tests, never its verdict); and the suite now drives
-`cli.main` end to end against a sandboxed DB and workbench.
+## Parked deliberately
 
-## Reported (2026-09-23) — duplicates, a report crash, and one version
+- **Rust, and any multi-file artifact.** The crate case (a tree, a build pipeline, a
+  diagnostics-shaped verdict, authored references because the curator cannot write
+  Rust) is documented as a gap in `docs/architecture.md` §12 rather than built.
+- **A compiled toolchain runner.** `run_cases(..., python=…)` covers an interpreter;
+  a compiler's failure mode needs a different verdict vocabulary.
+- **A public plugin API.** The format is v1-unstable until two curricula use it; a
+  deprecation policy for a seam nobody has tested twice is premature.
+- **Peer review as evidence.** Two students grading each other's design work is a
+  real evidence source for judged subjects; it needs a second user model and is
+  parked until someone enrols in a curriculum that wants it.
+- **Fuzzing with shrinking** for the judge (still the strongest remaining correctness
+  idea for executable items).
+- **Reviewer calibration**: reviewer scores against subsequent warm-up grades, per
+  topic — an audit loop for the *reviewer*, mirroring what `report` does for an
+  item's assessment. Unblocked by persisted recall grades.
+- **A TUI (Textual), a web UI, multi-machine sync.** The CLI loop is the product
+  until it is not; nothing in this phase's design blocks any of them.
+- **`problems.source` and other provenance gaps** from the v0.12 audit: a curriculum
+  manifest now carries provenance natively, so the old column's job is done by
+  design.
 
-Three live reports, each with a diagnosis that turned out to be the second one:
+## Carried over from the v0.12 audit
 
-1. **"Remove all duplicate problems, keep the better version."** Every
-   LeetCode-shaped slug existed twice: the fetcher's kebab-case row (dead — no
-   curation, no lc number, no attempt, no card) beside the corpus's snake_case row
-   (curated, tagged, sometimes solved). All 18 pairs resolved the same way, so the
-   curated twin survived and the 18 duplicate files are gone; three further rows
-   had lost their files altogether. `bank.prune_stale_problems` now deletes a
-   fileless, uncurated, unattempted, card-less row at startup (announced, never
-   silent) and hands its LeetCode number to the row that owns the problem — and
-   `dojo fetch --all` re-tags by slug, because its old "already in the bank" check
-   only asked whether the number existed *somewhere*, which is how LC 50/208/235
-   were skipped forever and left off the ladder. Live effect: 182 rows → 161 (one
-   per file), the ladder set unchanged, no orphan attempts or cards. **The
-   `two_sum` premise was checked and corrected:** neither statement mentions
-   sortedness, and the sorted variant is `two_sum_2` (LC 167), already curated with
-   its own card — the generator for LC 1 is right to produce unsorted arrays.
-2. **"Report crash."** The curator read the prompt's import rule ("may import
-   only: random, math, and the decorators") as an instruction to write
-   `from decorators import oracle`, and the resulting `ModuleNotFoundError` escaped
-   `audit_curation` as a traceback that killed the session. Fixed: the prompt says
-   that import is a hard error, `curator.sanitize_imports` repairs the shape and
-   reports what it stripped, `_exec_proposal` raises `CuratorError`, and `report`
-   runs behind `guard` (in both phases). A report can now carry the student's own
-   words — `report <text>` / `dojo report --note TEXT` — which the auditor must
-   address by name, including by disagreeing.
-3. **"Use `pyproject.toml` as the version source of truth."** Done and pinned:
-   `version.VERSION` reads it, `MAJOR_VERSION` derives the debug-log gate from it,
-   `dojo --version` reports it, and a test fails if any `src/` file hardcodes a
-   version literal — which is how `0.13.0`, `"0.10"` and `0.1.0` coexisted for two
-   stages.
-4. **"If the network is down, dojo crashes."** It didn't — v0.13's guards kept
-   every path alive (verified by driving every CLI entry with the socket layer
-   offline) — but it *looked* like it, twice over: the message was
-   `the tutor unavailable (APIConnectionError: Connection error.)`, and with a
-   connection that opens and never answers (captive portal, dropped VPN) a single
-   hint held the terminal for **>600 s** (measured), because the SDKs default to a
-   600 s read timeout with two retries. Fixed both: `guard.is_network_error`
-   classifies the whole cause chain and the student reads "I'm having trouble
-   connecting to the AI backend — is the network connection ok?" plus a dim line
-   naming what didn't answer (a 401/429/5xx or a dojo bug keeps its technical
-   line); every request carries its role's timeout (60 s interactive, 180 s
-   long-form, `DOJO_TIMEOUT` overrides) with one retry, so a stalled call gives up
-   in 121 s (measured). Decision (the user's): per-role bounds rather than one
-   global number.
-
-## Reported (2026-09-26) — a pre-gating slate, and the history table
-
-1. **"Remove my stack and heap entries — they predate progression gating."** 13
-   attempts across `valid_parentheses` (LC 20) and `k_closest_points` (LC 973),
-   their revision and their 2 warm-up cards, deleted in one transaction: both
-   problems count as never solved and the ladder's solved set drops LC 20 and
-   LC 973 (stack 1/7 → 0/7). Verified against the derivation rather than asserted —
-   `rebuild_item_cards` on the cleaned copy reproduces the remaining 15 cards
-   exactly, with no orphan revision rows.
-2. **`dojo history` reads chronologically** (oldest → newest, so the attempt you
-   just finished is the last line — the bottom of a long table is where the eye
-   ends); `--limit N` still selects the most recent N.
-3. **The `r²` column is gone from that table** — `measured_*_r2` has been NULL since
-   v0.12 dropped the fit behind it (audit S3.3), so every cell was an em dash.
-4. **`claimed` / `measured` / `submitted` → `expected` / `measured` / `submitted`**,
-   all three complexity cells formatted **Time / Space**. `expected` is the
-   problem's own target complexity (from its "You should aim for…" line),
-   `measured` is the paired probe's verdict, and `submitted` is
-   `scheduler.ago_phrase` — "3 days ago" rather than a timestamp nobody counts
-   backwards from. The student's claimed answers *and their justifications* left
-   the list view (one cell wrapped over four rows); `dojo show <id>` still has
-   them.
-
-## Reported (2026-09-26) — `dojo <slug>` served unrelated problems
-
-`dojo two_sum` opened with two or three warm-ups for *other* problems before
-reaching the one that was asked for. It now offers them: `You have 3 warm-ups
-due — do the first 2 now? [y/N]` — the count due and the count this session will
-run, so "yes" is not a promise of five. "No" costs nothing (the cards stay due; a
-skipped warm-up is not a lapse), `--skip-warmup` skips the question, input that
-ends is treated as "no", and bare `dojo` still starts with the warm-ups unasked.
-
-## Reported (2026-09-26) — `<major>.<phase>.<commit>` versioning
-
-`pyproject.toml` holds the base (`<major>.<phase>.0`); the third component is the
-commit distance from the tag that closed the phase, so `dojo --version` reads
-`0.13.6` and moves on its own with every commit. Completing a phase = bump the
-base **and** `git tag v<major>.<phase>.0` on that commit (v0.13's marker is
-`v0.13.0`). `pyproject.toml` carries the **current** version and `make version`
-keeps it in step on every commit (the suite fails otherwise), because a shell
-prompt reads that file for a glanceable version — `PHASE_VERSION` (major.phase)
-still gates debug-log retention. AGENTS rule 9 is the contract;
-`tests/test_version.py` re-counts the distance in git instead of trusting it.
-
-## v0.11 work — shipped
-
-- Warm-up picks rotate (per-problem `MAX(submitted_at)` aggregation).
-- The recall grade is persisted (`attempts.recall_grade`); per-pattern recall
-  curves are now reconstructible, which unblocks item 5 below.
-- The profiler measures time with no tracer running, reports the range it can
-  support, and no longer flags a claim it cannot rule out (8/15 false flags →
-  0/15 on the stored solutions).
-- Multi-parameter complexity claims are compared, not silently skipped.
-- `quit` records nothing: an attempt row exists iff the student submitted.
-
-## Proposals from the v0.8 design audit
-
-1. **Judge ground-truth anchor + false-failure banner.** For LeetCode-fetched
-   problems, validate the AI oracle against LeetCode's own judge once at
-   curation time and store the verdict in the proposal provenance (dual-oracle
-   agreement stays, but as a filter before the real check). In `_submit`, a
-   distinct message when a submission fails only generated/oracle cases (visible
-   cases pass) — "this could be a curation bug — `dojo report` audits it" —
-   instead of a plain ✗. Converts the worst failure mode from silent trust loss
-   into a visible, fixable event.
-2. **Warm-up rotation floor.** → superseded by the v0.11 rotation fix (the
-   rotation never happened at all); only the *variant* idea below remains.
-3. **Streak + reminder.** Status line shows consecutive practice days; the setup
-   wizard offers a daily cron/launchd entry with the same consent UX as the PATH
-   wrapper. The actual adoption risk is the habit, not the loop's interior.
-4. **Consolidate `profile` into `history`** (near-duplicate commands; keep
-   `progress` for patterns, `show <id>` for detail) and hold the session command
-   list ≤7. ✅ shipped in v0.9 — `profile` is now a hidden alias of `history`.
-5. **Reviewer calibration in `dojo progress`.** Reviewer scores vs. subsequent
-   warm-up grades per pattern, plus hint-count correlation — an audit loop for
-   the *reviewer*, mirroring what `report` does for the *curator*. Unblocked by
-   the v0.11 grade-persistence fix.
-6. **Learner-model steering.** Stall detection (tier at abandon, hint counts)
-   feeding problem selection and the proactive learn offer. Note the current
-   offer fires only on `unstudied(pattern)` — a pattern you have *attempted and
-   failed* is "studied" by definition, so the offer is structurally blind to the
-   strongest signal. Trigger on repeated abandonment instead.
-7. **Write-up.** The never-solve-as-architecture idea, the honesty contract, and
-   the grader self-audit loop are worth a public write-up; the design docs are
-   the second-most-valuable artifact.
-8. **Terminal rendering polish.** ✅ shipped in v0.10.3 (the markdown flip).
-
-## Backlog (unchanged)
-
-- **`dojo forget <slug>` (or `dojo history --delete <id>`)**: 2026-09-26's cleanup
-  needed a hand-written script, because nothing in dojo can remove an attempt.
-  Deleting history is exactly the kind of thing that should be explicit, previewed
-  ("this drops LC 20 from the ladder and 1 card"), and reversible in the same
-  breath — the shape `bank.prune_stale_problems` already uses. Wanted the first
-  time it is asked for twice.
-- TUI polish (Textual) — only if the CLI loop proves insufficient.
-- Two-machine sync.
-- Warm-up problem variants (transfer, not recognition — see docs/retention.md).
-- A web UI — only if the CLI proves insufficient, never first.
+[`docs/audit-v0.12.md`](../docs/audit-v0.12.md) remains the catalogue of engine-quality
+findings, and it was written against the pre-split code. Its §4 coupling inventory is
+what phase 14 acts on; its §6 ordering was consumed by phase 13. The findings that
+survive the split unchanged — the judge's channel hygiene, the leak audit's
+fail-closed behaviour, the measurement rules, the terminal fallbacks — are now pinned
+by tests rather than by backlog items. Two are still open and land with phase 15:
+reviewer calibration, and fuzzing with shrinking.

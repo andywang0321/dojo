@@ -133,7 +133,7 @@ def build_curator_prompt(statement: str, hints: dict | None = None) -> str:
 # MockBackend keys its canned reference on the phrase "canonical reference" in
 # this prompt (backend.py); no other system prompt contains it. Rewording the
 # first line breaks that branch silently — keep the phrase, or update the mock
-# and tests/test_prompt_routing.py in the same commit (rule 6).
+# and tests/test_prompt_routing.py in the same commit (rule 8).
 REFERENCE_SYSTEM = """\
 You are writing ONE artifact: the canonical reference solution to an interview
 problem you are given. dojo already has a brute-force oracle for correctness; what it lacks

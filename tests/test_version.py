@@ -132,7 +132,7 @@ def test_a_missing_git_binary_is_not_an_error():
 def test_pyproject_is_kept_in_step_with_the_history():
     """`pyproject.toml` is what a shell prompt and a packaging tool read, so it
     carries the *current* version rather than a phase base — `make version` writes
-    it as part of every commit (AGENTS rule 9).
+    it as part of every commit (AGENTS rule 10).
 
     Two values are legal, because the check also runs before the commit exists:
     the version of HEAD (already committed, `VERSION`), or the version that commit

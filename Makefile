@@ -4,7 +4,7 @@ UV = UV_CACHE_DIR=$(CURDIR)/.uv-cache uv
 
 .PHONY: sync test seed demo day version
 
-#: Keep pyproject.toml's version in step with the git history (rule 9 in
+#: Keep pyproject.toml's version in step with the git history (rule 10 in
 #: AGENTS.md): writes the version the *next commit* will have. Run it as part of
 #: preparing any commit; `tests/test_version.py` fails when the file drifts.
 version: ## write the version this commit will have into pyproject.toml

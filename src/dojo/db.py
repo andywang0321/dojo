@@ -218,7 +218,7 @@ def _addable_columns(body: str) -> dict[str, str]:
 
 def migrate(conn: sqlite3.Connection) -> None:
     """Bring the database up to `SCHEMA`: create what is missing, add what is
-    new, and never remove or retype anything (AGENTS.md rule 4 — user data is
+    new, and never remove or retype anything (AGENTS.md rule 6 — user data is
     real).
 
     **Reconciliation, not a hand-kept list (v0.13).** The old version added one
