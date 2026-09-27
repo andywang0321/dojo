@@ -23,4 +23,7 @@ trie.search("app");     // return True
 Constraints:
 * 1 <= word.length, prefix.length <= 2000
 * word and prefix consist only of lowercase English letters.
-* At most 3 * 10^4 calls in total will be made to insert, search, and startsWith."""
+* At most 3 * 10^4 calls in total will be made to insert, search, and startsWith.
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the length of the word or prefix for a single call: insert, search and startsWith each walk their key one character at a time, and the trie itself holds one node per distinct prefix, so O(total inserted characters) nodes over the life of the structure.
+"""

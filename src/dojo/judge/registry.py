@@ -1720,6 +1720,289 @@ def _permutation_in_string_profiler(n: int, rng: random.Random) -> list:
     s1 = ("ab" * (width // 2 + 1))[:width]
     s2 = ("abc" * (rest // 3 + 1))[:rest]
     return [s1, s2]
+
+# ----------------------------------------------------------------------- tries
+
+
+@oracle("implement-trie-prefix-tree")
+def _implement_trie_prefix_tree_oracle(ops: list[list]) -> list:
+    # Brute force: keep the inserted words in a list and answer every query by
+    # scanning it — membership for search, a startswith scan for startsWith.
+    # O(N * L) a query, which is exactly what the trie exists to avoid.
+    words: list[str] = []
+    out: list = []
+    for op in ops:
+        method, *args = op
+        if method == "insert":
+            words.append(args[0])
+            out.append(None)
+        elif method == "search":
+            out.append(args[0] in words)
+        elif method == "startsWith":
+            out.append(any(word.startswith(args[0]) for word in words))
+        else:  # pragma: no cover - the generator only emits the three methods
+            raise ValueError(f"unknown op {method}")
+    return out
+
+
+@judge_case("implement-trie-prefix-tree")
+def _implement_trie_prefix_tree_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
+    # Deterministic by construction: every op comes from the seeded rng, the
+    # alphabet and the length range are fixed, and the op list replays on a fresh
+    # instance (the judge harness builds one per case).
+    steps = 2 * max(1, min(n, 12)) + 1
+    alphabet = "ab"  # two letters: prefixes collide in almost every call
+    ops: list[list] = []
+    inserted: list[str] = []
+    for step in range(steps):
+        if not inserted or step % 3 == 0:
+            # 1 <= word.length <= 2000, lowercase only: 1..4 letters of "ab"
+            word = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 4)))
+            ops.append(["insert", word])
+            if word not in inserted:
+                inserted.append(word)
+            continue
+        word = rng.choice(inserted)
+        cut = rng.randint(1, len(word))  # a real prefix, sometimes the word itself
+        roll = rng.randint(0, 3)
+        if roll == 0:
+            ops.append(["search", word])  # a hit
+        elif roll == 1:
+            ops.append(["search", word + rng.choice(alphabet)])  # a miss
+        elif roll == 2:
+            ops.append(["startsWith", word[:cut]])  # a hit (the empty prefix is
+            # not reachable here: cut >= 1)
+        else:
+            # a real prefix asked as a whole word: true exactly when that prefix
+            # was itself inserted earlier, which is what makes search and
+            # startsWith differ
+            ops.append(["search", word[:cut]])
+    return [], _implement_trie_prefix_tree_oracle(ops), {"ops": ops}
+
+
+@oracle("design-add-and-search-words-data-structure")
+def _design_add_and_search_words_data_structure_oracle(ops: list[list]) -> list:
+    # Brute force: keep every added word and, for a query, compare it against them
+    # one at a time — a plain membership test when the pattern has no dot, a
+    # per-character match when it has one. O(N * L) a query, no trie, no prefix
+    # pruning: the differential against the reference is real.
+    words: list[str] = []
+    out: list = []
+    for op in ops:
+        method, *args = op
+        if method == "addWord":
+            words.append(args[0])
+            out.append(None)
+        elif method == "search":
+            pattern = args[0]
+            hit = False
+            for word in words:
+                if len(word) != len(pattern):
+                    continue
+                if all(p == "." or p == ch for p, ch in zip(pattern, word)):
+                    hit = True
+                    break
+            out.append(hit)
+        else:  # pragma: no cover - the generator only emits addWord and search
+            raise ValueError(f"unknown op {method}")
+    return out
+
+
+@judge_case("design-add-and-search-words-data-structure")
+def _design_add_and_search_words_data_structure_case(
+    n: int, rng: random.Random
+) -> tuple[list, list, dict]:
+    # Deterministic by construction: every op comes from the seeded rng, the
+    # alphabet and length range are fixed, and the op list replays on a fresh
+    # instance (the judge harness builds one per case).
+    steps = 2 * max(1, min(n, 12)) + 1
+    alphabet = "ab"  # two letters: words overlap and prefix each other constantly
+    ops: list[list] = []
+    added: list[str] = []
+    patterns = 0  # cycles the dot through first, last and middle position
+    for step in range(steps):
+        if not added or step % 3 == 0:
+            # 1 <= word.length <= 25, lowercase only: 1..4 letters of "ab"
+            word = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 4)))
+            ops.append(["addWord", word])
+            if word not in added:
+                added.append(word)
+            continue
+        base = rng.choice(added)  # 1..4 letters, already in the dictionary
+        roll = rng.randint(0, 3)
+        if roll == 0:
+            ops.append(["search", base])  # a hit
+        elif roll == 1:
+            # ONE dot, placed at the first, the last and the middle position in
+            # turn: the statement's only worked example puts it in the middle
+            # (".ad"), so a generator that never tried the ends would leave "a dot
+            # matches any single letter" half-pinned.
+            pos = (0, len(base) - 1, len(base) // 2)[patterns % 3]
+            patterns += 1
+            ops.append(["search", base[:pos] + "." + base[pos + 1:]])
+        elif roll == 2 and len(base) >= 2:
+            # TWO dots — the statement's own maximum per query. The two ends when
+            # the word has a middle to spare, a random distinct pair otherwise.
+            if len(base) >= 3 and patterns % 2:
+                i, j = 0, len(base) - 1
+            else:
+                i, j = sorted(rng.sample(range(len(base)), 2))
+            patterns += 1
+            chars = list(base)
+            chars[i] = chars[j] = "."
+            ops.append(["search", "".join(chars)])
+        else:
+            # a length the dictionary cannot hold: one letter longer, or one
+            # shorter (never empty — the statement's floor is length 1)
+            if len(base) >= 2 and rng.random() < 0.5:
+                ops.append(["search", base[:-1]])
+            else:
+                ops.append(["search", base + rng.choice(alphabet)])
+    return [], _design_add_and_search_words_data_structure_oracle(ops), {"ops": ops}
+
+
+@oracle("word-search-ii")
+def _word_search_ii_oracle(board: list[list[str]], words: list[str]) -> list[str]:
+    # Brute force, and deliberately not a trie: for each word, walk the board once
+    # looking for it — a DFS from every cell whose letter starts the word, with a
+    # visited set that is undone on the way out (the statement forbids reusing a
+    # cell within a word). No sharing between words at all. The result is sorted,
+    # which is the canonical form of a set answer (the corpus convention for
+    # "compare": "sorted"), so the visible tests can carry the statement's own
+    # example output verbatim.
+    rows = len(board)
+    cols = len(board[0]) if rows else 0
+    found: list[str] = []
+
+    def _word_search_ii_here(word: str) -> bool:
+        last = len(word) - 1
+        visited = [[False] * cols for _ in range(rows)]
+
+        def _word_search_ii_step(r: int, c: int, k: int) -> bool:
+            if board[r][c] != word[k]:
+                return False
+            if k == last:
+                return True
+            visited[r][c] = True
+            hit = any(
+                _word_search_ii_step(nr, nc, k + 1)
+                for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1))
+                if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc]
+            )
+            visited[r][c] = False
+            return hit
+
+        return any(
+            _word_search_ii_step(r, c, 0) for r in range(rows) for c in range(cols)
+        )
+
+    for word in dict.fromkeys(words):  # the statement promises unique words
+        if word and len(word) <= rows * cols and _word_search_ii_here(word):
+            found.append(word)
+    return sorted(found)
+
+
+@judge_case("word-search-ii")
+def _word_search_ii_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
+    # Deterministic by construction: the board, the words and the paths they are
+    # spelled along all come from the seeded rng, and the expected answer is the
+    # oracle's own output. The board is 1..4 cells a side and a word 1..4 letters
+    # — well inside the statement's 12 x 12 and 10 (a case has to stay small
+    # enough for the brute-force oracle), and every word is unique.
+    n = max(1, min(n, 12))
+    side = 1 + n % 4  # 1 <= board.length, board[0].length <= 12
+    letters = "abc"  # a small alphabet, so words do overlap real board paths
+    board = [[rng.choice(letters) for _ in range(side)] for _ in range(side)]
+
+    def _word_search_ii_spelled(length: int) -> str:
+        # A self-avoiding walk of `length` cells spelled out: a string that really
+        # is on the board, which is how a present word (and a long shared prefix)
+        # gets built rather than hoped for.
+        r, c = rng.randrange(side), rng.randrange(side)
+        seen = {(r, c)}
+        out = [board[r][c]]
+        while len(out) < length:
+            options = [
+                (nr, nc)
+                for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1))
+                if 0 <= nr < side and 0 <= nc < side and (nr, nc) not in seen
+            ]
+            if not options:
+                break  # cornered early: a shorter word is still a real path
+            r, c = rng.choice(options)
+            seen.add((r, c))
+            out.append(board[r][c])
+        return "".join(out)
+
+    words: list[str] = []
+    for _ in range(1 + n % 3):
+        words.append(_word_search_ii_spelled(rng.randint(1, 4)))  # usually present
+    for _ in range(1 + n % 3):
+        words.append(  # 1 <= length <= 10, lowercase only
+            "".join(rng.choice(letters) for _ in range(rng.randint(1, 4)))
+        )
+    words = list(dict.fromkeys(words))  # "All the strings of words are unique"
+    return (
+        [board, words],
+        _word_search_ii_oracle(board, words),
+        {"compare": "sorted"},  # the answer is a set: only its order is free
+    )
+
+
+@profiler_input("word-search-ii")
+def _word_search_ii_profiler(n: int, rng: random.Random) -> list:
+    # Board + words of total size ~n, both dimensions exercised: the board takes a
+    # quarter of the budget and grows with n up to the statement's own 12 x 12 cap
+    # (144 cells), and the word list takes everything left over, so the input keeps
+    # growing after the grid has saturated.
+    #
+    # The words are built to make both a trie walk and a per-word board search do
+    # their full work instead of returning early: seven in eight are a REAL board
+    # path one letter short plus a reserved letter ('z' never occurs on the board),
+    # so the word is absent — a per-word search has to exhaust the board before it
+    # can answer false — while its entire prefix is genuinely present, so neither
+    # implementation dies on the first letter. The eighth is a real path (present),
+    # which keeps the answer non-empty so the two outputs are actually compared.
+    # Values stay inside the statement's ranges: lowercase letters, board 1..12 a
+    # side, words 1..10 letters and unique.
+    n = max(1, int(n))
+    side = max(1, min(12, int((n // 4) ** 0.5)))  # int sqrt: registry.py imports only random
+    letters = "abcd"  # four letters: the walk's branching stays real but tractable
+    board = [[rng.choice(letters) for _ in range(side)] for _ in range(side)]
+    cells = side * side
+    longest = max(1, min(10, cells))  # a word cannot be longer than the board
+
+    def _word_search_ii_path(length: int) -> str:
+        r, c = rng.randrange(side), rng.randrange(side)
+        seen = {(r, c)}
+        out = [board[r][c]]
+        while len(out) < length:
+            options = [
+                (nr, nc)
+                for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1))
+                if 0 <= nr < side and 0 <= nc < side and (nr, nc) not in seen
+            ]
+            if not options:
+                break
+            r, c = rng.choice(options)
+            seen.add((r, c))
+            out.append(board[r][c])
+        return "".join(out)
+
+    average = (longest + 1) // 2 + 1  # 1..longest, plus the reserved letter
+    count = max(1, max(1, n - cells) // average)
+    words: list[str] = []
+    for i in range(count):
+        length = 1 + i % longest
+        if i % 8 == 0:
+            words.append(_word_search_ii_path(length))
+        elif length == 1:
+            words.append("z")
+        else:
+            words.append(_word_search_ii_path(length - 1) + "z")
+    return [board, list(dict.fromkeys(words))]
+
+
 # ------------------------------------------------- canonical references (v0.12)
 #
 # The probe's performance baseline, and the large-input comparator. Each entry
@@ -2454,3 +2737,150 @@ def _time_based_key_value_store_reference(ops: list[list]) -> list:
         else:  # pragma: no cover - the generator only emits set and get
             raise ValueError(f"unknown op {method}")
     return out
+
+
+# --- canonical reference (design-add-and-search-words-data-structure) ---
+
+@reference("design-add-and-search-words-data-structure")
+def _design_add_and_search_words_data_structure_reference(ops: list[list]) -> list:
+    """Canonical WordDictionary, driven through the same op list the oracle takes:
+    one dict per node (a None key marks the end of an added word), and a search
+    that descends the trie letter by letter, branching into every child when it
+    meets a '.' — at most two per query by the statement's own constraint, so the
+    walk stays linear in the word length up to a 26^2 constant."""
+
+    def _design_add_and_search_words_data_structure_matches(
+        node: dict, word: str, i: int
+    ) -> bool:
+        if i == len(word):
+            return None in node
+        ch = word[i]
+        if ch == ".":
+            return any(
+                _design_add_and_search_words_data_structure_matches(child, word, i + 1)
+                for key, child in node.items()
+                if key is not None
+            )
+        child = node.get(ch)
+        return child is not None and _design_add_and_search_words_data_structure_matches(
+            child, word, i + 1
+        )
+
+    root: dict = {}
+    out: list = []
+    for op in ops:
+        method, *args = op
+        if method == "addWord":
+            node = root
+            for ch in args[0]:
+                nxt = node.get(ch)
+                if nxt is None:
+                    nxt = {}
+                    node[ch] = nxt
+                node = nxt
+            node[None] = True
+            out.append(None)
+        elif method == "search":
+            out.append(
+                _design_add_and_search_words_data_structure_matches(root, args[0], 0)
+            )
+        else:  # pragma: no cover - the generator only emits addWord and search
+            raise ValueError(f"unknown op {method}")
+    return out
+
+
+# --- canonical reference (implement-trie-prefix-tree) ---
+
+@reference("implement-trie-prefix-tree")
+def _implement_trie_prefix_tree_reference(ops: list[list]) -> list:
+    """Canonical trie, driven through the same op list the oracle takes: one dict
+    per node mapping a character to its child, plus a None key marking "a word
+    ends here" — which is the whole difference between search and startsWith.
+    Each call walks its word once (O(len(word)) time), and the structure holds one
+    node per distinct prefix (O(total inserted characters) space)."""
+    root: dict = {}
+    out: list = []
+    for op in ops:
+        method, *args = op
+        word = args[0]
+        if method == "insert":
+            node = root
+            for ch in word:
+                nxt = node.get(ch)
+                if nxt is None:
+                    nxt = {}
+                    node[ch] = nxt
+                node = nxt
+            node[None] = True  # a word ends at this node
+            out.append(None)
+        elif method == "search":
+            node = root
+            for ch in word:
+                node = node.get(ch)
+                if node is None:
+                    break
+            out.append(node is not None and None in node)
+        elif method == "startsWith":
+            node = root
+            for ch in word:
+                node = node.get(ch)
+                if node is None:
+                    break
+            out.append(node is not None)
+        else:  # pragma: no cover - the generator only emits the three methods
+            raise ValueError(f"unknown op {method}")
+    return out
+
+
+# --- canonical reference (word-search-ii) ---
+
+@reference("word-search-ii")
+def _word_search_ii_reference(board: list[list[str]], words: list[str]) -> list[str]:
+    """Canonical trie + backtracking: build ONE trie over every word, then walk the
+    board once following trie edges, so a path that no word prefixes is never
+    explored and the board is not re-walked per word the way a brute-force search
+    re-walks it. A word is unlinked from the trie the moment it is found (and an
+    empty branch is pruned from its parent), which keeps the result free of
+    duplicates and stops the walk from descending into a branch that can no longer
+    match anything.
+
+    The words come back in discovery order, not sorted: the case's own
+    "compare": "sorted" tag is what makes any order legal, and the probe's
+    scale_compare is set to "sorted" for the same reason."""
+    root: dict = {}
+    for word in words:
+        node = root
+        for ch in word:
+            nxt = node.get(ch)
+            if nxt is None:
+                nxt = {}
+                node[ch] = nxt
+            node = nxt
+        node[None] = word  # the word-end marker carries the word itself
+
+    rows = len(board)
+    cols = len(board[0]) if rows else 0
+    found: list[str] = []
+    visited: set[tuple[int, int]] = set()
+
+    def _word_search_ii_walk(r: int, c: int, node: dict) -> None:
+        ch = board[r][c]
+        nxt = node.get(ch)
+        if nxt is None:
+            return  # no remaining word has this prefix
+        word = nxt.pop(None, None)
+        if word is not None:
+            found.append(word)  # unlinked: a second occurrence cannot re-add it
+        if nxt:  # something is still reachable through this node: descend
+            visited.add((r, c))
+            for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+                if 0 <= nr < rows and 0 <= nc < cols and (nr, nc) not in visited:
+                    _word_search_ii_walk(nr, nc, nxt)
+            visited.discard((r, c))
+        else:  # nothing left below: prune the edge so the walk stops paying for it
+            node.pop(ch, None)
+
+    for r in range(rows):
+        for c in range(cols):
+            _word_search_ii_walk(r, c, root)
+    return found

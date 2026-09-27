@@ -25,4 +25,7 @@ Constraints:
 * word in addWord consists of lowercase English letters.
 * word in search consist of '.' or lowercase English letters.
 * There will be at most 2 dots in word for search queries.
-* At most 10^4 calls will be made to addWord and search."""
+* At most 10^4 calls will be made to addWord and search.
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the length of the word for a single addWord or search call: addWord walks its word once, search walks it once too and branches only at a '.', which the statement limits to two per query, and the structure holds one node per distinct prefix over every word added.
+"""

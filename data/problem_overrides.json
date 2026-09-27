@@ -2788,5 +2788,398 @@
       }
     ],
     "lc_number": 981
+  },
+  "implement-trie-prefix-tree": {
+    "function_name": "Trie",
+    "signature": {
+      "methods": {
+        "insert": "(self, word: str) -> None",
+        "search": "(self, word: str) -> bool",
+        "startsWith": "(self, prefix: str) -> bool"
+      }
+    },
+    "visible_tests": [
+      {
+        "ops": [
+          [
+            "insert",
+            "apple"
+          ],
+          [
+            "search",
+            "apple"
+          ],
+          [
+            "search",
+            "app"
+          ],
+          [
+            "startsWith",
+            "app"
+          ],
+          [
+            "insert",
+            "app"
+          ],
+          [
+            "search",
+            "app"
+          ]
+        ],
+        "expected": [
+          null,
+          true,
+          false,
+          true,
+          null,
+          true
+        ]
+      },
+      {
+        "ops": [
+          [
+            "search",
+            "a"
+          ],
+          [
+            "startsWith",
+            "a"
+          ],
+          [
+            "insert",
+            "a"
+          ],
+          [
+            "search",
+            "a"
+          ],
+          [
+            "startsWith",
+            "ab"
+          ],
+          [
+            "search",
+            "ab"
+          ]
+        ],
+        "expected": [
+          false,
+          false,
+          null,
+          true,
+          false,
+          false
+        ]
+      },
+      {
+        "ops": [
+          [
+            "insert",
+            "app"
+          ],
+          [
+            "search",
+            "app"
+          ],
+          [
+            "insert",
+            "apple"
+          ],
+          [
+            "search",
+            "app"
+          ],
+          [
+            "search",
+            "apple"
+          ],
+          [
+            "search",
+            "appl"
+          ],
+          [
+            "startsWith",
+            "appl"
+          ]
+        ],
+        "expected": [
+          null,
+          true,
+          null,
+          true,
+          true,
+          false,
+          true
+        ]
+      }
+    ],
+    "lc_number": 208
+  },
+  "design-add-and-search-words-data-structure": {
+    "function_name": "WordDictionary",
+    "signature": {
+      "methods": {
+        "addWord": "(self, word: str) -> None",
+        "search": "(self, word: str) -> bool"
+      }
+    },
+    "visible_tests": [
+      {
+        "ops": [
+          [
+            "addWord",
+            "bad"
+          ],
+          [
+            "addWord",
+            "dad"
+          ],
+          [
+            "addWord",
+            "mad"
+          ],
+          [
+            "search",
+            "pad"
+          ],
+          [
+            "search",
+            "bad"
+          ],
+          [
+            "search",
+            ".ad"
+          ],
+          [
+            "search",
+            "b.."
+          ]
+        ],
+        "expected": [
+          null,
+          null,
+          null,
+          false,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "ops": [
+          [
+            "search",
+            "."
+          ],
+          [
+            "addWord",
+            "a"
+          ],
+          [
+            "search",
+            "."
+          ],
+          [
+            "search",
+            "a"
+          ],
+          [
+            "search",
+            "b"
+          ],
+          [
+            "search",
+            "aa"
+          ]
+        ],
+        "expected": [
+          false,
+          null,
+          true,
+          true,
+          false,
+          false
+        ]
+      },
+      {
+        "ops": [
+          [
+            "addWord",
+            "ba"
+          ],
+          [
+            "search",
+            "ba."
+          ],
+          [
+            "search",
+            ".a"
+          ],
+          [
+            "search",
+            "b."
+          ],
+          [
+            "search",
+            ".."
+          ],
+          [
+            "search",
+            "bad"
+          ]
+        ],
+        "expected": [
+          null,
+          false,
+          true,
+          true,
+          true,
+          false
+        ]
+      },
+      {
+        "ops": [
+          [
+            "addWord",
+            "bad"
+          ],
+          [
+            "search",
+            "ba"
+          ],
+          [
+            "search",
+            ".ad"
+          ],
+          [
+            "search",
+            "b.d"
+          ],
+          [
+            "search",
+            "b.."
+          ],
+          [
+            "search",
+            "bad."
+          ]
+        ],
+        "expected": [
+          null,
+          false,
+          true,
+          true,
+          true,
+          false
+        ]
+      }
+    ],
+    "lc_number": 211
+  },
+  "word-search-ii": {
+    "function_name": "find_words",
+    "signature": "(board: list[list[str]], words: list[str]) -> list[str]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              "o",
+              "a",
+              "a",
+              "n"
+            ],
+            [
+              "e",
+              "t",
+              "a",
+              "e"
+            ],
+            [
+              "i",
+              "h",
+              "k",
+              "r"
+            ],
+            [
+              "i",
+              "f",
+              "l",
+              "v"
+            ]
+          ],
+          [
+            "oath",
+            "pea",
+            "eat",
+            "rain"
+          ]
+        ],
+        "expected": [
+          "eat",
+          "oath"
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            [
+              "a",
+              "b"
+            ],
+            [
+              "c",
+              "d"
+            ]
+          ],
+          [
+            "abcb"
+          ]
+        ],
+        "expected": [],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            [
+              "a"
+            ]
+          ],
+          [
+            "a",
+            "aa"
+          ]
+        ],
+        "expected": [
+          "a"
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            [
+              "a",
+              "a"
+            ]
+          ],
+          [
+            "a",
+            "aa",
+            "aaa",
+            "b"
+          ]
+        ],
+        "expected": [
+          "a",
+          "aa"
+        ],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 212,
+    "scale_compare": "sorted"
   }
 }
