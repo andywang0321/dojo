@@ -11,4 +11,7 @@ Input: s1 = "ab", s2 = "eidboaoo"
 Output: false
 Constraints:
 * 1 <= s1.length, s2.length <= 10^4
-* s1 and s2 consist of lowercase English letters."""
+* s1 and s2 consist of lowercase English letters.
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the string s2.
+"""

@@ -20,4 +20,7 @@ Constraints:
 * n == t.length
 * 1 <= m, n <= 10^5
 * s and t consist of uppercase and lowercase English letters.
-Follow up: Could you find an algorithm that runs in O(m + n) time?"""
+Follow up: Could you find an algorithm that runs in O(m + n) time?
+
+You should aim for a solution as good or better than O(m + n) time and O(n) space, where m is the length of s and n is the length of t.
+"""

@@ -16,4 +16,7 @@ Explanation: The answer is "wke", with the length of 3.
 Notice that the answer must be a substring, "pwke" is a subsequence and not a substring.
 Constraints:
 * 0 <= s.length <= 10^5
-* s consists of English letters, digits, symbols and spaces."""
+* s consists of English letters, digits, symbols and spaces.
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the string s.
+"""

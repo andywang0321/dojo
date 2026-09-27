@@ -15,4 +15,7 @@ There may exists other ways to achieve this answer too.
 Constraints:
 * 1 <= s.length <= 10^5
 * s consists of only uppercase English letters.
-* 0 <= k <= s.length"""
+* 0 <= k <= s.length
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the string s.
+"""

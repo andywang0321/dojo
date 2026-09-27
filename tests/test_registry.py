@@ -63,8 +63,31 @@ def test_every_curated_slug_has_complete_infrastructure():
         )
 
 
+def _module_view():
+    """The registry's public names as a module-like view — what a predicate
+    checker receives in the judge harness (where the module is the *student's*)."""
+    return SimpleNamespace(**{k: v for k, v in vars(reg).items() if not k.startswith("_")})
+
+
+def _predicate_holds(slug: str, case: dict) -> bool:
+    """Judge one predicate case against the oracle.
+
+    The special-cased checkers need a *different* candidate value than the
+    oracle's answer (a round-trip needs the encoded form, a sample checker needs
+    a sample); every other checker is exercised generically on the oracle's own
+    output, which is the contract's floor: the trust anchor's answer must be
+    accepted by whatever predicate the corpus judges students with."""
+    name = case["predicate"]
+    checker = CHECKERS[name]
+    args = case.get("args") or []
+    if name == "encode_decode_roundtrip":
+        return checker(_reference_module(), _reference_module().encode(args[0]), args)
+    if name == "sample_valid":
+        return checker(None, reg._reference_sample(*args), args)
+    return checker(_module_view(), ORACLES[slug](*args), args)
+
+
 def test_visible_tests_agree_with_references():
-    ref_module = _reference_module()
     for slug, entry in load_overrides().items():
         for i, case in enumerate(entry.visible_tests):
             where = f"{slug} visible test {i + 1}"
@@ -76,23 +99,14 @@ def test_visible_tests_agree_with_references():
                 args = copy.deepcopy(case["args"])
                 ORACLES[slug](*args)
                 assert _equal(args, case["expected"]), where
-            elif case.get("predicate") == "encode_decode_roundtrip":
-                got = ref_module.encode(case["args"][0])
-                assert CHECKERS["encode_decode_roundtrip"](ref_module, got, case["args"]), where
-            elif case.get("predicate") == "sample_valid":
-                sample = reg._reference_sample(*case["args"])
-                assert CHECKERS["sample_valid"](None, sample, case["args"]), where
-            elif case.get("predicate") == "is_peak":
-                assert CHECKERS["is_peak"](None, ORACLES[slug](*case["args"]), case["args"]), where
-            elif case.get("predicate") == "k_closest_valid":
-                assert CHECKERS["k_closest_valid"](None, ORACLES[slug](*case["args"]), case["args"]), where
+            elif case.get("predicate"):
+                assert _predicate_holds(slug, case), where
             else:
                 got = ORACLES[slug](*case["args"])
                 assert _equal(got, case["expected"]), f"{where}: {got!r} vs {case['expected']!r}"
 
 
 def test_generated_cases_agree_with_references():
-    ref_module = _reference_module()
     for slug, generator in JUDGE_CASES.items():
         rng = random.Random(f"dojo-registry-{slug}")
         for n in (0, 3, 7, 12):
@@ -100,14 +114,8 @@ def test_generated_cases_agree_with_references():
             args, expected = generated[:2]
             extras = generated[2] if len(generated) > 2 else {}
             where = f"{slug} generated case (n={n})"
-            if extras.get("predicate") == "encode_decode_roundtrip":
-                got = ref_module.encode(args[0])
-                assert CHECKERS["encode_decode_roundtrip"](ref_module, got, args), where
-            elif extras.get("predicate") == "sample_valid":
-                sample = reg._reference_sample(*args)
-                assert CHECKERS["sample_valid"](None, sample, args), where
-            elif extras.get("predicate") == "k_closest_valid":
-                assert CHECKERS["k_closest_valid"](None, ORACLES[slug](*args), args), where
+            if extras.get("predicate"):
+                assert _predicate_holds(slug, {**extras, "args": args, "expected": expected}), where
             elif extras.get("compare") == "mutates":
                 ORACLES[slug](*args)
                 assert _equal(args, expected), where
@@ -261,6 +269,11 @@ def test_references_survive_the_real_judge(tmp_path):
         "encode_and_decode_strings",
         "generate_sample_to_target_sum",
         "peak_elements",
+        # v0.14 content: one representative per new shape the 126-problem
+        # curation introduced — a predicate verdict (LC 76) and plain new ones.
+        "minimum-window-substring",
+        "best-time-to-buy-and-sell-stock",
+        "sliding-window-maximum",
     ):
         entry = overrides[slug]
         path = tmp_path / f"{slug}.py"

@@ -1124,6 +1124,262 @@ def _min_stack_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
     return [], _min_stack_oracle(ops), {"ops": ops}
 
 
+
+# ----------------------------------------------------------------------- sliding_window
+
+
+
+@oracle("best-time-to-buy-and-sell-stock")
+def _best_time_to_buy_and_sell_stock_oracle(prices: list[int]) -> int:
+    best = 0
+    for i in range(len(prices)):
+        for j in range(i + 1, len(prices)):
+            best = max(best, prices[j] - prices[i])
+    return best
+
+
+@judge_case("best-time-to-buy-and-sell-stock")
+def _best_time_to_buy_and_sell_stock_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(1, min(n, 12))  # the statement's own constraint: length >= 1
+    prices = [rng.randint(0, 20) for _ in range(n)]
+    return [prices], _best_time_to_buy_and_sell_stock_oracle(prices)
+
+
+@profiler_input("best-time-to-buy-and-sell-stock")
+def _best_time_to_buy_and_sell_stock_profiler(n: int, rng: random.Random) -> list:
+    # Strictly decreasing, inside the statement's value range: the running minimum
+    # updates on every step (nothing to early-exit on for either implementation)
+    # and no profitable pair exists, so the answer is 0 without a scan stopping
+    # early on a lucky buy.
+    return [[max(1, 10_000 - i) for i in range(n)]]
+@oracle("longest-substring-without-repeating-characters")
+def _longest_substring_without_repeating_characters_oracle(s: str) -> int:
+    best = 0
+    for start in range(len(s)):
+        seen: set[str] = set()
+        for end in range(start, len(s)):
+            if s[end] in seen:
+                break
+            seen.add(s[end])
+            best = max(best, end - start + 1)
+    return best
+
+
+@judge_case("longest-substring-without-repeating-characters")
+def _longest_substring_without_repeating_characters_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(0, min(n, 12))  # the statement's own constraint is 0 <= s.length: n = 0 stays 0
+    alphabet = "abcABC12 ."  # letters, digits, a symbol and a space — the statement's own set
+    s = "".join(rng.choice(alphabet) for _ in range(n))
+    return [s], _longest_substring_without_repeating_characters_oracle(s)
+
+
+@profiler_input("longest-substring-without-repeating-characters")
+def _longest_substring_without_repeating_characters_profiler(n: int, rng: random.Random) -> list:
+    # A shuffled cycle through (almost) every character the statement allows.
+    # Every window of at most len(chars) consecutive characters is repeat-free,
+    # so the window grows to the alphabet's own size — the longest a repeat-free
+    # substring can be under these constraints — instead of stopping early on a
+    # repeat, and the cycle keeps the left pointer moving. Values stay inside
+    # "English letters, digits, symbols and spaces".
+    chars = list(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        " .,;:!?+-*/=_()[]{}<>@#$%&|~^`"
+    )
+    rng.shuffle(chars)
+    cycle = "".join(chars)
+    return ["".join(cycle[i % len(cycle)] for i in range(n))]
+
+
+@oracle("minimum-window-substring")
+def _minimum_window_substring_oracle(s: str, t: str) -> str:
+    """Brute force: for each start, extend until the window covers t; the first
+    covering window is the shortest one starting at that index."""
+    from collections import Counter
+
+    need = Counter(t)
+    if not need:
+        return ""  # an empty t is covered by the empty window
+    best = ""
+    for i in range(len(s)):
+        have: Counter = Counter()
+        for j in range(i, len(s)):
+            have[s[j]] += 1
+            if all(have[c] >= need[c] for c in need):
+                if not best or j - i + 1 < len(best):
+                    best = s[i : j + 1]
+                break
+    return best
+
+
+@judge_case("minimum-window-substring")
+def _minimum_window_substring_case(n: int, rng: random.Random) -> tuple[list, str, dict]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= m, n <= 10^5
+    letters = "abAB"  # English letters; a tiny alphabet so windows collide
+    s = "".join(rng.choice(letters) for _ in range(n))
+    if rng.random() < 0.5:
+        # A substring of s, so a window exists for sure -- and often more than
+        # one of minimal length, which is what the predicate verdict is for.
+        start = rng.randrange(n)
+        t = s[start : start + rng.randint(1, n - start)]
+    else:
+        t = "".join(rng.choice(letters) for _ in range(rng.randint(1, n)))
+    return [s, t], _minimum_window_substring_oracle(s, t), {"predicate": "minimum_window_valid"}
+
+
+@checker("minimum_window_valid")
+def _minimum_window_substring_valid(module, got, args) -> bool:
+    """The contract as a property, because the minimal window is NOT unique.
+
+    Over the statement's own constraints ("abba"/"ab") admits both "ab" and
+    "ba" at the minimal length 2; the statement's uniqueness sentence is a
+    promise about LeetCode's hidden testcases, not about this function. So the
+    checker computes only the minimal *length* -- never the oracle's choice
+    among the ties -- and then accepts any substring of s of that length that
+    covers t. Equality judging here would false-fail a correct solution that
+    picked the other minimal window (the k_closest_points trust bug)."""
+    from collections import Counter
+
+    s, t = args
+    if not isinstance(got, str):
+        return False
+    need = Counter(t)
+    if not need:
+        return got == ""  # an empty t is covered by the empty window
+    best = None
+    for i in range(len(s)):
+        have: Counter = Counter()
+        for j in range(i, len(s)):
+            have[s[j]] += 1
+            if all(have[c] >= need[c] for c in need):
+                if best is None or j - i + 1 < best:
+                    best = j - i + 1
+                break
+    if best is None:
+        return got == ""  # nothing in s covers t: "" is the only answer
+    if len(got) != best:
+        return False
+    if any(got.count(c) < need[c] for c in need):
+        return False
+    return any(s[i : i + best] == got for i in range(len(s) - best + 1))
+
+
+@profiler_input("minimum-window-substring")
+def _minimum_window_substring_profiler(n: int, rng: random.Random) -> list:
+    # The only 'b' in s sits on the very last character and t needs n//4 a's,
+    # so the window closes exactly there and the shrink phase then walks back
+    # over the whole 'a' run: both phases of the two-pointer traverse the
+    # string, and t itself is Theta(n) so the n-term of the O(m + n) target is
+    # exercised as well as the m-term (a constant-size t would measure only m).
+    # The brute-force oracle never breaks early for the first ~3n/4 starts, and
+    # no shorter window can cover t. A random string over a small alphabet
+    # closes a window almost immediately and would measure the best case.
+    size = max(8, n)
+    quarter = size // 4
+    return ["a" * (size - quarter - 2) + "b", "a" * quarter + "b"]
+
+
+@oracle("sliding-window-maximum")
+def _sliding_window_maximum_oracle(nums: list[int], k: int) -> list[int]:
+    """Brute force: recompute the maximum of every window from scratch."""
+    return [max(nums[i : i + k]) for i in range(len(nums) - k + 1)]
+
+
+@judge_case("sliding-window-maximum")
+def _sliding_window_maximum_case(n: int, rng: random.Random) -> tuple[list, list]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= nums.length
+    if rng.random() < 0.5:
+        nums = [rng.randint(-4, 4) for _ in range(n)]  # ties and negatives
+    else:
+        nums = [rng.randint(-10_000, 10_000) for _ in range(n)]  # the stated range
+    k = rng.randint(1, n)  # the statement's own constraint: 1 <= k <= nums.length
+    return [nums, k], _sliding_window_maximum_oracle(nums, k)
+
+
+@profiler_input("sliding-window-maximum")
+def _sliding_window_maximum_profiler(n: int, rng: random.Random) -> list:
+    # Strictly decreasing and inside the statement's value range: the monotonic
+    # deque never pops from the back, so it fills to k and every index is pushed
+    # once and popped once (its amortized worst case), while a heap solution
+    # keeps k live entries and pops one stale one per step. A random or
+    # increasing array lets the deque stay at size 1 and measures the best case.
+    size = max(2, n)
+    nums = [max(-10_000, 10_000 - i) for i in range(size)]
+    return [nums, max(1, size // 2)]
+
+
+@oracle("longest-repeating-character-replacement")
+def _longest_repeating_character_replacement_oracle(s: str, k: int) -> int:
+    best = 0
+    for start in range(len(s)):
+        counts: dict[str, int] = {}
+        for end in range(start, len(s)):
+            counts[s[end]] = counts.get(s[end], 0) + 1
+            length = end - start + 1
+            if length - max(counts.values()) > k:
+                break
+            best = max(best, length)
+    return best
+
+
+@judge_case("longest-repeating-character-replacement")
+def _longest_repeating_character_replacement_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= s.length
+    s = "".join(rng.choice("ABC") for _ in range(n))
+    k = rng.randint(0, n)  # the statement's own constraint: 0 <= k <= s.length
+    return [s, k], _longest_repeating_character_replacement_oracle(s, k)
+
+
+@profiler_input("longest-repeating-character-replacement")
+def _longest_repeating_character_replacement_profiler(n: int, rng: random.Random) -> list:
+    # A strict A..Z cycle keeps every window's counts balanced, so the maximum
+    # frequency of a window stays near len/26 and the window that satisfies
+    # len - maxfreq <= k is about 1.04k long: with k = n // 2 the answer is
+    # Theta(n), which is what makes a nested-loop solution measure quadratic
+    # instead of looking linear. The window shrinks periodically (the whole
+    # string is scanned, there is no early exit) and k sits strictly between the
+    # two shortcut values — k > 0 (so the "k = 0, just find the longest run"
+    # special case cannot trigger) and k < n - maxfreq_total (so "replace
+    # everything, the answer is n" cannot either). Uppercase only, k <= n.
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    s = "".join(letters[i % len(letters)] for i in range(n))
+    return [s, n // 2]
+
+
+@oracle("permutation-in-string")
+def _permutation_in_string_oracle(s1: str, s2: str) -> bool:
+    target = sorted(s1)
+    width = len(s1)
+    for start in range(len(s2) - width + 1):
+        if sorted(s2[start : start + width]) == target:
+            return True
+    return False
+
+
+@judge_case("permutation-in-string")
+def _permutation_in_string_case(n: int, rng: random.Random) -> tuple[list, bool]:
+    size = max(1, min(n, 12))  # the statement's own constraint: both lengths >= 1
+    a = rng.randint(1, size)
+    b = rng.randint(1, size)  # drawn independently: s1 longer than s2 is a legal input
+    s1 = "".join(rng.choice("ab") for _ in range(a))
+    s2 = "".join(rng.choice("ab") for _ in range(b))
+    return [s1, s2], _permutation_in_string_oracle(s1, s2)
+
+
+@profiler_input("permutation-in-string")
+def _permutation_in_string_profiler(n: int, rng: random.Random) -> list:
+    # s1 is an "ab" cycle of about n/4 characters and s2 an "abc" cycle holding
+    # the rest, so the total size is ~n. The window width grows with n, which is
+    # what makes a per-window O(len(s1)) or O(len(s1) log len(s1)) solution
+    # (Counter- or sorted-comparison per window) measure quadratic, while n2 - n1
+    # is still about n/2 window positions for the reference. No window can match:
+    # every stretch of >= 3 consecutive characters of the "abc" cycle contains a
+    # "c", and s1 contains none — so the answer is False all the way and nothing
+    # early-exits. Both strings are lowercase English letters.
+    width = max(3, n // 4)
+    rest = max(1, n - width)
+    s1 = ("ab" * (width // 2 + 1))[:width]
+    s2 = ("abc" * (rest // 3 + 1))[:rest]
+    return [s1, s2]
 # ------------------------------------------------- canonical references (v0.12)
 #
 # The probe's performance baseline, and the large-input comparator. Each entry
@@ -1577,3 +1833,119 @@ def valid_sudoku(board: list[list[str]]) -> bool:
             cols[j].add(c)
             boxes[b].add(c)
     return True
+
+
+# --- canonical reference (best-time-to-buy-and-sell-stock) ---
+
+@reference("best-time-to-buy-and-sell-stock")
+def _best_time_to_buy_and_sell_stock_reference(prices: list[int]) -> int:
+    best = 0
+    low = None
+    for price in prices:
+        if low is None or price < low:
+            low = price
+        else:
+            best = max(best, price - low)
+    return best
+
+
+# --- canonical reference (longest-repeating-character-replacement) ---
+
+@reference("longest-repeating-character-replacement")
+def _longest_repeating_character_replacement_reference(s: str, k: int) -> int:
+    counts = [0] * 26
+    left = 0
+    best = 0
+    for right, ch in enumerate(s):
+        counts[ord(ch) - 65] += 1
+        while (right - left + 1) - max(counts) > k:
+            counts[ord(s[left]) - 65] -= 1
+            left += 1
+        best = max(best, right - left + 1)
+    return best
+
+
+# --- canonical reference (longest-substring-without-repeating-characters) ---
+
+@reference("longest-substring-without-repeating-characters")
+def _longest_substring_without_repeating_characters_reference(s: str) -> int:
+    last: dict[str, int] = {}
+    left = 0
+    best = 0
+    for right, ch in enumerate(s):
+        if ch in last and last[ch] >= left:
+            left = last[ch] + 1
+        last[ch] = right
+        best = max(best, right - left + 1)
+    return best
+
+
+# --- canonical reference (minimum-window-substring) ---
+
+@reference("minimum-window-substring")
+def _minimum_window_substring_reference(s: str, t: str) -> str:
+    """Two pointers + a deficit counter over t -- the intended O(m + n)."""
+    from collections import Counter
+
+    if not t:
+        return ""
+    need = Counter(t)
+    missing = len(t)  # characters still missing from the window, duplicates counted
+    left = 0
+    best_start, best_len = 0, len(s) + 1
+    for right, ch in enumerate(s):
+        if need[ch] > 0:
+            missing -= 1
+        need[ch] -= 1
+        while missing == 0:
+            if right - left + 1 < best_len:
+                best_start, best_len = left, right - left + 1
+            dropped = s[left]
+            need[dropped] += 1
+            if need[dropped] > 0:
+                missing += 1
+            left += 1
+    return s[best_start : best_start + best_len] if best_len <= len(s) else ""
+
+
+# --- canonical reference (permutation-in-string) ---
+
+@reference("permutation-in-string")
+def _permutation_in_string_reference(s1: str, s2: str) -> bool:
+    width = len(s1)
+    if width > len(s2):
+        return False
+    need = [0] * 26
+    for ch in s1:
+        need[ord(ch) - 97] += 1
+    window = [0] * 26
+    for ch in s2[:width]:
+        window[ord(ch) - 97] += 1
+    if window == need:
+        return True
+    for i in range(width, len(s2)):
+        window[ord(s2[i]) - 97] += 1
+        window[ord(s2[i - width]) - 97] -= 1
+        if window == need:
+            return True
+    return False
+
+
+# --- canonical reference (sliding-window-maximum) ---
+
+@reference("sliding-window-maximum")
+def _sliding_window_maximum_reference(nums: list[int], k: int) -> list[int]:
+    """Monotonic deque of indices -- the intended O(n) time and O(k) space."""
+    from collections import deque
+
+    window: deque[int] = deque()  # indices, their values decreasing
+    out: list[int] = []
+    for i, value in enumerate(nums):
+        while window and nums[window[-1]] <= value:
+            window.pop()
+        window.append(i)
+        if window[0] <= i - k:
+            window.popleft()  # the front has left the window
+        if i >= k - 1:
+            out.append(nums[window[0]])
+    return out
