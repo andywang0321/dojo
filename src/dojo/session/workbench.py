@@ -90,6 +90,39 @@ def _args_literal(args: list) -> str | None:
     return "(" + ", ".join(parts) + ("," if len(parts) == 1 else "") + ")"
 
 
+def _mutates_block(function_name: str, cases: list[dict], lines: list[str]) -> str:
+    """The examples block for in-place problems ("compare": "mutates").
+
+    The observable result of `rotate(matrix)` is the matrix, not the None it
+    returns, so this block deep-copies the arguments, calls the function for
+    their side effect, and compares the argument list afterwards — the same
+    thing the judge does. Returns "" when a case cannot be rendered honestly."""
+    entries = []
+    for case in cases:
+        # _args_literal renders the argument tuple; the copy above the call is
+        # what makes "the args are the result" true for a re-run.
+        args = _args_literal(list(case.get("args", [])))
+        want = _literal(case.get("expected"))
+        if args is None or want is None:
+            return ""
+        entries.append(f"        ({args}, {want}),")
+    block = [
+        *lines,
+        "    import copy",
+        "",
+        "    _cases = [",
+        *entries,
+        "    ]",
+        "    for _i, (_args, _want) in enumerate(_cases, 1):",
+        "        _call = copy.deepcopy(list(_args))",
+        f"        {function_name}(*_call)  # in place: the arguments are the result",
+        "        _ok = _call == _want",
+        "        print(f\"case {_i}: {'ok  ' if _ok else 'FAIL'} args={_call!r} want={_want!r}\")",
+        SENTINEL_CLOSE,
+    ]
+    return "\n".join(block) + "\n"
+
+
 def example_block(problem) -> str:
     """The `if __name__ == "__main__":` block built from the problem's own
     visible tests, sentinel-fenced, or "" when it cannot be built honestly.
@@ -106,6 +139,16 @@ def example_block(problem) -> str:
     plain_cases = [c for c in cases if "ops" not in c]
     if class_cases and plain_cases:
         return ""  # a mixed problem: dojo's own check covers it, don't guess here
+
+    mutates_cases = [c for c in plain_cases if c.get("compare") == "mutates"]
+    if mutates_cases:
+        if len(mutates_cases) != len(plain_cases):
+            return ""  # mixed verdict modes: dojo's own check covers it
+        return _mutates_block(
+            function_name,
+            mutates_cases,
+            [SENTINEL_OPEN, 'if __name__ == "__main__":'],
+        )
 
     lines = [SENTINEL_OPEN, 'if __name__ == "__main__":']
     if class_cases:

@@ -57,3 +57,24 @@ def check_equal(got, expected, mode: str) -> bool:
     elif mode == "sorted":
         got, expected = canonical(got), canonical(expected)
     return json.dumps(got, sort_keys=True) == json.dumps(expected, sort_keys=True)
+
+
+def case_verdict(case: dict, got, args) -> bool:
+    """Judge one case's outcome, with ``"mutates"`` semantics applied (v0.14).
+
+    ``got`` is the call's return value and ``args`` the argument list as it
+    stands *after* the call. A ``"mutates"`` case is one where the problem's
+    contract is the effect on its arguments — LeetCode's "modify in place,
+    return nothing" problems (rotate-image, set-matrix-zeroes) — so the value
+    under comparison is the post-call argument list, not the (None) return:
+
+        {"args": [[[1, 2], [3, 4]]], "expected": [[[3, 1], [4, 2]]],
+         "compare": "mutates"}
+
+    Every other mode compares the return value, unchanged. One implementation,
+    three callers — the judge harness, the curator's reference gate and the
+    registry tests — so the three can never drift apart (the reason this module
+    exists at all)."""
+    if case.get("compare") == "mutates":
+        return check_equal(args, case.get("expected"), "strict")
+    return check_equal(got, case.get("expected"), case.get("compare", "strict"))

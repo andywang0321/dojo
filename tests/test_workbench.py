@@ -110,6 +110,41 @@ def test_an_order_insensitive_problem_compares_that_way_locally():
     assert "sorted(map(repr, _got)) == sorted(map(repr, _want))" in block
 
 
+def test_an_in_place_problem_compares_the_arguments_not_the_return(capsys):
+    """LC 48/73's contract is the effect on the arguments; a block that compared
+    the (None) return value would print FAIL for a correct solution."""
+    problem = _problem(
+        function_name="rotate",
+        signature="(matrix: list[list[int]]) -> None",
+        cases=[
+            {"args": [[[1, 2], [3, 4]]], "expected": [[[3, 1], [4, 2]]], "compare": "mutates"},
+        ],
+    )
+    block = wb.example_block(problem)
+    assert "in place: the arguments are the result" in block
+    assert "_ok = _call == _want" in block
+
+    body = block.replace(wb.SENTINEL_OPEN, "").replace(wb.SENTINEL_CLOSE, "")
+    ast.parse(body)
+    namespace: dict = {"__name__": "__main__"}
+    solution = (
+        "def rotate(matrix):\n"
+        "    matrix[:] = [list(row) for row in zip(*matrix[::-1])]\n"
+    )
+    exec(compile(solution + body, "<examples>", "exec"), namespace)  # noqa: S102
+    assert "case 1: ok" in capsys.readouterr().out
+
+
+def test_a_mixed_verdict_problem_gets_no_block():
+    problem = _problem(
+        cases=[
+            {"args": [[1, 2]], "expected": [1, 2], "compare": "sorted"},
+            {"args": [[3, 4]], "expected": [[4, 3]], "compare": "mutates"},
+        ]
+    )
+    assert wb.example_block(problem) == ""
+
+
 # ------------------------------------------------------- the student view
 
 

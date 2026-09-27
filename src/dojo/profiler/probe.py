@@ -136,7 +136,12 @@ def main():
             out["error"] = f"{type(exc).__name__}: {exc}"
             return
 
-        out["digest"], out["preview"] = _digest(result, mode)
+        # The digest is what the two implementations are compared on. For an
+        # in-place problem ("compare": "mutates") the return value is None and
+        # says nothing, so the observable result is the argument list as the
+        # call left it — the same thing the judge's own "mutates" mode compares.
+        observed = payload if mode == "mutates" else result
+        out["digest"], out["preview"] = _digest(observed, mode)
 
         # 3. space: tracemalloc runs here and only here, untimed.
         try:

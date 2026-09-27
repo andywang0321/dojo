@@ -74,6 +74,14 @@ def _ints(n, rng):
     return [list(range(n))]
 
 
+def _grid(n, rng):
+    """A square matrix whose total element count is ~n (the shape an in-place
+    matrix problem is measured on), wrapped as the argument list."""
+    side = max(1, int(n**0.5))
+    matrix = [[rng.randint(0, 9) for _ in range(side)] for _ in range(side)]
+    return [matrix]
+
+
 # ------------------------------------------------------------- mechanism
 
 
@@ -211,6 +219,29 @@ def test_output_comparison_can_be_order_insensitive(tmp_path):
     assert strict.points[0].outputs_agree is False
     loose = run_probe(a, _ints, b, sizes=[100], repeats=1, compare="sorted")
     assert loose.points[0].outputs_agree is True
+
+
+ROTATE_RIGHT = "def rotate(m):\n    m[:] = [list(r) for r in zip(*m[::-1])]\n"
+ROTATE_WRONG = "def rotate(m):\n    m.reverse()\n"
+
+
+def test_an_in_place_problem_is_compared_on_its_effect(tmp_path):
+    """A "mutates" problem (LC 48/73) returns None, so a digest of the return
+    value makes every implementation look identical. The digest is taken over the
+    argument list as the call left it, which is what the judge compares too —
+    otherwise the probe would report "outputs agree" about code that disagrees."""
+    reference = Target("reference", _write(tmp_path, "r", ROTATE_RIGHT), "rotate")
+    broken = Target("yours", _write(tmp_path, "w", ROTATE_WRONG), "rotate")
+    correct = Target("yours", _write(tmp_path, "c", ROTATE_RIGHT), "rotate")
+
+    blind = run_probe(broken, _grid, reference, sizes=[16], repeats=1, compare="strict")
+    assert blind.points[0].outputs_agree is True  # both return None: says nothing
+
+    caught = run_probe(broken, _grid, reference, sizes=[16], repeats=1, compare="mutates")
+    assert caught.points[0].outputs_agree is False
+
+    agree = run_probe(correct, _grid, reference, sizes=[16], repeats=1, compare="mutates")
+    assert agree.points[0].outputs_agree is True
 
 
 def test_without_a_reference_there_are_no_ratios(tmp_path):

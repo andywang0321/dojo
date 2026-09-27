@@ -519,3 +519,54 @@ def test_a_non_network_transport_failure_keeps_its_detail():
 
     with pytest.raises(LeetCodeError, match="transport error: the transport returned garbage"):
         fetch_question_data(broken_post, "two-sum")
+
+
+def test_bulk_fetch_lands_a_ladder_problem_in_its_roadmap_group(db, monkeypatch, tmp_path):
+    """The site's topic tags are not the roadmap's grouping (v0.14).
+
+    `dojo fetch` derives `pattern` from LeetCode's tags, which put 47 of the 150
+    in a group the roadmap disagrees with: LC 287 is tagged "Two Pointers" and
+    the roadmap places it in Linked List, LC 202 is tagged "Math" and the roadmap
+    calls it Math & Geometry, LC 286 is tagged "BFS/DFS" and belongs to Graphs.
+    The row's `pattern` drives the progress rollups, the learn-mode studied set
+    and the non-ladder fallback, so a ladder problem must land in its ladder's
+    group — and then the seed file's directory agrees with the roadmap too.
+    """
+    from dojo.cli import _cmd_fetch_all, _roadmap_groups_by_lc
+    from dojo.fetcher import ParsedProblem
+
+    monkeypatch.setattr("dojo.config.DB_PATH", tmp_path / "dojo.db")
+    monkeypatch.setattr("dojo.config.PROBLEMS_DIR", tmp_path / "problems")
+    (tmp_path / "problems").mkdir()
+
+    landed: dict[str, str] = {}
+
+    def fake_fetch(slug):
+        return ParsedProblem(
+            title_slug=slug,
+            title=slug,
+            difficulty="Easy",
+            pattern="two_pointers",  # whatever the site's tags said
+            statement=f"{slug} [Easy]\n\nStatement.",
+            function_name="solve_it",
+            signature="(x: int) -> int",
+            url="https://example.com",
+        )
+
+    def fake_land(problem, problems_dir, db_path):
+        landed[problem.title_slug] = problem.pattern
+        return problems_dir / problem.pattern / f"{problem.title_slug}.py"
+
+    monkeypatch.setattr("dojo.fetcher.fetch_problem", fake_fetch)
+    monkeypatch.setattr("dojo.fetcher.land", fake_land)
+
+    console = type("C", (), {"print": lambda self, *a, **k: None})()
+    _cmd_fetch_all(console, delay=0)
+
+    assert landed["find-the-duplicate-number"] == "linked_list"  # LC 287
+    assert landed["happy-number"] == "math_and_geometry"  # LC 202
+    assert landed["walls-and-gates"] == "graphs"  # LC 286
+    assert landed["two-sum"] == "arrays_and_hashing"  # already correct
+    # The map is ladder-only: a number outside the roadmap resolves to nothing and
+    # keeps the fetcher's own pattern.
+    assert _roadmap_groups_by_lc().get(99999) is None

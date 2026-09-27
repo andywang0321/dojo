@@ -9,6 +9,7 @@ with the reference behavior, and representative references survive the real
 judge subprocess protocol (strict, sorted, approx, predicate, and ops modes).
 """
 
+import copy
 import json
 import random
 import textwrap
@@ -69,6 +70,12 @@ def test_visible_tests_agree_with_references():
             where = f"{slug} visible test {i + 1}"
             if "ops" in case:
                 assert _equal(ORACLES[slug](case["ops"]), case["expected"]), where
+            elif case.get("compare") == "mutates":
+                # In-place problems (v0.14): the oracle's effect on the arguments
+                # is the value under test, not its (None) return value.
+                args = copy.deepcopy(case["args"])
+                ORACLES[slug](*args)
+                assert _equal(args, case["expected"]), where
             elif case.get("predicate") == "encode_decode_roundtrip":
                 got = ref_module.encode(case["args"][0])
                 assert CHECKERS["encode_decode_roundtrip"](ref_module, got, case["args"]), where
@@ -101,6 +108,9 @@ def test_generated_cases_agree_with_references():
                 assert CHECKERS["sample_valid"](None, sample, args), where
             elif extras.get("predicate") == "k_closest_valid":
                 assert CHECKERS["k_closest_valid"](None, ORACLES[slug](*args), args), where
+            elif extras.get("compare") == "mutates":
+                ORACLES[slug](*args)
+                assert _equal(args, expected), where
             elif extras.get("ops") is not None:
                 assert _equal(ORACLES[slug](extras["ops"]), expected), where
             else:

@@ -103,3 +103,68 @@ def test_non_json_serializable_return_fails(tmp_path):
     report = run_cases(_write(tmp_path, NON_SERIALIZABLE), "is_valid", CASES)
     assert report.status == "error"  # serialization is a harness-level failure
     assert all(not r.passed and r.error for r in report.results)
+
+
+# ------------------------------------------------- "mutates" (in-place, v0.14)
+
+ROTATE_CASES = [
+    {"args": [[[1, 2], [3, 4]]], "expected": [[[3, 1], [4, 2]]], "compare": "mutates",
+     "label": "2x2"},
+    # 1x1 and 3x3, plus a case where nothing may happen but the shape
+    {"args": [[[7]]], "expected": [[[7]]], "compare": "mutates", "label": "1x1"},
+    {
+        "args": [[[1, 2, 3], [4, 5, 6], [7, 8, 9]]],
+        "expected": [[[7, 4, 1], [8, 5, 2], [9, 6, 3]]],
+        "compare": "mutates",
+        "label": "3x3",
+    },
+]
+
+ROTATE_IN_PLACE = textwrap.dedent(
+    """
+    def rotate(matrix: list[list[int]]) -> None:
+        matrix[:] = [list(row) for row in zip(*matrix[::-1])]
+    """
+)
+
+ROTATE_REBINDING = textwrap.dedent(
+    """
+    def rotate(matrix: list[list[int]]) -> None:
+        matrix = [list(row) for row in zip(*matrix[::-1])]  # returns nothing, changes nothing
+    """
+)
+
+ROTATE_WRONG = textwrap.dedent(
+    """
+    def rotate(matrix: list[list[int]]) -> None:
+        matrix.reverse()
+    """
+)
+
+
+def test_in_place_solution_passes_a_mutates_case(tmp_path):
+    report = run_cases(_write(tmp_path, ROTATE_IN_PLACE), "rotate", ROTATE_CASES)
+    assert report.all_passed, report.results
+    assert report.status == "correct"
+
+
+def test_rebinding_without_mutating_fails_a_mutates_case(tmp_path):
+    """The whole point of the mode: `matrix = <new list>` is not an in-place
+    rotation, and the judge must not be fooled by a correct-looking value. (The
+    1x1 case passes vacuously — rotating a single cell changes nothing.)"""
+    report = run_cases(_write(tmp_path, ROTATE_REBINDING), "rotate", ROTATE_CASES)
+    assert report.status == "wrong_answer"
+    by_label = {r.label: r for r in report.results}
+    assert not by_label["2x2"].passed
+    assert not by_label["3x3"].passed
+
+
+def test_a_mutates_failure_shows_the_arguments_not_none(tmp_path):
+    """`got` is what the function produced. For an in-place problem that is the
+    argument list as the call left it — reporting the None return beside an
+    expected matrix reads as a dojo bug."""
+    report = run_cases(_write(tmp_path, ROTATE_WRONG), "rotate", ROTATE_CASES)
+    assert not report.all_passed
+    first = report.results[0]
+    assert first.got == [[[3, 4], [1, 2]]]  # reversed rows, not None
+    assert first.expected == [[[3, 1], [4, 2]]]

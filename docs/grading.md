@@ -9,8 +9,11 @@ Student code runs in an isolated subprocess with a JSON protocol: the harness im
 - `strict` (default): JSON equality with `sort_keys`. No leniency — a non-serializable return fails the case.
 - `"compare": "sorted"` — deep-sorts both sides before equality; the honest way to support "any order" prompts.
 - `"compare": "approx:1e-4"` / `"compare": "rounded:n"` — recursive float tolerance / rounding.
+- `"compare": "mutates"` (v0.14) — in-place problems: `expected` is the **argument list as it must stand after the call**, and the post-call arguments are what's compared. LeetCode's "modify in place, return nothing" contract (LC 48 rotate-image, 73 set-matrix-zeroes) graded as written, rather than rewritten into a different problem: `{"args": [[[1, 2], [3, 4]]], "expected": [[[3, 1], [4, 2]]], "compare": "mutates"}`. A rebinding `matrix = <new list>` fails (the caller's object never changed), the failure display shows the mutated arguments rather than the `None` return, and the probe digests the same thing — so reference and student are compared on their effect, not on two identical `None`s.
 - `"predicate": name` — a `@checker(name)` in the registry validates `(module, got, args)`; for round-trips, any-valid-sample, any-peak, and any-valid-k-closest-set (boundary distance ties: the checker accepts any valid tie choice — equality judging there once false-failed correct solutions, the trust bug).
 - `{"ops": [...], "expected": [...]}` — class problems: instantiate `function_name`, replay the method sequence, compare per-op outputs.
+
+`judge/compare.py` holds the one implementation of these rules; the harness, the curator's reference gate and `tests/test_registry.py` all call `check_equal` / `case_verdict`, so a case cannot mean one thing to the grader and another to the gate that admitted the reference.
 
 ### Registries (`judge/registry.py`)
 

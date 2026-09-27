@@ -104,6 +104,67 @@ def test_gate_rejects_a_raising_reference():
     assert findings and "raised" in findings[0]
 
 
+# ------------------------------------- in-place problems ("mutates", v0.14)
+
+ROTATE_SLUG = "rotate_matrix"
+
+ROTATE_ORACLE = '''
+@oracle("rotate_matrix")
+def _rotate_oracle(matrix: list[list[int]]) -> None:
+    matrix[:] = [list(row) for row in zip(*matrix[::-1])]
+'''
+
+ROTATE_GENERATOR = '''
+@judge_case("rotate_matrix")
+def _rotate_case(n: int, rng) -> tuple[list, list, dict]:
+    n = max(1, min(n, 12))
+    side = 1 + n % 4
+    matrix = [[rng.randint(0, 9) for _ in range(side)] for _ in range(side)]
+    want = [list(row) for row in zip(*matrix[::-1])]
+    return [matrix], [want], {"compare": "mutates"}
+'''
+
+ROTATE_GOOD_REFERENCE = '''
+@reference("rotate_matrix")
+def _rotate_reference(matrix: list[list[int]]) -> None:
+    matrix[:] = [list(row) for row in zip(*matrix[::-1])]
+'''
+
+#: Rotates correctly but rebinds the name instead of mutating: returns None and
+#: leaves the caller's matrix untouched.
+ROTATE_REBINDING_REFERENCE = '''
+@reference("rotate_matrix")
+def _rotate_reference(matrix: list[list[int]]) -> None:
+    matrix = [list(row) for row in zip(*matrix[::-1])]
+'''
+
+ROTATE_VISIBLE = [
+    {"args": [[[1, 2], [3, 4]]], "expected": [[[3, 1], [4, 2]]], "compare": "mutates"},
+]
+
+
+def _rotate_namespace(reference: str) -> dict:
+    ns = make_isolated_namespace()
+    exec(compile(ROTATE_ORACLE, "<oracle>", "exec"), ns)
+    exec(compile(ROTATE_GENERATOR, "<generator>", "exec"), ns)
+    exec(compile(reference, "<reference>", "exec"), ns)
+    return ns
+
+
+def test_gate_admits_an_in_place_reference():
+    """The gate judges a "mutates" case on the reference's effect on the
+    arguments — the same rule the judge applies to the student."""
+    ns = _rotate_namespace(ROTATE_GOOD_REFERENCE)
+    assert reference_findings(ROTATE_SLUG, ns, ROTATE_VISIBLE) == []
+
+
+def test_gate_rejects_a_reference_that_rebinds_instead_of_mutating():
+    ns = _rotate_namespace(ROTATE_REBINDING_REFERENCE)
+    findings = reference_findings(ROTATE_SLUG, ns, ROTATE_VISIBLE)
+    assert findings
+    assert "the reference left" in findings[0]
+
+
 def test_gate_reports_a_missing_reference():
     ns = _namespace_with()
     assert "no @reference" in reference_findings(SLUG, ns, VISIBLE)[0]

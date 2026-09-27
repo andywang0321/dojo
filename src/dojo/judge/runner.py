@@ -7,6 +7,11 @@ case). Extra modes, per case:
 - ``"sorted"``    — deep-sort both sides before JSON equality (any order).
 - ``"rounded:n"`` — round floats to n decimals before equality.
 - ``"approx:t"``  — recursive absolute tolerance t for floats.
+- ``"mutates"``   — in-place problems: ``expected`` is the argument list as it
+  must stand *after* the call, and the post-call arguments are what gets
+  compared (the return value is None and carries no information). LeetCode's
+  "modify in place, return nothing" contract, graded honestly rather than
+  rewritten into a different problem (v0.14).
 - ``"predicate"`` — case key names a checker in ``judge/registry.CHECKERS``
   that receives (module, got, args) and returns a boolean (round-trip
   tests, property checks like "any valid sample").
@@ -49,7 +54,7 @@ import time
 # Verdict semantics live in one place, shared with the curator's reference gate
 # (v0.12) — the harness judges the student's code by the same rules the gate
 # judges a canonical solution by.
-from dojo.judge.compare import canonical, check_equal, rounded
+from dojo.judge.compare import case_verdict
 
 try:
     from dojo.judge.registry import CHECKERS
@@ -216,7 +221,12 @@ def main():
                     lambda: CHECKERS[case["predicate"]](solution, got, case["args"])
                 )
             else:
-                passed = check_equal(got, expected, mode)
+                passed = case_verdict(case, got, case.get("args"))
+                if mode == "mutates":
+                    # The contract is the effect on the arguments, so that is
+                    # what "got" must show — reporting None (the return) beside
+                    # an expected matrix reads as a dojo bug.
+                    got = case["args"]
             printed = LAST["printed"]
             results.append(
                 {

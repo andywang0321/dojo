@@ -1095,6 +1095,22 @@ def _roadmap_lc_for_slug(title_slug: str) -> int | None:
     return None
 
 
+def _roadmap_groups_by_lc() -> dict[int, str]:
+    """LeetCode number -> the roadmap group that owns it.
+
+    The roadmap is authoritative for ladder problems, and the *site's* topic tags
+    are not: `dojo fetch` buckets by tag, which disagreed with the roadmap for 47
+    of the 150 (find-the-duplicate-number is tagged "Two Pointers" and the
+    roadmap places it in Linked List; walls-and-gates is tagged "BFS" and belongs
+    to Graphs). Landing a ladder problem outside its ladder group left
+    `problems.pattern`, the seed file's directory, and the progress/rollup views
+    disagreeing with the roadmap for problems the ladder itself serves by
+    number — so the fetch consults the roadmap first (v0.14)."""
+    from dojo.roadmap import load_roadmap
+
+    return {lc: group["slug"] for group in load_roadmap() for lc in group["problems"]}
+
+
 def _tag_lc_number(conn, title_slug: str, lc: int | None) -> None:
     """Record the LeetCode number on a landed problem row so the roadmap
     ladder can see it (the fetcher's model doesn't carry it; the TOML is
@@ -1130,6 +1146,7 @@ def _cmd_fetch_all(console, delay: float = 0.8) -> int:
     # two_sum_2 differ from the LeetCode slug but own the lc number) — a
     # row whose file is missing is a lost import and gets re-fetched.
     seed_files = {p.stem for p in PROBLEMS_DIR.rglob("*.py")}
+    groups_by_lc = _roadmap_groups_by_lc()
     fetched = skipped = failed = 0
     failures = []
     for lc, slug in _roadmap_entries():
@@ -1153,6 +1170,10 @@ def _cmd_fetch_all(console, delay: float = 0.8) -> int:
             continue
         try:
             problem = fetch_problem(slug)
+            group = groups_by_lc.get(lc)
+            if group:
+                # The roadmap, not the site's tags, decides the ladder group.
+                problem.pattern = group
             land(problem, problems_dir=PROBLEMS_DIR, db_path=DB_PATH)
             with connect(DB_PATH) as conn:
                 _tag_lc_number(conn, problem.title_slug, lc)
@@ -1205,13 +1226,17 @@ def _cmd_fetch(args) -> int:
     except LeetCodeError as exc:
         console.print(f"[red]Fetch failed: {exc}[/red]")
         return 1
+    lc = _roadmap_lc_for_slug(problem.title_slug)
+    group = _roadmap_groups_by_lc().get(lc)
+    if group:
+        problem.pattern = group  # the roadmap decides the ladder group (v0.14)
     try:
         path = land(problem, problems_dir=PROBLEMS_DIR, db_path=DB_PATH)
     except LeetCodeError as exc:
         console.print(f"[red]{exc}[/red]")
         return 1
     with connect(DB_PATH) as conn:
-        _tag_lc_number(conn, problem.title_slug, _roadmap_lc_for_slug(problem.title_slug))
+        _tag_lc_number(conn, problem.title_slug, lc)
     console.print(
         f"[green]Landed {problem.title} ({problem.title_slug}) — "
         f"{problem.pattern}, {problem.difficulty}.[/green]\n{path}"

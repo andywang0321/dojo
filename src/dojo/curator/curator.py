@@ -28,7 +28,7 @@ from dojo import bank
 from dojo.config import DB_PATH, PROBLEMS_DIR, PROBLEM_OVERRIDES, REPO_ROOT
 from dojo.db import connect
 from dojo.guard import is_network_error, network_message
-from dojo.judge.compare import check_equal
+from dojo.judge.compare import case_verdict
 from dojo.patterns import PATTERNS
 from dojo.tutor.backend import Role
 
@@ -538,7 +538,9 @@ def _case_findings(label, case, reference_fn, checkers, module_view) -> list[str
 
     expected = case.get("expected")
     mode = case.get("compare", "strict")
-    if not check_equal(got, expected, mode):
+    if not case_verdict(case, got, args):
+        if mode == "mutates":
+            return [f"{label}: the reference left {args!r}, the case expects {expected!r}"]
         return [f"{label}: the reference returned {got!r}, the case expects {expected!r}"]
     return []
 
