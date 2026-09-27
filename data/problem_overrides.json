@@ -2393,7 +2393,8 @@
         "expected": 1
       }
     ],
-    "lc_number": 33
+    "lc_number": 33,
+    "probe_max_n": 5000
   },
   "search-a-2d-matrix": {
     "function_name": "search_matrix",
@@ -2536,7 +2537,8 @@
         "expected": 1
       }
     ],
-    "lc_number": 153
+    "lc_number": 153,
+    "probe_max_n": 5000
   },
   "binary-search": {
     "function_name": "search",

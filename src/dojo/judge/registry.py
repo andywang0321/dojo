@@ -2811,6 +2811,25 @@ def _search_in_rotated_sorted_array_case(n: int, rng: random.Random) -> tuple[li
     return [nums, target], _search_in_rotated_sorted_array_oracle(nums, target)
 # No profiler input: O(log n) growth is flat at the probe sizes, and the
 # O(1) <-> O(log n) boundary is a knife-edge — measured, see the fragment notes.
+
+@profiler_input("search-in-rotated-sorted-array")
+def _search_in_rotated_sorted_array_profiler(n: int, rng: random.Random) -> list:
+    """Distinct ascending values rotated by n//2, with an ABSENT target inside the
+    statement's range: the search must run its loop to exhaustion (no lucky
+    midpoint hit) and a linear student scan must read every element.
+
+    This input was omitted at first because a correct, C-accelerated student
+    (pivot + bisect) was named "better than the reference — O(1)" in 2 of 8 runs;
+    `growth.verdict` now refuses a better-than-declared claim against a
+    sub-linear class (v0.14), and the batch verifier re-measured the input on the
+    current rule: correct pivot search 6/6 "matches", correct pivot+bisect 5/6
+    "matches" and 1/6 "unresolved", a linear scan 6/6 "worse — O(n)" (15-19x)."""
+    n = max(1, min(n, 5000))
+    values = list(range(n))
+    rotated = values[n // 2:] + values[:n // 2]
+    return [rotated, 10_000]  # absent, and inside -10^4 <= target <= 10^4
+# No profiler input: O(log n) growth is flat at the probe sizes, and the
+# O(1) <-> O(log n) boundary is a knife-edge — measured, see the fragment notes.
 # No profiler input: O(log n) growth is flat at the probe sizes, and the
 # O(1) <-> O(log n) boundary is a knife-edge — measured, see the fragment notes.
 
@@ -2904,6 +2923,24 @@ def _find_minimum_in_rotated_sorted_array_case(n: int, rng: random.Random) -> tu
     k = rng.randrange(n)
     nums = ascending[k:] + ascending[:k]
     return [nums], _find_minimum_in_rotated_sorted_array_oracle(nums)
+# No profiler input: same O(log n) flatness/knife-edge as its sibling
+# search-in-rotated-sorted-array — measured, see the fragment notes.
+
+@profiler_input("find-minimum-in-rotated-sorted-array")
+def _find_minimum_in_rotated_sorted_array_profiler(n: int, rng: random.Random) -> list:
+    """Ascending distinct values rotated LEFT by one: the single descent sits at
+    the very end, so the reference's loop runs to exhaustion and no linear
+    shortcut (min(nums), or a scan stopping at the first inversion) can exit
+    early on anything but the last comparison.
+
+    Omitted at first for the sibling's reason (a false "better — O(1)" for a
+    correct C-accelerated student); the sub-linear guard in `growth.verdict`
+    removes that risk, and the batch verifier measured the input on the current
+    rule: correct log search 6/6 "matches", a C-accelerated keyed variant 6/6
+    "matches", min(nums) 6/6 "worse — O(n)" (13-15x)."""
+    n = max(1, min(n, 5000))
+    values = list(range(n))
+    return [values[1:] + values[:1]]
 # No profiler input: same O(log n) flatness/knife-edge as its sibling
 # search-in-rotated-sorted-array — measured, see the fragment notes.
 # No profiler input: same O(log n) flatness/knife-edge as its sibling
@@ -3000,29 +3037,21 @@ def _koko_eating_bananas_case(n: int, rng: random.Random) -> tuple[list, int]:
 
 @profiler_input("koko-eating-bananas")
 def _koko_eating_bananas_profiler(n: int, rng: random.Random) -> list:
-    # n piles, every one of them within 1_000 of 10_000, and h = 5n: the answer
-    # is exactly 2_000, and the reference's binary search then takes all 14
-    # rounds of the range [1, max(piles)] — the geometric maximum for this
-    # midpoint scheme, which I checked exhaustively over every possible answer
-    # instead of assuming it (h = 2n gives the same shape but k* = 5_000 and only
-    # 13 of the 14 rounds; the count depends on where the answer sits in the
-    # interval tree, and it is identical at every ladder size because the range
-    # does not depend on n). Every round scans all n piles, so nothing
-    # early-exits on the reference side. The piles are deliberately all about the
-    # same size: with one dominant pile the `hours > h` short-circuit a
-    # feasibility check may use would decide after a single pile and a student's
-    # check would measure as O(1), which is the early-exit trap this input exists
-    # to close — with these piles the shortest scan any visited speed provokes is
-    # 0.62n. Values stay inside 1 <= piles[i] <= 10^9 and
-    # piles.length <= h <= 10^9.
-    #
-    # 10^4 rather than the statement's 10^9 is a deliberate ceiling: the
-    # brute-force oracle has to run on this same input (probe_smoke runs it as
-    # the student up to n=800, _oracle_confirms at the disputed size), and its
-    # cost grows with the largest pile. At 10^4 it is still a ~14-probe search,
-    # so the intended cost model is fully exercised.
-    n = max(1, min(n, 10_000))  # 1 <= piles.length <= 10^4
-    piles = [10_000 - (i % 1_000) for i in range(n)]
+    """n piles whose VALUES scale with n (n .. n + n/4), h = 5n, so the answer
+    (n/4) is strictly inside [1, max(piles)] and the reference's binary search
+    takes its full round count while every round scans all n piles.
+
+    The values scale with n on purpose: with piles fixed near 10^4 the naive
+    "try every speed from 1 to max(piles)" scan is linear IN n (its cost is
+    n * max(piles), and max(piles) never grew), so it measured as "matches" with
+    a ~100x constant factor — the batch verifier's finding, reproduced with the
+    real probe. Scaling the values makes that wrong-class solution report
+    "worse — O(n^2)" (trend 15-19x, ratio climbing 3.1 -> 92.6), while the
+    brute-force oracle stays affordable (0.007 s at n=800, 0.509 s at n=6400) and
+    every value stays inside 1 <= piles[i] <= 10^9."""
+    n = max(2, min(n, 10_000))
+    half = max(1, n // 2)
+    piles = [n + (i % half) // 2 for i in range(n)]
     return [piles, 5 * n]
 
 
@@ -7504,8 +7533,6 @@ def _time_based_key_value_store_reference(ops: list[list]) -> list:
         else:  # pragma: no cover - the generator only emits set and get
             raise ValueError(f"unknown op {method}")
     return out
-
-
 # --- canonical reference (design-add-and-search-words-data-structure) ---
 
 @reference("design-add-and-search-words-data-structure")
