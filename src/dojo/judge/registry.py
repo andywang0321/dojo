@@ -961,6 +961,346 @@ def _find_a_peak_case(n: int, rng: random.Random) -> tuple[list, int]:
 # uses (100..6400) and would be misreported as O(1) — an honesty choice.
 
 
+
+@oracle("median-of-two-sorted-arrays")
+def _median_of_two_sorted_arrays_oracle(nums1: list[int], nums2: list[int]) -> float | None:
+    """Brute force: merge both arrays (sorted() is the merge), take the middle —
+    the mean of the two middle elements when the total is even. Written to be
+    total on two empty arrays, though the statement requires m + n >= 1."""
+    merged = sorted(nums1 + nums2)
+    size = len(merged)
+    if size == 0:
+        return None
+    mid = size // 2
+    if size % 2:
+        return float(merged[mid])
+    return (merged[mid - 1] + merged[mid]) / 2
+
+
+@judge_case("median-of-two-sorted-arrays")
+def _median_of_two_sorted_arrays_case(
+    n: int, rng: random.Random
+) -> tuple[list, float, dict]:
+    size = max(1, min(n, 12))  # the statement's own bound: 1 <= m + n
+    m = rng.randint(0, size)  # either side may be empty (0 <= m, 0 <= n)
+    k = size - m
+    # Values are inside [-10^6, 10^6]; duplicates are allowed by the statement
+    # (only "sorted" is promised), and the median of a multiset is unique anyway.
+    nums1 = sorted(rng.randint(-1_000_000, 1_000_000) for _ in range(m))
+    nums2 = sorted(rng.randint(-1_000_000, 1_000_000) for _ in range(k))
+    expected = _median_of_two_sorted_arrays_oracle(nums1, nums2)
+    return [nums1, nums2], expected, {"compare": "approx:1e-5"}
+
+
+@profiler_input("median-of-two-sorted-arrays")
+def _median_of_two_sorted_arrays_profiler(n: int, rng: random.Random) -> list:
+    # An even total split evenly and interleaved: both halves are non-empty,
+    # strictly increasing, and neither dominates, so the partition search does
+    # its full log(min(m, n)).
+    #
+    # The merged middle pair is (v, v + 1) by construction, so the median is a
+    # half-integer: every correct solution returns exactly the same float, which
+    # is what lets the probe's exact digest comparison accept a correct answer
+    # instead of blaming it for an int/float spelling (an odd total would let a
+    # solution legally return the int middle element and disagree with this
+    # reference's float on the digest alone).
+    total = max(2, n - (n % 2))
+    merged = [-1_000_000 + i for i in range(total)]  # distinct, ascending, in range
+    return [merged[0::2], merged[1::2]]
+
+
+
+@oracle("search-in-rotated-sorted-array")
+def _search_in_rotated_sorted_array_oracle(nums: list[int], target: int) -> int:
+    for i, value in enumerate(nums):
+        if value == target:
+            return i
+    return -1
+
+
+@judge_case("search-in-rotated-sorted-array")
+def _search_in_rotated_sorted_array_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= nums.length
+    ascending = sorted(rng.sample(range(-10_000, 10_001), n))  # unique, inside [-10^4, 10^4]
+    # k = 0 is the "possibly rotated" reading of the constraints (the parenthetical
+    # k >= 1 describes a genuine rotation; the constraint line admits nums sorted).
+    k = rng.randrange(n) if n > 1 else 0
+    nums = ascending[k:] + ascending[:k]
+    if rng.random() < 0.5:
+        target = rng.choice(nums)
+    else:  # a target that is genuinely absent: the "-1" path, not a lucky hit
+        present = set(nums)
+        target = rng.randint(-10_000, 10_000)
+        while target in present:
+            target = target + 1 if target < 10_000 else -10_000
+    return [nums, target], _search_in_rotated_sorted_array_oracle(nums, target)
+# No profiler input: O(log n) growth is flat at the probe sizes, and the
+# O(1) <-> O(log n) boundary is a knife-edge — measured, see the fragment notes.
+# No profiler input: O(log n) growth is flat at the probe sizes, and the
+# O(1) <-> O(log n) boundary is a knife-edge — measured, see the fragment notes.
+
+
+
+@oracle("search-a-2d-matrix")
+def _search_a_2d_matrix_oracle(matrix: list[list[int]], target: int) -> bool:
+    # Brute force: visit every cell and use none of the sortedness.
+    for row in matrix:
+        for value in row:
+            if value == target:
+                return True
+    return False
+
+
+def _search_a_2d_matrix_absent_target(values: list[int], rng: random.Random) -> int:
+    """A target inside the statement's own range that is not in ``values``."""
+    present = set(values)
+    for _ in range(64):
+        candidate = rng.randint(-10_000, 10_000)
+        if candidate not in present:
+            return candidate
+    # Unreachable with <= 12 values drawn from 20_001, kept so this is total.
+    return next(v for v in range(-10_000, 10_001) if v not in present)
+
+
+@judge_case("search-a-2d-matrix")
+def _search_a_2d_matrix_case(n: int, rng: random.Random) -> tuple[list, bool]:
+    total = max(1, min(n, 12))  # the statement's floor: m >= 1 and n >= 1
+    rows = rng.randint(1, min(4, total))
+    cols = rng.randint(1, max(1, total // rows))
+    # Strictly increasing in flattened order, so each row is non-decreasing AND
+    # the first integer of each row is greater than the last of the previous one
+    # (strictly increasing is the only shape that gives the statement's strict
+    # ">" between rows). Values stay inside -10^4 <= matrix[i][j] <= 10^4.
+    values: list[int] = []
+    current = rng.randint(-10_000, 10_000 - 5 * rows * cols)
+    for _ in range(rows * cols):
+        values.append(current)
+        current += rng.randint(1, 5)
+    matrix = [values[i * cols:(i + 1) * cols] for i in range(rows)]
+    if rng.random() < 0.5:
+        target = rng.choice(values)  # a hit, the shape example 1 has
+    else:
+        target = _search_a_2d_matrix_absent_target(values, rng)  # a miss
+    return [matrix, target], _search_a_2d_matrix_oracle(matrix, target)
+
+
+@profiler_input("search-a-2d-matrix")
+def _search_a_2d_matrix_profiler(n: int, rng: random.Random) -> list:
+    # The matrix is one strictly increasing run of EVEN values laid out row by
+    # row (so both stated properties hold exactly), and the target is an ODD
+    # value in the gap just below the LAST cell: it is not in the matrix, so the
+    # binary search cannot stop at a lucky midpoint but must run its loop to
+    # exhaustion, on a deepest gap for this midpoint scheme (one round deeper
+    # than a mid-matrix miss at every size I measured), while a linear scan must
+    # read every cell (the `target > matrix[-1][-1]` short-circuit cannot fire
+    # either). All values and the target are inside
+    # -10^4 <= matrix[i][j], target <= 10^4, and the shape is square-ish with
+    # both dimensions <= 100 (the statement's own bound), so the cell count is
+    # ~n for the probe's ladder.
+    n = max(2, min(n, 10_000))  # 100 x 100 is the most cells the statement allows
+    side = max(1, int(n**0.5))  # no `math` import here: registry.py imports only random
+    while side * side < n and side < 100:
+        side += 1
+    cols = min(100, side)
+    rows = min(100, -(-n // cols))
+    total = rows * cols
+    values = [-10_000 + 2 * i for i in range(total)]
+    matrix = [values[i * cols:(i + 1) * cols] for i in range(rows)]
+    target = values[-2] + 1
+    return [matrix, target]
+
+
+
+@oracle("find-minimum-in-rotated-sorted-array")
+def _find_minimum_in_rotated_sorted_array_oracle(nums: list[int]) -> int | None:
+    best = None
+    for value in nums:
+        if best is None or value < best:
+            best = value
+    return best
+
+
+@judge_case("find-minimum-in-rotated-sorted-array")
+def _find_minimum_in_rotated_sorted_array_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(1, min(n, 12))  # the statement's own constraint: 1 <= n
+    ascending = sorted(rng.sample(range(-5_000, 5_001), n))  # unique, inside [-5000, 5000]
+    # k = 0 is the "rotated n times" case the statement allows explicitly (its
+    # example 3, [11,13,15,17], is exactly that).
+    k = rng.randrange(n)
+    nums = ascending[k:] + ascending[:k]
+    return [nums], _find_minimum_in_rotated_sorted_array_oracle(nums)
+# No profiler input: same O(log n) flatness/knife-edge as its sibling
+# search-in-rotated-sorted-array — measured, see the fragment notes.
+# No profiler input: same O(log n) flatness/knife-edge as its sibling
+# search-in-rotated-sorted-array — measured, see the fragment notes.
+
+
+
+@oracle("binary-search")
+def _binary_search_oracle(nums: list[int], target: int) -> int:
+    # Brute force: read the array left to right and stop at the first match.
+    # The statement promises unique values, so the first match is the only one,
+    # and a full pass without a match is the -1.
+    for i, value in enumerate(nums):
+        if value == target:
+            return i
+    return -1
+
+
+def _binary_search_absent_target(nums: list[int], rng: random.Random) -> int:
+    """A target inside the statement's own range that is not in ``nums``."""
+    present = set(nums)
+    for _ in range(64):
+        candidate = rng.randint(-9_999, 9_999)
+        if candidate not in present:
+            return candidate
+    # Unreachable with <= 12 values drawn from 19_999, kept so this is total.
+    return next(v for v in range(-9_999, 10_000) if v not in present)
+
+
+@judge_case("binary-search")
+def _binary_search_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(1, min(n, 12))  # the statement's floor: nums.length >= 1
+    # Ascending and unique (the statement's own two promises), every value
+    # strictly inside -10^4 < nums[i] < 10^4.
+    nums = sorted(rng.sample(range(-9_999, 10_000), n))
+    if rng.random() < 0.5:
+        target = rng.choice(nums)  # a hit, the shape both examples have
+    else:
+        target = _binary_search_absent_target(nums, rng)  # a miss
+    return [nums, target], _binary_search_oracle(nums, target)
+
+
+@profiler_input("binary-search")
+def _binary_search_profiler(n: int, rng: random.Random) -> list:
+    # Both ways this input could let something finish early are closed. The
+    # target is ABSENT, so a binary search cannot stop at a lucky midpoint but
+    # must run its loop to exhaustion; it sits in the gap just below the LARGEST
+    # element, a deepest gap for this midpoint scheme (one round deeper than a
+    # mid-array miss at every size I measured); and it is strictly inside the
+    # value span, so the `target > nums[-1]` short-circuit a linear scan might
+    # use cannot fire and a linear scan must read all n. Values are all odd and
+    # the target is even (the miss is structural, not luck), and every value and
+    # the target are strictly inside the statement's -10^4 < nums[i], target <
+    # 10^4 range. n is capped at the statement's own 10^4 (the probe's ladder
+    # stops at 6400) and floored at 2 so the top gap exists.
+    n = max(2, min(n, 10_000))
+    nums = [-9_999 + 2 * i for i in range(n)]
+    target = nums[-2] + 1
+    return [nums, target]
+
+
+
+@oracle("koko-eating-bananas")
+def _koko_eating_bananas_oracle(piles: list[int], h: int) -> int:
+    # Brute force: try every speed from 1 upwards and answer with the first one
+    # that fits in h hours. The `hours > h` break only skips the rest of a sum
+    # that has already failed, so it cannot change the answer; without it this
+    # loop would be hopeless on the profiler input, where the answer is 2000.
+    if not piles:
+        return 1  # unreachable under the statement's constraints (length >= 1)
+    for speed in range(1, max(piles) + 1):
+        hours = 0
+        for pile in piles:
+            hours += -(-pile // speed)  # ceil(pile / speed), in integers
+            if hours > h:
+                break
+        if hours <= h:
+            return speed
+    # Unreachable while h >= len(piles): speed = max(piles) costs exactly
+    # len(piles) hours, which the statement's `piles.length <= h` allows.
+    return max(piles)
+
+
+@judge_case("koko-eating-bananas")
+def _koko_eating_bananas_case(n: int, rng: random.Random) -> tuple[list, int]:
+    n = max(1, min(n, 12))  # the statement's floor: piles.length >= 1
+    piles = [rng.randint(1, 20) for _ in range(n)]
+    # piles.length <= h is the statement's own floor, and h == n is the tightest
+    # legal case there is (every pile eaten in exactly one hour, answer = the
+    # largest pile) — it is included on purpose, not by accident.
+    h = rng.randint(n, n + 6)
+    return [piles, h], _koko_eating_bananas_oracle(piles, h)
+
+
+@profiler_input("koko-eating-bananas")
+def _koko_eating_bananas_profiler(n: int, rng: random.Random) -> list:
+    # n piles, every one of them within 1_000 of 10_000, and h = 5n: the answer
+    # is exactly 2_000, and the reference's binary search then takes all 14
+    # rounds of the range [1, max(piles)] — the geometric maximum for this
+    # midpoint scheme, which I checked exhaustively over every possible answer
+    # instead of assuming it (h = 2n gives the same shape but k* = 5_000 and only
+    # 13 of the 14 rounds; the count depends on where the answer sits in the
+    # interval tree, and it is identical at every ladder size because the range
+    # does not depend on n). Every round scans all n piles, so nothing
+    # early-exits on the reference side. The piles are deliberately all about the
+    # same size: with one dominant pile the `hours > h` short-circuit a
+    # feasibility check may use would decide after a single pile and a student's
+    # check would measure as O(1), which is the early-exit trap this input exists
+    # to close — with these piles the shortest scan any visited speed provokes is
+    # 0.62n. Values stay inside 1 <= piles[i] <= 10^9 and
+    # piles.length <= h <= 10^9.
+    #
+    # 10^4 rather than the statement's 10^9 is a deliberate ceiling: the
+    # brute-force oracle has to run on this same input (probe_smoke runs it as
+    # the student up to n=800, _oracle_confirms at the disputed size), and its
+    # cost grows with the largest pile. At 10^4 it is still a ~14-probe search,
+    # so the intended cost model is fully exercised.
+    n = max(1, min(n, 10_000))  # 1 <= piles.length <= 10^4
+    piles = [10_000 - (i % 1_000) for i in range(n)]
+    return [piles, 5 * n]
+
+
+
+@oracle("time-based-key-value-store")
+def _time_based_key_value_store_oracle(ops: list[list]) -> list:
+    """Brute force: keep every (timestamp, value) for a key and scan them all on
+    a get, taking the latest timestamp that is <= the query."""
+    store: dict[str, list[list]] = {}
+    out: list = []
+    for op in ops:
+        method, *args = op
+        if method == "set":
+            key, value, timestamp = args
+            store.setdefault(key, []).append([timestamp, value])
+            out.append(None)
+        elif method == "get":
+            key, timestamp = args
+            latest_stamp = None
+            latest_value = ""
+            for stamp, value in store.get(key, []):
+                if stamp <= timestamp and (latest_stamp is None or stamp > latest_stamp):
+                    latest_stamp, latest_value = stamp, value
+            out.append(latest_value)
+        else:  # pragma: no cover - the generator only emits set and get
+            raise ValueError(f"unknown op {method}")
+    return out
+
+
+@judge_case("time-based-key-value-store")
+def _time_based_key_value_store_case(n: int, rng: random.Random) -> tuple[list, list, dict]:
+    # Deterministic by construction: every op comes from the seeded rng, the
+    # timestamps are a strictly increasing counter (the statement's own
+    # guarantee), and the key pool is fixed, so the same (n, rng) always
+    # replays the same sequence on a fresh instance.
+    steps = 2 * max(1, min(n, 12)) + 1
+    written = ("k0", "k1", "k2")  # keys that get writes
+    keys = written + ("k3",)  # k3 is never written: get on it must answer ""
+    ops: list[list] = []
+    stamp = 0
+    for step in range(steps):
+        key = rng.choice(keys if step % 2 else written)
+        if step % 2 == 0:  # a set: the timestamp only ever moves forward
+            stamp += rng.randint(1, 4)
+            value = "".join(
+                rng.choice("abcdefghijklmnopqrstuvwxyz0123456789")
+                for _ in range(rng.randint(1, 3))
+            )
+            ops.append(["set", key, value, stamp])
+        else:  # a get: at, just before, or just after the newest timestamp
+            asked = max(1, stamp + rng.choice([-1, 0, 0, 1, 2]))
+            ops.append(["get", key, asked])
+    return [], _time_based_key_value_store_oracle(ops), {"ops": ops}
 # ------------------------------------------------------- dynamic_programming
 
 
@@ -1948,4 +2288,169 @@ def _sliding_window_maximum_reference(nums: list[int], k: int) -> list[int]:
             window.popleft()  # the front has left the window
         if i >= k - 1:
             out.append(nums[window[0]])
+    return out
+
+
+# --- canonical reference (binary-search) ---
+
+@reference("binary-search")
+def _binary_search_reference(nums: list[int], target: int) -> int:
+    lo, hi = 0, len(nums) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if nums[mid] == target:
+            return mid
+        if nums[mid] < target:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return -1
+# --- canonical reference (find-minimum-in-rotated-sorted-array) ---
+
+@reference("find-minimum-in-rotated-sorted-array")
+def _find_minimum_in_rotated_sorted_array_reference(nums: list[int]) -> int | None:
+    """Canonical O(log n): compare the middle with the last element — if it is
+    larger, the minimum is to its right, otherwise it is at or left of it."""
+    if not nums:
+        return None
+    lo, hi = 0, len(nums) - 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if nums[mid] > nums[hi]:
+            lo = mid + 1
+        else:
+            hi = mid
+    return nums[lo]
+# --- canonical reference (koko-eating-bananas) ---
+
+@reference("koko-eating-bananas")
+def _koko_eating_bananas_reference(piles: list[int], h: int) -> int:
+    if not piles:
+        return 1  # unreachable under the statement's constraints (length >= 1)
+
+    def hours_for(speed: int) -> int:
+        total = 0
+        for pile in piles:
+            total += -(-pile // speed)  # ceil(pile / speed), in integers
+        return total
+
+    # Feasibility is monotone in the speed (a bigger speed never costs more
+    # hours) and speed = max(piles) always fits, because the statement promises
+    # piles.length <= h. So binary search the smallest feasible speed, scanning
+    # every pile on every probe — nothing here exits early.
+    lo, hi = 1, max(piles)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if hours_for(mid) <= h:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+# --- canonical reference (median-of-two-sorted-arrays) ---
+
+@reference("median-of-two-sorted-arrays")
+def _median_of_two_sorted_arrays_reference(nums1: list[int], nums2: list[int]) -> float | None:
+    """Canonical O(log min(m, n)): binary search how many elements of the smaller
+    array sit left of the split, so that everything on the left is <= everything
+    on the right; the median then reads off the four boundary values."""
+    a, b = (nums1, nums2) if len(nums1) <= len(nums2) else (nums2, nums1)
+    m, n = len(a), len(b)
+    if m + n == 0:
+        return None
+    half = (m + n + 1) // 2  # the left side holds this many elements
+    lo, hi = 0, m
+    while lo <= hi:
+        i = (lo + hi) // 2  # elements of a on the left
+        j = half - i  # elements of b on the left
+        left_a = a[i - 1] if i > 0 else float("-inf")
+        right_a = a[i] if i < m else float("inf")
+        left_b = b[j - 1] if j > 0 else float("-inf")
+        right_b = b[j] if j < n else float("inf")
+        if left_a > right_b:
+            hi = i - 1
+        elif left_b > right_a:
+            lo = i + 1
+        else:
+            if (m + n) % 2:
+                return float(max(left_a, left_b))
+            return (max(left_a, left_b) + min(right_a, right_b)) / 2
+    raise ValueError("median of two sorted arrays: inputs are not sorted")
+# --- canonical reference (search-a-2d-matrix) ---
+
+@reference("search-a-2d-matrix")
+def _search_a_2d_matrix_reference(matrix: list[list[int]], target: int) -> bool:
+    # The two stated properties make the matrix a single sorted array read row
+    # by row, so one binary search over cell indices is enough — and it never
+    # materialises that array.
+    if not matrix or not matrix[0]:
+        return False
+    cols = len(matrix[0])  # the statement guarantees every row is n long
+    lo, hi = 0, len(matrix) * cols - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        value = matrix[mid // cols][mid % cols]
+        if value == target:
+            return True
+        if value < target:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return False
+# --- canonical reference (search-in-rotated-sorted-array) ---
+
+@reference("search-in-rotated-sorted-array")
+def _search_in_rotated_sorted_array_reference(nums: list[int], target: int) -> int:
+    """Canonical O(log n): one half is always sorted, so the target's side of the
+    wrap is decidable from the sorted half alone. Distinct values are guaranteed
+    by the statement, so no tie handling is needed."""
+    lo, hi = 0, len(nums) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if nums[mid] == target:
+            return mid
+        if nums[lo] <= nums[mid]:  # the left half is sorted
+            if nums[lo] <= target < nums[mid]:
+                hi = mid - 1
+            else:
+                lo = mid + 1
+        else:  # the right half is sorted
+            if nums[mid] < target <= nums[hi]:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+    return -1
+# --- canonical reference (time-based-key-value-store) ---
+
+@reference("time-based-key-value-store")
+def _time_based_key_value_store_reference(ops: list[list]) -> list:
+    """Canonical TimeMap, driven through the same op list the oracle takes:
+    one growing list of (timestamp, value) per key (appended in the statement's
+    strictly increasing timestamp order) and a binary search for the latest set
+    at or before the query — O(1) per set, O(log n) per get, O(n) space."""
+    store: dict[str, list[tuple[int, str]]] = {}
+    out: list = []
+    for op in ops:
+        method, *args = op
+        if method == "set":
+            key, value, timestamp = args
+            store.setdefault(key, []).append((timestamp, value))
+            out.append(None)
+        elif method == "get":
+            key, timestamp = args
+            entries = store.get(key)
+            if not entries:
+                out.append("")
+                continue
+            lo, hi = 0, len(entries) - 1
+            found = -1  # index of the latest timestamp <= the query
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                if entries[mid][0] <= timestamp:
+                    found = mid
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            out.append(entries[found][1] if found >= 0 else "")
+        else:  # pragma: no cover - the generator only emits set and get
+            raise ValueError(f"unknown op {method}")
     return out

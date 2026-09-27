@@ -16,4 +16,7 @@ Output: 23
 Constraints:
 * 1 <= piles.length <= 10^4
 * piles.length <= h <= 10^9
-* 1 <= piles[i] <= 10^9"""
+* 1 <= piles[i] <= 10^9
+
+You should aim for a solution as good or better than O(n log m) time and O(1) space, where n is the number of piles and m is the largest pile.
+"""

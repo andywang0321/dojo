@@ -23,4 +23,7 @@ Constraints:
 * 1 <= n <= 5000
 * -5000 <= nums[i] <= 5000
 * All the integers of nums are unique.
-* nums is sorted and rotated between 1 and n times."""
+* nums is sorted and rotated between 1 and n times.
+
+You should aim for a solution with O(log n) time and O(1) space, where n is the length of the nums array.
+"""

@@ -14,4 +14,7 @@ Constraints:
 * 1 <= nums.length <= 10^4
 * -10^4 < nums[i], target < 10^4
 * All the integers in nums are unique.
-* nums is sorted in ascending order."""
+* nums is sorted in ascending order.
+
+You should aim for a solution as good or better than O(log n) time and O(1) space, where n is the length of the nums array.
+"""

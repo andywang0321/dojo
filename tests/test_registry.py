@@ -126,6 +126,32 @@ def test_generated_cases_agree_with_references():
                 assert _equal(got, expected), f"{where}: {got!r} vs {expected!r}"
 
 
+def test_every_profiler_input_runs_and_is_json_serializable():
+    """Corpus-wide smoke for the measurement path (v0.14).
+
+    A `@profiler_input` body is never executed by the other tests — it runs only
+    inside a live session's probe, where a raising generator degrades to "no
+    measurement" behind `dojo.guard` and says nothing about why. So a fragment
+    whose generator called `math.isqrt` without importing `math` (LC 74 — caught
+    by `data/curation/offline/probe_smoke.py`, not by the suite) would have
+    shipped silently. The args must also survive `json.dumps`: the probe writes
+    them to `args.json`.
+    """
+    from dojo.judge import PROFILER_INPUTS
+
+    rng = random.Random("profiler-input-smoke")
+    for slug, generator in PROFILER_INPUTS.items():
+        for n in (1, 16):
+            try:
+                args = generator(n, rng)
+            except Exception as exc:  # noqa: BLE001 - reporting the failure is the point
+                raise AssertionError(
+                    f"{slug}: profiler input raised at n={n}: {exc!r}"
+                ) from exc
+            assert isinstance(args, list), f"{slug}: profiler input must return an args list"
+            json.dumps(args)  # the probe's JSON hand-off
+
+
 def test_profiler_inputs_match_curated_slugs_and_scale():
     from dojo.judge import PROFILER_INPUTS
 
@@ -243,6 +269,26 @@ _WRAPPERS = {
         "def generate_sample(n, sigma, target):\n"
         "    return _reference_sample(n, sigma, target)\n"
     ),
+    # An ops (class) problem: the harness instantiates `function_name` and
+    # replays the method sequence, so the representative solution is a class
+    # carrying the statement's own method names.
+    "time-based-key-value-store": textwrap.dedent(
+        """
+        class TimeMap:
+            def __init__(self):
+                self.store = {}
+
+            def set(self, key: str, value: str, timestamp: int) -> None:
+                self.store.setdefault(key, []).append((timestamp, value))
+
+            def get(self, key: str, timestamp: int) -> str:
+                best = ""
+                for ts, value in self.store.get(key, []):
+                    if ts <= timestamp:
+                        best = value
+                return best
+        """
+    ),
 }
 
 
@@ -274,6 +320,9 @@ def test_references_survive_the_real_judge(tmp_path):
         "minimum-window-substring",
         "best-time-to-buy-and-sell-stock",
         "sliding-window-maximum",
+        "median-of-two-sorted-arrays",  # an approx-float verdict
+        "time-based-key-value-store",  # ops (class) mode through the real judge
+        "binary-search",  # a declared O(log n) target with a profiler input
     ):
         entry = overrides[slug]
         path = tmp_path / f"{slug}.py"

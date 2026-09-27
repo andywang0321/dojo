@@ -24,4 +24,7 @@ Constraints:
 * key and value consist of lowercase English letters and digits.
 * 1 <= timestamp <= 10^7
 * All the timestamps timestamp of set are strictly increasing.
-* At most 2 * 10^5 calls will be made to set and get."""
+* At most 2 * 10^5 calls will be made to set and get.
+
+You should aim for a solution as good or better than O(log n) time and O(n) space, where n is the number of set calls: each set is O(1), and each get pays O(log n) for a binary search over the timestamps stored for its key.
+"""

@@ -18,4 +18,7 @@ Constraints:
 * -10^4 <= nums[i] <= 10^4
 * All values of nums are unique.
 * nums is an ascending array that is possibly rotated.
-* -10^4 <= target <= 10^4"""
+* -10^4 <= target <= 10^4
+
+You should aim for a solution with O(log n) time and O(1) space, where n is the length of the nums array.
+"""

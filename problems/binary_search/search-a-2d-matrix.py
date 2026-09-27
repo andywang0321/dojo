@@ -15,4 +15,7 @@ Constraints:
 * m == matrix.length
 * n == matrix[i].length
 * 1 <= m, n <= 100
-* -10^4 <= matrix[i][j], target <= 10^4"""
+* -10^4 <= matrix[i][j], target <= 10^4
+
+You should aim for a solution as good or better than O(log N) time and O(1) space, where N = m * n is the total number of cells in the matrix (m rows of n columns, as the constraints above name them).
+"""

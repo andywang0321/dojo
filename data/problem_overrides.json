@@ -2271,5 +2271,522 @@
       }
     ],
     "lc_number": 567
+  },
+  "median-of-two-sorted-arrays": {
+    "function_name": "find_median_sorted_arrays",
+    "signature": "(nums1: list[int], nums2: list[int]) -> float",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            3
+          ],
+          [
+            2
+          ]
+        ],
+        "expected": 2.0,
+        "compare": "approx:1e-5"
+      },
+      {
+        "args": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4
+          ]
+        ],
+        "expected": 2.5,
+        "compare": "approx:1e-5"
+      },
+      {
+        "args": [
+          [],
+          [
+            1
+          ]
+        ],
+        "expected": 1.0,
+        "compare": "approx:1e-5"
+      },
+      {
+        "args": [
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ],
+        "expected": 1.5,
+        "compare": "approx:1e-5"
+      }
+    ],
+    "lc_number": 4,
+    "probe_max_n": 1600
+  },
+  "search-in-rotated-sorted-array": {
+    "function_name": "search",
+    "signature": "(nums: list[int], target: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ],
+          0
+        ],
+        "expected": 4
+      },
+      {
+        "args": [
+          [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ],
+          3
+        ],
+        "expected": -1
+      },
+      {
+        "args": [
+          [
+            1
+          ],
+          0
+        ],
+        "expected": -1
+      },
+      {
+        "args": [
+          [
+            1,
+            3
+          ],
+          1
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            3,
+            1
+          ],
+          1
+        ],
+        "expected": 1
+      }
+    ],
+    "lc_number": 33
+  },
+  "search-a-2d-matrix": {
+    "function_name": "search_matrix",
+    "signature": "(matrix: list[list[int]], target: int) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              3,
+              5,
+              7
+            ],
+            [
+              10,
+              11,
+              16,
+              20
+            ],
+            [
+              23,
+              30,
+              34,
+              60
+            ]
+          ],
+          3
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              3,
+              5,
+              7
+            ],
+            [
+              10,
+              11,
+              16,
+              20
+            ],
+            [
+              23,
+              30,
+              34,
+              60
+            ]
+          ],
+          13
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            [
+              1
+            ]
+          ],
+          1
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              3
+            ]
+          ],
+          2
+        ],
+        "expected": false
+      }
+    ],
+    "lc_number": 74
+  },
+  "find-minimum-in-rotated-sorted-array": {
+    "function_name": "find_min",
+    "signature": "(nums: list[int]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            4,
+            5,
+            1,
+            2
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            2
+          ]
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            11,
+            13,
+            15,
+            17
+          ]
+        ],
+        "expected": 11
+      },
+      {
+        "args": [
+          [
+            1
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            2,
+            1
+          ]
+        ],
+        "expected": 1
+      }
+    ],
+    "lc_number": 153
+  },
+  "binary-search": {
+    "function_name": "search",
+    "signature": "(nums: list[int], target: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            -1,
+            0,
+            3,
+            5,
+            9,
+            12
+          ],
+          9
+        ],
+        "expected": 4
+      },
+      {
+        "args": [
+          [
+            -1,
+            0,
+            3,
+            5,
+            9,
+            12
+          ],
+          2
+        ],
+        "expected": -1
+      },
+      {
+        "args": [
+          [
+            5
+          ],
+          5
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            5
+          ],
+          -3
+        ],
+        "expected": -1
+      }
+    ],
+    "lc_number": 704
+  },
+  "koko-eating-bananas": {
+    "function_name": "min_eating_speed",
+    "signature": "(piles: list[int], h: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            6,
+            7,
+            11
+          ],
+          8
+        ],
+        "expected": 4
+      },
+      {
+        "args": [
+          [
+            30,
+            11,
+            23,
+            4,
+            20
+          ],
+          5
+        ],
+        "expected": 30
+      },
+      {
+        "args": [
+          [
+            30,
+            11,
+            23,
+            4,
+            20
+          ],
+          6
+        ],
+        "expected": 23
+      },
+      {
+        "args": [
+          [
+            3,
+            6,
+            7,
+            11
+          ],
+          4
+        ],
+        "expected": 11
+      },
+      {
+        "args": [
+          [
+            5
+          ],
+          5
+        ],
+        "expected": 1
+      }
+    ],
+    "lc_number": 875
+  },
+  "time-based-key-value-store": {
+    "function_name": "TimeMap",
+    "signature": {
+      "methods": {
+        "set": "(self, key: str, value: str, timestamp: int) -> None",
+        "get": "(self, key: str, timestamp: int) -> str"
+      }
+    },
+    "visible_tests": [
+      {
+        "ops": [
+          [
+            "set",
+            "foo",
+            "bar",
+            1
+          ],
+          [
+            "get",
+            "foo",
+            1
+          ],
+          [
+            "get",
+            "foo",
+            3
+          ],
+          [
+            "set",
+            "foo",
+            "bar2",
+            4
+          ],
+          [
+            "get",
+            "foo",
+            4
+          ],
+          [
+            "get",
+            "foo",
+            5
+          ]
+        ],
+        "expected": [
+          null,
+          "bar",
+          "bar",
+          null,
+          "bar2",
+          "bar2"
+        ]
+      },
+      {
+        "ops": [
+          [
+            "get",
+            "foo",
+            1
+          ],
+          [
+            "set",
+            "foo",
+            "a",
+            2
+          ],
+          [
+            "get",
+            "foo",
+            1
+          ],
+          [
+            "get",
+            "bar",
+            5
+          ]
+        ],
+        "expected": [
+          "",
+          null,
+          "",
+          ""
+        ]
+      },
+      {
+        "ops": [
+          [
+            "set",
+            "k1",
+            "v1",
+            1
+          ],
+          [
+            "set",
+            "k2",
+            "v2",
+            2
+          ],
+          [
+            "set",
+            "k1",
+            "v3",
+            3
+          ],
+          [
+            "get",
+            "k1",
+            2
+          ],
+          [
+            "get",
+            "k1",
+            3
+          ],
+          [
+            "get",
+            "k2",
+            3
+          ]
+        ],
+        "expected": [
+          null,
+          null,
+          null,
+          "v1",
+          "v3",
+          "v2"
+        ]
+      }
+    ],
+    "lc_number": 981
   }
 }
