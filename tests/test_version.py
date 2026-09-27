@@ -147,15 +147,16 @@ def test_pyproject_is_kept_in_step_with_the_history():
     )
 
 
-def test_the_written_version_is_the_next_commits(monkeypatch, tmp_path):
-    """`make version` = `sync_pyproject()`: write the number the pending commit
-    will have, touch nothing else, and be a no-op the second time."""
+def test_uncommitted_work_gets_the_number_it_will_be_committed_as(monkeypatch, tmp_path):
+    """`make version` = `sync_pyproject()`: with work in the tree, write the number
+    that work will have, touch nothing else, and be a no-op the second time."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         '[project]\nname = "dojo"\nversion = "1.15.0"\n\n[tool.other]\nversion = "keep-me"\n'
     )
     monkeypatch.setattr(version_mod, "_PYPROJECT", pyproject)
     monkeypatch.setattr(version_mod, "commits_since_phase", lambda *a, **k: 4)
+    monkeypatch.setattr(version_mod, "tree_has_changes", lambda *a, **k: True)
 
     assert version_mod.sync_pyproject() == ("1.15.5", True)
     text = pyproject.read_text()
@@ -163,6 +164,39 @@ def test_the_written_version_is_the_next_commits(monkeypatch, tmp_path):
     assert 'version = "keep-me"' in text            # only [project] is touched
     assert 'name = "dojo"' in text                  # ... and only that one line
     assert version_mod.sync_pyproject() == ("1.15.5", False)   # idempotent
+
+
+def test_a_clean_tree_keeps_the_current_version(monkeypatch, tmp_path):
+    """Running it when there is nothing to commit must not invent a commit: the
+    file is what a shell prompt reads, so it has to describe the state you are in
+    (this is the bug the first version had — it wrote `derived + 1` always)."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nversion = "1.15.0"\n')
+    monkeypatch.setattr(version_mod, "_PYPROJECT", pyproject)
+    monkeypatch.setattr(version_mod, "commits_since_phase", lambda *a, **k: 4)
+    monkeypatch.setattr(version_mod, "tree_has_changes", lambda *a, **k: False)
+
+    assert version_mod.sync_pyproject() == ("1.15.4", True)
+    assert 'version = "1.15.4"' in pyproject.read_text()
+    assert version_mod.sync_pyproject() == ("1.15.4", False)
+
+
+def test_a_dirty_tree_is_recognised_by_git(monkeypatch):
+    """The state probe itself: lines mentioning pyproject.toml alone are not work."""
+    clean = SimpleNamespace(returncode=0, stdout="")
+    only_pyproject = SimpleNamespace(returncode=0, stdout=' M pyproject.toml\n')
+    real_work = SimpleNamespace(
+        returncode=0, stdout=' M pyproject.toml\n?? src/dojo/new.py\n'
+    )
+    assert version_mod.tree_has_changes(run=lambda cmd: clean) is False
+    assert version_mod.tree_has_changes(run=lambda cmd: only_pyproject) is False
+    assert version_mod.tree_has_changes(run=lambda cmd: real_work) is True
+    assert version_mod.tree_has_changes(run=lambda cmd: SimpleNamespace(returncode=128, stdout="")) is False
+
+    def no_git(cmd):
+        raise FileNotFoundError("git")
+
+    assert version_mod.tree_has_changes(run=no_git) is False
 
 
 def test_at_a_phase_boundary_the_new_base_stands(monkeypatch, tmp_path):

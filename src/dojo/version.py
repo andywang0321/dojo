@@ -11,9 +11,11 @@ human) sees the real version rather than a phase base.
                 7 commits since phase 13 was completed
 
 **Every commit keeps `pyproject.toml` in step: run `make version`.** It writes the
-version *this* commit will have (`commits_since_phase() + 1`), and
-`tests/test_version.py` fails when the file and the history disagree — so a
-forgotten bump is caught by the suite, not by a stale prompt later.
+version of the state you are in — with uncommitted work, the number that work will
+be committed as (`commits_since_phase() + 1`); on a clean tree, the current one, so
+a casual run cannot invent a commit that does not exist. `tests/test_version.py`
+fails when the file and the history disagree — so a forgotten bump is caught by the
+suite, not by a stale prompt later.
 
 **Completing a phase** is that same bump plus two manual touches, in one commit:
 
@@ -180,16 +182,46 @@ def write_pyproject(version: str, path: Path | None = None) -> Path:
     return target
 
 
-def sync_pyproject(run: Runner | None = None) -> tuple[str, bool]:
-    """Bring `pyproject.toml` in step with the history; returns (version, changed).
+def tree_has_changes(run: Runner | None = None) -> bool:
+    """Whether the working tree carries changes beyond pyproject.toml's own
+    version line — i.e. whether a commit is in flight.
 
-    This is `make version`: idempotent, so running it twice in a row is a no-op,
-    and safe on a checkout whose git it cannot read (nothing changes)."""
-    version = pending_version(run=run)
-    if _parse(version) is None or _pyproject_version() == version:
-        return version, False
-    write_pyproject(version)
-    return version, True
+    This is what makes `make version` honest in both states: with uncommitted
+    work, the tree is one commit away from HEAD, so the version it will be
+    committed as is `commits_since_phase() + 1`; on a clean tree the current
+    version stands, and a casual run must not invent a commit that does not
+    exist. A checkout without git counts as clean — nothing can be committed
+    there anyway, and nothing is pending."""
+    runner = run or _default_runner()
+    try:
+        result = runner(["git", "status", "--porcelain"])
+    except Exception:  # noqa: BLE001 - no git: nothing to be pending
+        return False
+    if getattr(result, "returncode", 1) != 0:
+        return False
+    for line in (result.stdout or "").splitlines():
+        path = line[3:].strip() if len(line) > 3 else ""
+        if path and Path(path).name != _PYPROJECT.name:
+            return True
+    return False
+
+
+def sync_pyproject(run: Runner | None = None) -> tuple[str, bool]:
+    """Bring `pyproject.toml` in step with the state you are in; (version, changed).
+
+    With uncommitted work that is the number the work will be committed as
+    (`pending_version()`); on a clean tree it is the current version. So the file
+    never describes a commit that does not exist, running it twice in a row is a
+    no-op, and it is safe on a checkout whose git it cannot read. This is
+    `make version`."""
+    current = _resolve(run=run)
+    target = pending_version(run=run) if tree_has_changes(run=run) else current
+    if _parse(target) is None:
+        return current, False
+    if _pyproject_version() == target:
+        return target, False
+    write_pyproject(target)
+    return target, True
 
 
 #: The full version, e.g. ``0.13.7`` — major.phases-completed.commits-since.
