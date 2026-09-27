@@ -83,10 +83,14 @@ in [v0.14](v0.14.md) Increment 1.*
     invoked by the suite, and no test drives `main()` into a real `run_day`.
     Add one `main(["day", slug])` smoke test plus tests for
     `show`/`history`/`check`/`warmup`/`report --fix`.
-12. **Content, not code: 121 of 150 ladder problems are landed but uncurated**
-    (29 curated + ladder-tagged), so the ladder and the prereq gate operate over
-    a 29-problem subset. The "126 still to fetch" note is really "121 still to
-    curate."
+12. **CLOSED (v0.14): the ladder is fully curated — 150 of 150.** All 126
+    remaining problems were curated offline (fragments + assembler, gated by
+    `tests/test_registry.py`, probe-smoked per problem, independently verified per
+    batch); see [docs/audit-corpus-v0.14.md](../docs/audit-corpus-v0.14.md). The
+    batch also turned up and fixed real product gaps — a `mutates` verdict mode for
+    in-place problems, class stubs with constructor arguments, an `_oracle_confirms`
+    that was vacuous under `mutates`, a sub-linear growth guard, and two
+    complexity lines that never parsed.
 13. **`problems.source` is a dead column** — always `'seed'`, even for the 155
     fetched/lc-numbered rows, so provenance is unrecoverable.
 

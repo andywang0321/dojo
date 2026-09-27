@@ -20,4 +20,7 @@ Constraints:
 * 1 <= nums.length <= 20
 * 0 <= nums[i] <= 1000
 * 0 <= sum(nums[i]) <= 1000
-* -1000 <= target <= 1000"""
+* -1000 <= target <= 1000
+
+You should aim for a solution as good or better than O(n * s) time and O(s) space, where n is the length of nums and s is the sum of nums: an expression is fixed by which numbers take a '+', so the count is a subset-sum count folded over the n values, and the array it needs spans the 2s + 1 totals a signed sum can reach.
+"""

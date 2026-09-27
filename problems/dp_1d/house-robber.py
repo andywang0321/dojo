@@ -14,4 +14,7 @@ Explanation: Rob house 1 (money = 2), rob house 3 (money = 9) and rob house 5 (m
 Total amount you can rob = 2 + 9 + 1 = 12.
 Constraints:
 * 1 <= nums.length <= 100
-* 0 <= nums[i] <= 400"""
+* 0 <= nums[i] <= 400
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the nums array.
+"""

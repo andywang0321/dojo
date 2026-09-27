@@ -210,9 +210,13 @@ def verdict(
             return Verdict(MATCHES, trend, None, declared_class, None,
                            f"grows like the reference (cost ratio {shown})")
         kind = WORSE if trend > 1 else BETTER
-        return Verdict(kind, trend, None, declared_class, None,
-                       f"growth is {'faster' if trend > 1 else 'slower'} than the "
-                       f"reference (cost ratio {shown})")
+        return Verdict(
+            kind, trend, None, declared_class, None,
+            f"its cost grows {'faster' if trend > 1 else 'slower'} than the "
+            f"reference's (cost ratio {shown}) — but the declared class "
+            f"({declared_class}) is not one the probe can name, so this is a "
+            f"direction, not a class",
+        )
 
     sizes = [n for n, _ in clean]
     named = _nearest_class(log_trend, declared_class, sizes)

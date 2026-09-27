@@ -15,4 +15,7 @@ Output: 18
 Constraints:
 * 1 <= points.length <= 1000
 * -10^6 <= xi, yi <= 10^6
-* All pairs (xi, yi) are distinct."""
+* All pairs (xi, yi) are distinct.
+
+You should aim for a solution as good or better than O(n^2) time and O(n) space, where n is the number of points: every pair of points may be connected, so the graph is complete, and keeping one cheapest connection per point to a growing tree looks at each of the n^2 ordered pairs once -- while sorting all n(n-1)/2 edges instead costs O(n^2 log n) time and O(n^2) space.
+"""

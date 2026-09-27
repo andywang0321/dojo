@@ -179,7 +179,7 @@ wheels = [
 
 [[package]]
 name = "dojo"
-version = "0.13.18"
+version = "0.13.19"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },

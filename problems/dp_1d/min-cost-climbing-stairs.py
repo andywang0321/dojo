@@ -23,4 +23,7 @@ Explanation: You will start at index 0.
 The total cost is 6.
 Constraints:
 * 2 <= cost.length <= 1000
-* 0 <= cost[i] <= 999"""
+* 0 <= cost[i] <= 999
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the cost array.
+"""

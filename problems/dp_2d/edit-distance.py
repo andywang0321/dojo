@@ -23,4 +23,7 @@ exention -> exection (replace 'n' with 'c')
 exection -> execution (insert 'u')
 Constraints:
 * 0 <= word1.length, word2.length <= 500
-* word1 and word2 consist of lowercase English letters."""
+* word1 and word2 consist of lowercase English letters.
+
+You should aim for a solution as good or better than O(m * n) time and O(m * n) space, where m and n are the lengths of the two strings.
+"""

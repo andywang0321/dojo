@@ -26,4 +26,7 @@ Constraints:
 * At most 5 * 10^4 calls will be made to addNum and findMedian.
 Follow up:
 * If all integer numbers from the stream are in the range [0, 100], how would you optimize your solution?
-* If 99% of all integer numbers from the stream are in the range [0, 100], how would you optimize your solution?"""
+* If 99% of all integer numbers from the stream are in the range [0, 100], how would you optimize your solution?
+
+You should aim for a solution with O(log n) time per addNum and O(n) space, where n is the number of values added so far (a sorted list with insort is O(n) per add, which is why the intended two-heap split is worth finding).
+"""

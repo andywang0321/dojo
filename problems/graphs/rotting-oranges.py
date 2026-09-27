@@ -21,4 +21,7 @@ Constraints:
 * m == grid.length
 * n == grid[i].length
 * 1 <= m, n <= 10
-* grid[i][j] is 0, 1, or 2."""
+* grid[i][j] is 0, 1, or 2.
+
+You should aim for a solution as good or better than O(m * n) time and O(m * n) space, where m x n is the grid: a breadth-first search that starts from every rotten orange at once reaches each fresh orange at its shortest distance, every cell is enqueued at most once, and the queue can hold every cell in the worst case.
+"""

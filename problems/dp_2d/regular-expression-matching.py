@@ -21,4 +21,7 @@ Constraints:
 * 1 <= p.length <= 20
 * s contains only lowercase English letters.
 * p contains only lowercase English letters, '.', and '*'.
-* It is guaranteed for each appearance of the character '*', there will be a previous valid character to match."""
+* It is guaranteed for each appearance of the character '*', there will be a previous valid character to match.
+
+You should aim for a solution as good or better than O(m * n) time and O(m * n) space, where m is the length of s and n is the length of p: the intended table stores one boolean per (string position, pattern position) pair -- m * n states, each decided from at most two others -- and it is a table rather than a plain recursion because a '*' group can consume any number of characters, so the same state is reached by many different splits of the pattern; carrying the table in a single rolling row of n + 1 flags computes the same recurrence in O(n) space instead, which is at least as good.
+"""

@@ -13,4 +13,7 @@ Output: 6
 Explanation: Six palindromic strings: "a", "a", "a", "aa", "aa", "aaa".
 Constraints:
 * 1 <= s.length <= 1000
-* s consists of lowercase English letters."""
+* s consists of lowercase English letters.
+
+You should aim for a solution as good or better than O(n^2) time and O(1) space, where n is the length of s: expanding around every one of the 2n-1 centers counts each palindrome once, and Manacher's radii give the same count in O(n) time.
+"""

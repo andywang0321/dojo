@@ -169,18 +169,50 @@ Status (each group is committed once assembled, gated and probe-smoked):
 | bit_manipulation | 7 | ✓ committed |
 | math_and_geometry | 8 | ✓ committed |
 | intervals | 6 | ✓ committed |
-| greedy | 7 | fragments in flight |
-| graphs | 13 | fragments in flight (3 premium statements authored) |
-| advanced_graphs | 6 | fragments in flight (1 premium statement authored) |
-| dp_1d | 12 | fragments in flight |
-| dp_2d | 11 | fragments in flight |
+| greedy | 7 | ✓ committed |
+| graphs | 13 | ✓ committed (3 premium statements authored) |
+| advanced_graphs | 6 | ✓ committed (1 premium statement authored) |
+| dp_1d | 12 | ✓ committed |
+| dp_2d | 11 | ✓ committed |
 
-At the commit that landed the first ten groups (`985de4a`, version `0.13.17`):
-**101 of the 150 ladder problems are curated** (up from 24), the suite is 562
-passing, and `dojo roadmap --table` no longer skips a group — `sliding_window`
-became the ladder's next group the moment its six problems landed, where before
-the prereq gate treated the empty group as satisfied and served a later ladder
-instead.
+**All 150 ladder problems are curated** (up from 24 when this audit started), the
+suite is 562 passing, and `dojo roadmap --table` no longer skips a group —
+`sliding_window` became the ladder's next group the moment its six problems
+landed, where before the prereq gate treated the empty group as satisfied and
+served a later ladder instead.
+
+## 6c. Known limits this batch left behind
+
+Recorded rather than hidden, because each is a real narrowing of what dojo can
+claim about a solution:
+
+* **A predicate checker cannot see the pre-call arguments.** The harness hands
+  checkers `(module, got, args)` with `args` in its post-call state, so
+  `deep_copy_valid` / `graph_copy_valid` cannot catch a student who mutates the
+  input and then copies the damaged values — the copy IS faithful to what the
+  input now holds. The scale probe does catch that shape (its digest is the
+  input), and closing it in the judge needs the pre-call arguments passed to
+  checkers, which is a harness change.
+* **Probe inputs are bounded by the oracle's in-process cost.** `_oracle_confirms`
+  runs the oracle with no timeout of its own, so several profiler inputs carry a
+  `probe_max_n` below the statement's own bound (walls-and-gates 1600, burst-balloons
+  150 — the latter because the probe's tracemalloc phase is superlinear). Where the
+  input could stay at the statement's bound without that risk, it does.
+* **Growth verdicts are direction-only for multi-variable classes.** A line like
+  `O(n + e)` or `O(m * n)` is not one of the classes `growth.verdict` can name, so
+  those problems report a ratio and a direction with the Measured column reading
+  "unresolved" — honest, but it means a correct solution to a graph problem gets
+  no class confirmation.
+* **Two O(log n) problems needed the sub-linear guard to stay honest** (LC 704/74
+  keep their inputs; LC 33/153 got theirs back only after the guard landed), and
+  `longest-increasing-subsequence`'s O(n log n) reference measures nearly linear
+  because `bisect` is C: a quadratic student's trend is clearly worse (20-60x above
+  a same-class control) but the class label does not resolve on a 2,500-element
+  ladder.
+* **A missing `function_name` in the probe reads as "no measurement" rather than
+  a failure** — the probe harness's outer `try` has only a `finally`, so an
+  AttributeError there yields an all-`None` payload. Reported by an author; not
+  fixed here.
 
 ## 6b. What the batches turned up in the product
 

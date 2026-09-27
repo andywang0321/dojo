@@ -31,4 +31,7 @@ Constraints:
 * m == heights.length
 * n == heights[r].length
 * 1 <= m, n <= 200
-* 0 <= heights[r][c] <= 10^5"""
+* 0 <= heights[r][c] <= 10^5
+
+You should aim for a solution as good or better than O(m * n) time and O(m * n) space, where m and n are the number of rows and columns of the heights matrix.
+"""

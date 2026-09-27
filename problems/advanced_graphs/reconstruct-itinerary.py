@@ -17,4 +17,7 @@ Constraints:
 * fromi.length == 3
 * toi.length == 3
 * fromi and toi consist of uppercase English letters.
-* fromi != toi"""
+* fromi != toi
+
+You should aim for a solution as good or better than O(n log n) time and O(n) space, where n is the number of tickets: the graph has at most n + 1 airports and n flights, so sorting every airport's destinations is one sort of n items in total and the intended walk visits each ticket exactly once, while a search that retries destinations after a dead end can revisit the same ticket many times.
+"""

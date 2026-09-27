@@ -18,4 +18,7 @@ Output: 0
 Explanation: There is no such common subsequence, so the result is 0.
 Constraints:
 * 1 <= text1.length, text2.length <= 1000
-* text1 and text2 consist of only lowercase English characters."""
+* text1 and text2 consist of only lowercase English characters.
+
+You should aim for a solution as good or better than O(m * n) time and O(min(m, n)) space, where m and n are the lengths of text1 and text2: every one of the m * n table cells is settled once from its left, top and diagonal neighbours, and the 1-D form rolls a single row over the shorter string, which is the least workspace this recurrence needs.
+"""

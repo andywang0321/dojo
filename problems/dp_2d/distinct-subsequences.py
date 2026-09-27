@@ -22,4 +22,7 @@ babgbag
 babgbag
 Constraints:
 * 1 <= s.length, t.length <= 1000
-* s and t consist of English letters."""
+* s and t consist of English letters.
+
+You should aim for a solution as good or better than O(m * n) time and O(n) space, where m is the length of s and n is the length of t.
+"""

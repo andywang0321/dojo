@@ -13,4 +13,7 @@ Input: prices = [1]
 Output: 0
 Constraints:
 * 1 <= prices.length <= 5000
-* 0 <= prices[i] <= 1000"""
+* 0 <= prices[i] <= 1000
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the prices array: the intended day-by-day state machine carries only the three numbers a day can be in (holding a share, sold today, free to buy), so one sweep over the prices settles it with no table.
+"""

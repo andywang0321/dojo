@@ -17,4 +17,7 @@ Constraints:
 * m == matrix.length
 * n == matrix[i].length
 * 1 <= m, n <= 200
-* 0 <= matrix[i][j] <= 2^31 - 1"""
+* 0 <= matrix[i][j] <= 2^31 - 1
+
+You should aim for a solution as good or better than O(m * n) time and O(m * n) space, where m and n are the dimensions of the matrix.
+"""

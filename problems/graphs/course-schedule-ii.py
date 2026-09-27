@@ -21,4 +21,7 @@ Constraints:
 * prerequisites[i].length == 2
 * 0 <= ai, bi < numCourses
 * ai != bi
-* All the pairs [ai, bi] are distinct."""
+* All the pairs [ai, bi] are distinct.
+
+You should aim for a solution as good or better than O(n + p) time and O(n + p) space, where n is the number of courses and p is the number of prerequisite pairs.
+"""

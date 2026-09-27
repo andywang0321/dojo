@@ -10,4 +10,7 @@ Input: s = "cbbd"
 Output: "bb"
 Constraints:
 * 1 <= s.length <= 1000
-* s consist of only digits and English letters."""
+* s consist of only digits and English letters.
+
+You should aim for a solution as good or better than O(n^2) time and O(1) space, where n is the length of s: expanding around every one of the 2n-1 centers is the intended solution, and Manacher's algorithm reaches O(n) time but is not required.
+"""

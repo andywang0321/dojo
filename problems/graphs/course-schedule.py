@@ -18,4 +18,7 @@ Constraints:
 * 0 <= prerequisites.length <= 5000
 * prerequisites[i].length == 2
 * 0 <= ai, bi < numCourses
-* All the pairs prerequisites[i] are unique."""
+* All the pairs prerequisites[i] are unique.
+
+You should aim for a solution as good or better than O(n + p) time and O(n + p) space, where n is the number of courses and p is the number of prerequisite pairs.
+"""

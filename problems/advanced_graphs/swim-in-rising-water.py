@@ -22,4 +22,7 @@ Constraints:
 * n == grid[i].length
 * 1 <= n <= 50
 * 0 <= grid[i][j] < n^2
-* Each value grid[i][j] is unique."""
+* Each value grid[i][j] is unique.
+
+You should aim for a solution as good or better than O(N log N) time and O(N) space, where N is the number of cells in the grid (N = n * n, with n the side length the constraints above call n).
+"""

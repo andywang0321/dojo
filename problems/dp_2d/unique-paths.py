@@ -14,4 +14,7 @@ Explanation: From the top-left corner, there are a total of 3 ways to reach the 
 2. Down -> Down -> Right
 3. Down -> Right -> Down
 Constraints:
-* 1 <= m, n <= 100"""
+* 1 <= m, n <= 100
+
+You should aim for a solution as good or better than O(m * n) time and O(min(m, n)) space, where m and n are the number of rows and columns of the grid: every one of the m * n cells is settled once from the cell above it and the cell to its left, and rolling a single row over the shorter dimension is the smallest workspace that recurrence needs.
+"""

@@ -15,4 +15,7 @@ Output: 10
 Constraints:
 * n == nums.length
 * 1 <= n <= 300
-* 0 <= nums[i] <= 100"""
+* 0 <= nums[i] <= 100
+
+You should aim for a solution as good or better than O(n^3) time and O(n^2) space, where n is the length of the nums array: the intended interval DP fills a table indexed by the two still-standing boundary balloons -- O(n^2) entries -- and every entry scans the balloons between its boundaries as the one burst last, which is where the third factor comes from; each burst's payoff reads only its two neighbours, and the O(n^2) table is what remembers the sub-windows.
+"""

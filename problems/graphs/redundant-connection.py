@@ -16,4 +16,7 @@ Constraints:
 * 1 <= ai < bi <= edges.length
 * ai != bi
 * There are no repeated edges.
-* The given graph is connected."""
+* The given graph is connected.
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the number of edges -- and the statement's own `n == edges.length` makes that the number of nodes too: the intended union-find makes one pass over the edges with near-constant amortized find and union, and the parent array over the nodes is the space.
+"""

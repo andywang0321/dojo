@@ -16,4 +16,7 @@ Output: 0
 Constraints:
 * 1 <= coins.length <= 12
 * 1 <= coins[i] <= 2^31 - 1
-* 0 <= amount <= 10^4"""
+* 0 <= amount <= 10^4
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the amount: the intended bottom-up DP sweeps every amount once per denomination, and the statement's own bound of at most 12 denominations is a constant, so that amount-by-coins sweep is linear in the amount and needs one array of amount + 1 entries.
+"""

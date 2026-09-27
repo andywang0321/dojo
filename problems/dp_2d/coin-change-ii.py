@@ -23,4 +23,7 @@ Constraints:
 * 1 <= coins.length <= 300
 * 1 <= coins[i] <= 5000
 * All the values of coins are unique.
-* 0 <= amount <= 5000"""
+* 0 <= amount <= 5000
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the amount: the intended bottom-up DP sweeps every amount once per denomination, and the statement's own bound of at most 300 denominations is a constant, so that amount-by-coins sweep is linear in the amount and needs one array of amount + 1 entries.
+"""

@@ -30,4 +30,7 @@ Constraints:
 * 1 <= pricei <= 10^4
 * There will not be any multiple flights between two cities.
 * 0 <= src, dst, k < n
-* src != dst"""
+* src != dst
+
+You should aim for a solution as good or better than O(k * e) time and O(n) space, where e is the number of flights, k is the stop limit, and n is the number of cities.
+"""

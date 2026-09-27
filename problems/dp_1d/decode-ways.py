@@ -31,4 +31,7 @@ Explanation:
 "06" cannot be mapped to "F" because of the leading zero ("6" is different from "06"). In this case, the string is not a valid encoding, so return 0.
 Constraints:
 * 1 <= s.length <= 100
-* s contains only digits and may contain leading zero(s)."""
+* s contains only digits and may contain leading zero(s).
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of s: one left-to-right pass carries the two previous counts, and each step looks at one or two digits.
+"""

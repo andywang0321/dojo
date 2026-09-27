@@ -20,4 +20,7 @@ Constraints:
 * wordList[i].length == beginWord.length
 * beginWord, endWord, and wordList[i] consist of lowercase English letters.
 * beginWord != endWord
-* All the words in wordList are unique."""
+* All the words in wordList are unique.
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the total size of the input -- every character of beginWord, endWord and wordList: the statement caps a word at 10 characters, so how many one-letter neighbours a word has is a constant fixed by that limit rather than something the input can grow, and the intended search looks each of those neighbours up in a hash structure and visits every word of the list once instead of comparing every pair of words.
+"""

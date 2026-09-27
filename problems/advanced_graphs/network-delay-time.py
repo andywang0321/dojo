@@ -18,4 +18,7 @@ Constraints:
 * 1 <= ui, vi <= n
 * ui != vi
 * 0 <= wi <= 100
-* All the pairs (ui, vi) are unique. (i.e., no multiple edges.)"""
+* All the pairs (ui, vi) are unique. (i.e., no multiple edges.)
+
+You should aim for a solution as good or better than O(e log n) time and O(n + e) space, where n is the number of nodes and e is the number of edges: the intended search settles each node once and relaxes each of the e edges once against a heap holding at most e entries, while the adjacency list stores the e edges.
+"""

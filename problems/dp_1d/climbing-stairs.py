@@ -16,4 +16,7 @@ Explanation: There are three ways to climb to the top.
 2. 1 step + 2 steps
 3. 2 steps + 1 step
 Constraints:
-* 1 <= n <= 45"""
+* 1 <= n <= 45
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the number of steps in the staircase.
+"""

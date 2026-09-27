@@ -19,4 +19,7 @@ Constraints:
 * 1 <= wordDict.length <= 1000
 * 1 <= wordDict[i].length <= 20
 * s and wordDict[i] consist of only lowercase English letters.
-* All the strings of wordDict are unique."""
+* All the strings of wordDict are unique.
+
+You should aim for a solution as good or better than O(n^2) time and O(n) space, where n is the length of s: the canonical DP tries a split at every earlier position against a set of the dictionary words, and the statement caps a word at 20 characters so each comparison is a constant factor.
+"""

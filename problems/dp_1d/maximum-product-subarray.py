@@ -14,4 +14,7 @@ Explanation: The result cannot be 2, because [-2,-1] is not a subarray.
 Constraints:
 * 1 <= nums.length <= 2 * 10^4
 * -10 <= nums[i] <= 10
-* The product of any subarray of nums is guaranteed to fit in a 32-bit integer."""
+* The product of any subarray of nums is guaranteed to fit in a 32-bit integer.
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the nums array: the intended single pass carries the largest and smallest product of a subarray ending at each position -- a negative value swaps their roles, and a zero resets both -- so a pair of negatives is carried through the smallest side instead of being dropped.
+"""

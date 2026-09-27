@@ -32,4 +32,9 @@ Constraints:
 * 1 <= Node.val <= 100
 * Node.val is unique for each node.
 * There are no repeated edges and no self-loops in the graph.
-* The Graph is connected and all nodes can be visited starting from the given node."""
+* The Graph is connected and all nodes can be visited starting from the given node.
+
+You should aim for a solution as good or better than O(n + e) time and O(n + e) space, where n is the number of nodes and e is the number of edges in the graph.
+
+Input format: dojo has no graph Node class. The graph arrives as an adjacency list — graph: list[list[int]], where graph[i] lists the neighbours of node i as 0-based indices (the statement's 1-based val minus one), so the statement's Example 1 adjList = [[2,4],[1,3],[2,4],[1,3]] arrives as [[1,3],[0,2],[1,3],[0,2]], while its Example 2 [[]] (one node, no neighbours) and its Example 3 [] (an empty graph) are unchanged. The function returns the clone in that same form — its own fresh lists — and the judge grades the copy by property rather than by a canonical construction: the returned adjacency list must describe the same graph and share no list object with the input, so returning the input, a shallow copy of it, or a corrupted one fails.
+"""

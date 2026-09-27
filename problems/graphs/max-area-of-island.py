@@ -14,4 +14,7 @@ Constraints:
 * m == grid.length
 * n == grid[i].length
 * 1 <= m, n <= 50
-* grid[i][j] is either 0 or 1."""
+* grid[i][j] is either 0 or 1.
+
+You should aim for a solution as good or better than O(m * n) time and O(m * n) space, where m x n is the grid: every cell belongs to at most one island and is visited once, and the worst case for the bookkeeping is a grid that is one single island -- the flood fill's queue (or recursion stack) plus its visited marks then hold every cell.
+"""

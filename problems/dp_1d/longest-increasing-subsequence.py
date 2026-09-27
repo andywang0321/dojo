@@ -14,4 +14,7 @@ Output: 1
 Constraints:
 * 1 <= nums.length <= 2500
 * -10^4 <= nums[i] <= 10^4
-Follow up: Can you come up with an algorithm that runs in O(n log(n)) time complexity?"""
+Follow up: Can you come up with an algorithm that runs in O(n log(n)) time complexity?
+
+You should aim for a solution as good or better than O(n log n) time and O(n) space, where n is the length of the nums array: the statement's own follow-up asks for O(n log n), which is one binary search per element against a tails array that holds at most n values -- the same ceiling the O(n^2) DP's table of per-index lengths would need.
+"""
