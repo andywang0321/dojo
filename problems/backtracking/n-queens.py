@@ -11,4 +11,7 @@ Example 2:
 Input: n = 1
 Output: [["Q"]]
 Constraints:
-* 1 <= n <= 9"""
+* 1 <= n <= 9
+
+You should aim for a solution as good or better than O(n!) time and O(n^2) space, where n is the number of queens: placing one queen per row and rejecting a column that attacks a queen already placed visits at most n! partial placements (each row takes a column no earlier row took), and the board the search marks and unmarks is n x n.
+"""

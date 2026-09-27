@@ -233,3 +233,43 @@ def test_every_curated_problem_renders_a_compiling_template():
         block = wb.example_block(row)
         assert block, f"{problem.slug}: example_block refused to build"
         ast.parse(block.replace(wb.SENTINEL_OPEN, "").replace(wb.SENTINEL_CLOSE, ""))
+
+
+def test_a_constructor_with_parameters_is_rendered_into_the_stub():
+    """LC 146/703 shape (v0.14): a design problem whose constructor takes
+    arguments.
+
+    The stub used to read `def __init__(self):` for every `{"methods": ...}`
+    signature — the corpus's only class problem before the 126-problem curation
+    was `min_stack`, which takes none — so a student who filled in the stub as
+    written met `TypeError: LRUCache.__init__() missing 1 required positional
+    argument` on their first check.
+    """
+    problem = _problem(
+        function_name="KthLargest",
+        signature={"ctor": "(self, k: int, nums: list[int])", "methods": {"add": "(self, val: int) -> int"}},
+        cases=[
+            {
+                "ctor_args": [3, [4, 5, 8, 2]],
+                "ops": [["add", 3], ["add", 5]],
+                "expected": [4, 5],
+            }
+        ],
+    )
+    source = wb.template_for(problem)
+    ast.parse(source)
+    assert "def __init__(self, k: int, nums: list[int]):" in source
+    assert "def add(self, val: int) -> int:" in source
+    # and the examples block carries the constructor arguments and builds with them
+    assert "[3, [4, 5, 8, 2]]" in source
+    assert "_obj = KthLargest(*_ctor)" in source
+
+
+def test_a_constructor_without_parameters_still_renders_plainly():
+    problem = _problem(
+        function_name="MinStack",
+        signature={"methods": {"pop": "(self) -> None"}},
+    )
+    source = wb.template_for(problem)
+    ast.parse(source)
+    assert "def __init__(self):" in source

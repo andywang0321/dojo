@@ -20,4 +20,9 @@ Output: [[3,null],[3,0],[3,null]]
 Constraints:
 * 0 <= n <= 1000
 * -10^4 <= Node.val <= 10^4
-* Node.random is null or is pointing to some node in the linked list."""
+* Node.random is null or is pointing to some node in the linked list.
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the number of nodes in the list.
+
+Input format: dojo has no Node class. The list arrives as [[value, random_index], ...], one pair per node in list order (the list order is the next chain), and random_index is the index of the node the random pointer targets, or -1 when it is null. The function must return the deep copy in that same form.
+"""

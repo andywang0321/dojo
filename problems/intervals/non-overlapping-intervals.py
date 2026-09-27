@@ -17,4 +17,7 @@ Explanation: You don't need to remove any of the intervals since they're already
 Constraints:
 * 1 <= intervals.length <= 10^5
 * intervals[i].length == 2
-* -5 * 10^4 <= starti < endi <= 5 * 10^4"""
+* -5 * 10^4 <= starti < endi <= 5 * 10^4
+
+You should aim for a solution as good or better than O(n log n) time and O(n) space, where n is the number of intervals: ordering the intervals by end (one sorted copy, or an in-place sort for O(1) extra space) is what makes the greedy provably optimal, and a single sweep over them is then enough.
+"""

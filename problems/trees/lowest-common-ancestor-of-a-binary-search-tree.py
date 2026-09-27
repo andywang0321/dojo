@@ -18,4 +18,9 @@ Constraints:
 * -10^9 <= Node.val <= 10^9
 * All Node.val are unique.
 * p != q
-* p and q will exist in the BST."""
+* p and q will exist in the BST.
+
+You should aim for a solution as good or better than O(h) time and O(1) space, where h is the height of the BST (O(log n) when the tree is balanced, O(n) in the worst case).
+
+Input format: dojo has no TreeNode. The BST arrives as a nested list [value, left, right], where left and right are either None or nested lists (None is a missing child). p and q arrive as the two nodes' integer *values* (the statement guarantees all values are unique, so a value names exactly one node), and the function returns the value of the lowest common ancestor node -- not the node, and not its subtree. The examples above write the tree in LeetCode's level-order array form: [6,2,8,0,4,7,9,null,null,3,5] is the same tree as [6, [2, [0, None, None], [4, [3, None, None], [5, None, None]]], [8, [7, None, None], [9, None, None]]].
+"""

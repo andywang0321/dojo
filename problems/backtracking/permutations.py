@@ -13,4 +13,7 @@ Output: [[1]]
 Constraints:
 * 1 <= nums.length <= 6
 * -10 <= nums[i] <= 10
-* All the integers of nums are unique."""
+* All the integers of nums are unique.
+
+You should aim for a solution as good or better than O(n * n!) time and O(n) space, where n is the length of the nums array: there are n! arrangements and each one costs O(n) to copy out, and the O(n) is the recursion depth plus the bookkeeping of which values are already used — the returned list of permutations is not counted.
+"""

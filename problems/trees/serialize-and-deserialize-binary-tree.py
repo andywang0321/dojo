@@ -11,4 +11,9 @@ Input: root = []
 Output: []
 Constraints:
 * The number of nodes in the tree is in the range [0, 10^4].
-* -1000 <= Node.val <= 1000"""
+* -1000 <= Node.val <= 1000
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the number of nodes in the tree.
+
+Input format: dojo has no TreeNode and no Codec class. `serialize` receives the tree in dojo's nested-list form `[value, left, right]`, with `None` for a missing child (and `None` for an empty tree), and returns a string in whatever format you choose — the statement puts no restriction on it. `deserialize` receives that string and must return the same nested-list form. The statement's own level-order writing `[1,2,3,null,null,4,5]` is therefore `[1,[2,None,None],[3,[4,None,None],[5,None,None]]]` here, and `[]` (an empty tree) is `None`.
+"""

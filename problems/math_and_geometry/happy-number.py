@@ -18,4 +18,7 @@ Example 2:
 Input: n = 2
 Output: false
 Constraints:
-* 1 <= n <= 2^31 - 1"""
+* 1 <= n <= 2^31 - 1
+
+You should aim for a solution as good or better than O(log n) time and O(log n) space, where n is the value of the input number: each step sums the squares of its O(log n) digits, at most O(log n) distinct values can appear before the chain reaches 1 or repeats, and the set of values already seen is how the statement's endless cycle is detected.
+"""

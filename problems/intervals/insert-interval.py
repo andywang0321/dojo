@@ -18,4 +18,7 @@ Constraints:
 * 0 <= starti <= endi <= 10^5
 * intervals is sorted by starti in ascending order.
 * newInterval.length == 2
-* 0 <= start <= end <= 10^5"""
+* 0 <= start <= end <= 10^5
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the number of intervals: one pass over the already-sorted intervals builds the result, and the returned list is not counted, as elsewhere in this corpus.
+"""

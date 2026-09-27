@@ -20,7 +20,12 @@ from dojo.db import connect, dumps_json, now
 
 _HEADER_RE = re.compile(r"^(.*?)\s*[\[\(]\s*(Easy|Medium|Hard)\s*[\]\)]")
 _COMPLEXITY_RE = re.compile(
-    r"O\s*\(\s*([^)]+?)\s*\)\s+time\s+and\s+O\s*\(\s*([^)]+?)\s*\)\s+space",
+    # One level of nested parentheses is allowed, because honest complexity lines
+    # contain them: `O(max(m, n))` (add-two-numbers) and `O(4^n / sqrt(n))`
+    # (generate_parentheses) both failed the flat `[^)]+?` form, so their Expected
+    # column had been blank since they were written (v0.14).
+    r"O\s*\(\s*((?:[^()]|\([^()]*\))+?)\s*\)\s+time\s+and\s+"
+    r"O\s*\(\s*((?:[^()]|\([^()]*\))+?)\s*\)\s+space",
     re.IGNORECASE,
 )
 

@@ -12,6 +12,8 @@ curation contract tests (tests/test_registry.py) as the acceptance gate.
 
 from __future__ import annotations
 
+import copy
+
 import ast
 import importlib
 import importlib.util
@@ -517,6 +519,12 @@ def _case_findings(label, case, reference_fn, checkers, module_view) -> list[str
     args = case.get("args")
     if case.get("ops") is not None:
         args = [case["ops"]]  # class problems: the oracle takes the op list
+    if args is not None:
+        # A copy per call: an in-place reference (reorder-list, rotate-image)
+        # would otherwise consume the caller's case objects, and for a "mutates"
+        # case the post-call arguments ARE the value under test — so a second
+        # gate call on the same list reported a false finding (v0.14).
+        args = copy.deepcopy(args)
     try:
         got = reference_fn(*(args or []))
     except Exception as exc:  # noqa: BLE001 - reported, never raised

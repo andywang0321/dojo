@@ -33,4 +33,9 @@ Constraints:
 * 1 <= k <= nums.length + 1
 * -10^4 <= nums[i] <= 10^4
 * -10^4 <= val <= 10^4
-* At most 10^4 calls will be made to add."""
+* At most 10^4 calls will be made to add.
+
+You should aim for a solution as good or better than O(log k) time and O(k) space, where k is the rank: each add costs O(log k) against a heap that never holds more than k scores, and the constructor costs O(n log k) over the initial n scores.
+
+Input format: dojo builds the object with KthLargest(k, nums) — the statement's constructor arguments, positionally — and then calls add(val) once per score, comparing the k-th largest returned by each call. Give __init__ the (self, k, nums) parameters; the stream arrives one add at a time.
+"""

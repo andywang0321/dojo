@@ -19,4 +19,15 @@ Constraints:
 * All the integers in nums appear only once except for precisely one integer which appears two or more times.
 Follow up:
 * How can we prove that at least one duplicate number must exist in nums?
-* Can you solve the problem in linear runtime complexity?"""
+* Can you solve the problem in linear runtime complexity?
+
+Group note: this one is an array in the roadmap's linked-list group. The intended solution reads nums as a linked list — index i points at index nums[i], the repeated value is where that walk enters its cycle — so it is Floyd's two-pointer algorithm from the linked-list group applied to values instead of nodes. There is no representation change: the function takes nums exactly as the statement writes it and returns the repeated number.
+
+Group note: this one is an array in the roadmap's linked-list group. The intended solution reads nums as a linked list — index i points at index nums[i], the repeated value is where that walk enters its cycle — so it is Floyd's two-pointer algorithm from the linked-list group applied to values instead of nodes. There is no representation change: the function takes nums exactly as the statement writes it and returns the repeated number.
+
+Group note: this one is an array in the roadmap's linked-list group. The intended solution reads nums as a linked list — index i points at index nums[i], the repeated value is where that walk enters its cycle — so it is Floyd's two-pointer algorithm from the linked-list group applied to values instead of nodes. There is no representation change: the function takes nums exactly as the statement writes it and returns the repeated number.
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the nums array minus one (the array holds n + 1 integers in the range [1, n]).
+
+Group note (there is no representation change here): this one is an array in the roadmap's linked-list group. The intended solution reads nums as a linked list — index i points at index nums[i], the repeated value is where that walk enters its cycle — so it is Floyd's two-pointer algorithm from the linked-list group applied to values instead of nodes. There is no representation change: the function takes nums exactly as the statement writes it and returns the repeated number.
+"""

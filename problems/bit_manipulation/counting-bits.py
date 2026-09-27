@@ -22,4 +22,7 @@ Explanation:
 Constraints:
 * 0 <= n <= 10^5
 Follow up:
-* It is very easy to come up with a solution with a runtime of O(n log n). Can you do it in linear time O(n) and possibly in a single pass?"""
+* It is very easy to come up with a solution with a runtime of O(n log n). Can you do it in linear time O(n) and possibly in a single pass?
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the input integer: the answer holds n + 1 counts, so the space is the output itself and the intended single pass fills it in one sweep.
+"""

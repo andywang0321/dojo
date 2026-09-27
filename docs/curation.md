@@ -84,6 +84,7 @@ dojo grades *functions over plain data*: the judge passes JSON values and compar
 | grid | `list[list[str]]` / `list[list[int]]` | as the statement writes it |
 | intervals | `list[list[int]]` | |
 | design problem | `signature: {"methods": {...}}`, `function_name` = the class name, cases as `{"ops": [...], "expected": [...]}`, constructor args in `"ctor_args"` | `min_stack` is the worked example |
+| design problem, parameterized constructor | as above **plus** `signature["ctor"]` (e.g. `"(self, capacity: int)"`), and a leading `["__init__", *ctor_args]` op in every case | `lru_cache`, `kth_largest_element_in_a_stream` |
 | two collaborating functions | `signature: {"functions": {...}}`, `function_name` = the first one | `encode_and_decode_strings` |
 
 Every statement that uses a LeetCode-only type gets a short **representation note** appended to it — "dojo passes the list of node values; return the same form" — because a student who reads `ListNode` in the statement and receives a Python list has been sent down a wrong trail.
@@ -102,6 +103,8 @@ Every statement that uses a LeetCode-only type gets a short **representation not
 | `{"ops": [...]}` | class problems |
 
 A predicate checker receives `(module, got, args)` and must accept **every** correct answer — a checker that reimplements the oracle's tie-breaking turns a correct solution into a failed case (the `k_closest_points` trust bug, v0.12).
+
+**Design problems carry two extra rules (v0.14).** A constructor that takes arguments is declared in `signature["ctor"]`, because the workbench stub is rendered from the signature: hard-coding `def __init__(self):` gave `LRUCache`/`KthLargest` students a stub of the wrong arity, which they met as a `TypeError` on their first `check`. And the *oracle and reference* never receive `ctor_args` — `curator._case_findings` calls them with the op list — so a parameterized constructor also travels as a leading `["__init__", *ctor_args]` op in every case, which the harness replays on the object it built from `ctor_args`. Both are asserted by `tests/test_registry.py` (`ctor_args` without a declared `ctor` is a failure).
 
 ### The four artifacts
 

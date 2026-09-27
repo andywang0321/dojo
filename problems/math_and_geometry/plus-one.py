@@ -23,4 +23,7 @@ Thus, the result should be [1,0].
 Constraints:
 * 1 <= digits.length <= 100
 * 0 <= digits[i] <= 9
-* digits does not contain any leading 0's."""
+* digits does not contain any leading 0's.
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the digits array (the returned array is not counted: the carry ripples in place, and only the all-nines case allocates a new array of n + 1 digits, which is the answer itself).
+"""

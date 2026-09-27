@@ -16,4 +16,7 @@ Explanation: Intervals [1,4] and [4,7] are considered overlapping.
 Constraints:
 * 1 <= intervals.length <= 10^4
 * intervals[i].length == 2
-* 0 <= starti <= endi <= 10^4"""
+* 0 <= starti <= endi <= 10^4
+
+You should aim for a solution as good or better than O(n log n) time and O(n) space, where n is the number of intervals: the intervals must be seen in order of start (one sorted copy) and a single sweep over them builds the answer, which is itself O(n) when nothing overlaps.
+"""

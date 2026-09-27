@@ -16,4 +16,7 @@ Constraints:
 * -2^31 <= n <= 2^31-1
 * n is an integer.
 * Either x is not zero or n > 0.
-* -10^4 <= x^n <= 10^4"""
+* -10^4 <= x^n <= 10^4
+
+You should aim for a solution as good or better than O(log n) time and O(1) space, where n is the absolute value of the exponent: binary exponentiation squares the base and halves the exponent, so the loop runs once per bit of |n|, and the iterative form keeps the space O(1) - which is not decoration, since |n| can reach 2^31 - 1 and a recursion that deep would not survive Python's stack.
+"""

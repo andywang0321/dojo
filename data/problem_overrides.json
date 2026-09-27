@@ -3181,5 +3181,5270 @@
     ],
     "lc_number": 212,
     "scale_compare": "sorted"
+  },
+  "add-two-numbers": {
+    "function_name": "add_two_numbers",
+    "signature": "(l1: list[int], l2: list[int]) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            2,
+            4,
+            3
+          ],
+          [
+            5,
+            6,
+            4
+          ]
+        ],
+        "expected": [
+          7,
+          0,
+          8
+        ]
+      },
+      {
+        "args": [
+          [
+            0
+          ],
+          [
+            0
+          ]
+        ],
+        "expected": [
+          0
+        ]
+      },
+      {
+        "args": [
+          [
+            9,
+            9,
+            9,
+            9,
+            9,
+            9,
+            9
+          ],
+          [
+            9,
+            9,
+            9,
+            9
+          ]
+        ],
+        "expected": [
+          8,
+          9,
+          9,
+          9,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      {
+        "args": [
+          [
+            1
+          ],
+          [
+            1
+          ]
+        ],
+        "expected": [
+          2
+        ]
+      }
+    ],
+    "lc_number": 2,
+    "probe_max_n": 100
+  },
+  "remove-nth-node-from-end-of-list": {
+    "function_name": "remove_nth_from_end",
+    "signature": "(head: list[int], n: int) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          2
+        ],
+        "expected": [
+          1,
+          2,
+          3,
+          5
+        ]
+      },
+      {
+        "args": [
+          [
+            1
+          ],
+          1
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            1,
+            2
+          ],
+          1
+        ],
+        "expected": [
+          1
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            1
+          ],
+          2
+        ],
+        "expected": [
+          1,
+          1
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3
+          ],
+          3
+        ],
+        "expected": [
+          2,
+          3
+        ]
+      }
+    ],
+    "lc_number": 19
+  },
+  "merge-two-sorted-lists": {
+    "function_name": "merge_two_lists",
+    "signature": "(list1: list[int], list2: list[int]) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            4
+          ],
+          [
+            1,
+            3,
+            4
+          ]
+        ],
+        "expected": [
+          1,
+          1,
+          2,
+          3,
+          4,
+          4
+        ]
+      },
+      {
+        "args": [
+          [],
+          []
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [],
+          [
+            0
+          ]
+        ],
+        "expected": [
+          0
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4,
+            5,
+            6
+          ]
+        ],
+        "expected": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    ],
+    "lc_number": 21,
+    "probe_max_n": 100
+  },
+  "merge-k-sorted-lists": {
+    "function_name": "merge_k_lists",
+    "signature": "(lists: list[list[int]]) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              4,
+              5
+            ],
+            [
+              1,
+              3,
+              4
+            ],
+            [
+              2,
+              6
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          1,
+          2,
+          3,
+          4,
+          4,
+          5,
+          6
+        ]
+      },
+      {
+        "args": [
+          []
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            []
+          ]
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            [],
+            [
+              0
+            ],
+            []
+          ]
+        ],
+        "expected": [
+          0
+        ]
+      },
+      {
+        "args": [
+          [
+            [
+              5
+            ],
+            [
+              1
+            ],
+            [
+              3
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          3,
+          5
+        ]
+      }
+    ],
+    "lc_number": 23
+  },
+  "reverse-nodes-in-k-group": {
+    "function_name": "reverse_k_group",
+    "signature": "(head: list[int], k: int) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          2
+        ],
+        "expected": [
+          2,
+          1,
+          4,
+          3,
+          5
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          3
+        ],
+        "expected": [
+          3,
+          2,
+          1,
+          4,
+          5
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3
+          ],
+          3
+        ],
+        "expected": [
+          3,
+          2,
+          1
+        ]
+      },
+      {
+        "args": [
+          [
+            3,
+            1,
+            2,
+            3
+          ],
+          2
+        ],
+        "expected": [
+          1,
+          3,
+          3,
+          2
+        ]
+      }
+    ],
+    "lc_number": 25
+  },
+  "copy-list-with-random-pointer": {
+    "function_name": "copy_random_list",
+    "signature": "(head: list[list[int]]) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              7,
+              -1
+            ],
+            [
+              13,
+              0
+            ],
+            [
+              11,
+              4
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            7,
+            -1
+          ],
+          [
+            13,
+            0
+          ],
+          [
+            11,
+            4
+          ],
+          [
+            10,
+            2
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        "predicate": "deep_copy_valid"
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            1
+          ],
+          [
+            2,
+            1
+          ]
+        ],
+        "predicate": "deep_copy_valid"
+      },
+      {
+        "args": [
+          [
+            [
+              3,
+              -1
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              -1
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            3,
+            -1
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            -1
+          ]
+        ],
+        "predicate": "deep_copy_valid"
+      }
+    ],
+    "lc_number": 138,
+    "probe_max_n": 1000
+  },
+  "linked-list-cycle": {
+    "function_name": "has_cycle",
+    "signature": "(next_node: list[int]) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            1
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            1,
+            0
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            -1
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            2
+          ]
+        ],
+        "expected": true
+      }
+    ],
+    "lc_number": 141
+  },
+  "reorder-list": {
+    "function_name": "reorder_list",
+    "signature": "(head: list[int]) -> None",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            4,
+            2,
+            3
+          ]
+        ],
+        "compare": "mutates"
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            5,
+            2,
+            4,
+            3
+          ]
+        ],
+        "compare": "mutates"
+      },
+      {
+        "args": [
+          [
+            1
+          ]
+        ],
+        "expected": [
+          [
+            1
+          ]
+        ],
+        "compare": "mutates"
+      }
+    ],
+    "lc_number": 143,
+    "scale_compare": "mutates"
+  },
+  "lru-cache": {
+    "function_name": "LRUCache",
+    "signature": {
+      "ctor": "(self, capacity: int)",
+      "methods": {
+        "get": "(self, key: int) -> int",
+        "put": "(self, key: int, value: int) -> None"
+      }
+    },
+    "visible_tests": [
+      {
+        "ops": [
+          [
+            "__init__",
+            2
+          ],
+          [
+            "put",
+            1,
+            1
+          ],
+          [
+            "put",
+            2,
+            2
+          ],
+          [
+            "get",
+            1
+          ],
+          [
+            "put",
+            3,
+            3
+          ],
+          [
+            "get",
+            2
+          ],
+          [
+            "put",
+            4,
+            4
+          ],
+          [
+            "get",
+            1
+          ],
+          [
+            "get",
+            3
+          ],
+          [
+            "get",
+            4
+          ]
+        ],
+        "ctor_args": [
+          2
+        ],
+        "expected": [
+          null,
+          null,
+          null,
+          1,
+          null,
+          -1,
+          null,
+          -1,
+          3,
+          4
+        ]
+      },
+      {
+        "ops": [
+          [
+            "__init__",
+            1
+          ],
+          [
+            "put",
+            0,
+            0
+          ],
+          [
+            "get",
+            0
+          ],
+          [
+            "put",
+            1,
+            0
+          ],
+          [
+            "get",
+            0
+          ],
+          [
+            "get",
+            1
+          ],
+          [
+            "put",
+            1,
+            7
+          ],
+          [
+            "get",
+            1
+          ]
+        ],
+        "ctor_args": [
+          1
+        ],
+        "expected": [
+          null,
+          null,
+          0,
+          null,
+          -1,
+          0,
+          null,
+          7
+        ]
+      },
+      {
+        "ops": [
+          [
+            "__init__",
+            2
+          ],
+          [
+            "put",
+            1,
+            1
+          ],
+          [
+            "put",
+            2,
+            2
+          ],
+          [
+            "put",
+            1,
+            10
+          ],
+          [
+            "put",
+            3,
+            3
+          ],
+          [
+            "get",
+            2
+          ],
+          [
+            "get",
+            1
+          ],
+          [
+            "get",
+            3
+          ]
+        ],
+        "ctor_args": [
+          2
+        ],
+        "expected": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          -1,
+          10,
+          3
+        ]
+      }
+    ],
+    "lc_number": 146
+  },
+  "reverse-linked-list": {
+    "function_name": "reverse_list",
+    "signature": "(head: list[int]) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        ],
+        "expected": [
+          5,
+          4,
+          3,
+          2,
+          1
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            2
+          ]
+        ],
+        "expected": [
+          2,
+          1
+        ]
+      },
+      {
+        "args": [
+          []
+        ],
+        "expected": []
+      }
+    ],
+    "lc_number": 206,
+    "probe_max_n": 3200
+  },
+  "find-the-duplicate-number": {
+    "function_name": "find_duplicate",
+    "signature": "(nums: list[int]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            3,
+            4,
+            2,
+            2
+          ]
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            3,
+            1,
+            3,
+            4,
+            2
+          ]
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          [
+            3,
+            3,
+            3,
+            3,
+            3
+          ]
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          [
+            1,
+            1
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            2,
+            3
+          ]
+        ],
+        "expected": 2
+      }
+    ],
+    "lc_number": 287
+  },
+  "validate-binary-search-tree": {
+    "function_name": "is_valid_bst",
+    "signature": "(root: list | None) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            2,
+            [
+              1,
+              null,
+              null
+            ],
+            [
+              3,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            5,
+            [
+              1,
+              null,
+              null
+            ],
+            [
+              4,
+              [
+                3,
+                null,
+                null
+              ],
+              [
+                6,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            5,
+            [
+              4,
+              null,
+              null
+            ],
+            [
+              6,
+              [
+                3,
+                null,
+                null
+              ],
+              [
+                7,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": false
+      }
+    ],
+    "lc_number": 98
+  },
+  "same-tree": {
+    "function_name": "is_same_tree",
+    "signature": "(p: list | None, q: list | None) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            [
+              3,
+              null,
+              null
+            ]
+          ],
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            [
+              3,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            null
+          ],
+          [
+            1,
+            null,
+            [
+              2,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            [
+              1,
+              null,
+              null
+            ]
+          ],
+          [
+            1,
+            [
+              1,
+              null,
+              null
+            ],
+            [
+              2,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          null,
+          null
+        ],
+        "expected": true
+      }
+    ],
+    "lc_number": 100
+  },
+  "binary-tree-level-order-traversal": {
+    "function_name": "level_order",
+    "signature": "(root: list | None) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            [
+              9,
+              null,
+              null
+            ],
+            [
+              20,
+              [
+                15,
+                null,
+                null
+              ],
+              [
+                7,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            3
+          ],
+          [
+            9,
+            20
+          ],
+          [
+            15,
+            7
+          ]
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            null,
+            null
+          ]
+        ],
+        "expected": [
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "args": [
+          null
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              [
+                4,
+                null,
+                null
+              ],
+              null
+            ],
+            [
+              3,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            1
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            4
+          ]
+        ]
+      }
+    ],
+    "lc_number": 102,
+    "probe_max_n": 2000
+  },
+  "maximum-depth-of-binary-tree": {
+    "function_name": "max_depth",
+    "signature": "(root: list | None) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            [
+              9,
+              null,
+              null
+            ],
+            [
+              20,
+              [
+                15,
+                null,
+                null
+              ],
+              [
+                7,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          [
+            1,
+            null,
+            [
+              2,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          null
+        ],
+        "expected": 0
+      }
+    ],
+    "lc_number": 104
+  },
+  "construct-binary-tree-from-preorder-and-inorder-traversal": {
+    "function_name": "build_tree",
+    "signature": "(preorder: list[int], inorder: list[int]) -> list | None",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            9,
+            20,
+            15,
+            7
+          ],
+          [
+            9,
+            3,
+            15,
+            20,
+            7
+          ]
+        ],
+        "expected": [
+          3,
+          [
+            9,
+            null,
+            null
+          ],
+          [
+            20,
+            [
+              15,
+              null,
+              null
+            ],
+            [
+              7,
+              null,
+              null
+            ]
+          ]
+        ]
+      },
+      {
+        "args": [
+          [
+            -1
+          ],
+          [
+            -1
+          ]
+        ],
+        "expected": [
+          -1,
+          null,
+          null
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            3,
+            2,
+            1
+          ]
+        ],
+        "expected": [
+          1,
+          [
+            2,
+            [
+              3,
+              null,
+              null
+            ],
+            null
+          ],
+          null
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "expected": [
+          1,
+          null,
+          [
+            2,
+            null,
+            [
+              3,
+              null,
+              null
+            ]
+          ]
+        ]
+      }
+    ],
+    "lc_number": 105,
+    "probe_max_n": 3000
+  },
+  "balanced-binary-tree": {
+    "function_name": "is_balanced",
+    "signature": "(root: list | None) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            [
+              9,
+              null,
+              null
+            ],
+            [
+              20,
+              [
+                15,
+                null,
+                null
+              ],
+              [
+                7,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              [
+                3,
+                [
+                  4,
+                  null,
+                  null
+                ],
+                [
+                  4,
+                  null,
+                  null
+                ]
+              ],
+              [
+                3,
+                null,
+                null
+              ]
+            ],
+            [
+              2,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          null
+        ],
+        "expected": true
+      }
+    ],
+    "lc_number": 110,
+    "probe_max_n": 5000
+  },
+  "binary-tree-maximum-path-sum": {
+    "function_name": "max_path_sum",
+    "signature": "(root: list | None) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            [
+              3,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": 6
+      },
+      {
+        "args": [
+          [
+            -10,
+            [
+              9,
+              null,
+              null
+            ],
+            [
+              20,
+              [
+                15,
+                null,
+                null
+              ],
+              [
+                7,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": 42
+      },
+      {
+        "args": [
+          [
+            -3,
+            null,
+            null
+          ]
+        ],
+        "expected": -3
+      },
+      {
+        "args": [
+          [
+            -1,
+            [
+              -2,
+              null,
+              null
+            ],
+            [
+              -3,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": -1
+      }
+    ],
+    "lc_number": 124,
+    "probe_max_n": 1600
+  },
+  "binary-tree-right-side-view": {
+    "function_name": "right_side_view",
+    "signature": "(root: list | None) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              null,
+              [
+                5,
+                null,
+                null
+              ]
+            ],
+            [
+              3,
+              null,
+              [
+                4,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          3,
+          4
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              [
+                4,
+                [
+                  5,
+                  null,
+                  null
+                ],
+                null
+              ],
+              null
+            ],
+            [
+              3,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          3,
+          4,
+          5
+        ]
+      },
+      {
+        "args": [
+          [
+            1,
+            null,
+            [
+              3,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          3
+        ]
+      },
+      {
+        "args": [
+          null
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            null
+          ]
+        ],
+        "expected": [
+          1,
+          2
+        ]
+      }
+    ],
+    "lc_number": 199,
+    "probe_max_n": 100
+  },
+  "invert-binary-tree": {
+    "function_name": "invert_tree",
+    "signature": "(root: list | None) -> list | None",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            4,
+            [
+              2,
+              [
+                1,
+                null,
+                null
+              ],
+              [
+                3,
+                null,
+                null
+              ]
+            ],
+            [
+              7,
+              [
+                6,
+                null,
+                null
+              ],
+              [
+                9,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": [
+          4,
+          [
+            7,
+            [
+              9,
+              null,
+              null
+            ],
+            [
+              6,
+              null,
+              null
+            ]
+          ],
+          [
+            2,
+            [
+              3,
+              null,
+              null
+            ],
+            [
+              1,
+              null,
+              null
+            ]
+          ]
+        ]
+      },
+      {
+        "args": [
+          [
+            2,
+            [
+              1,
+              null,
+              null
+            ],
+            [
+              3,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": [
+          2,
+          [
+            3,
+            null,
+            null
+          ],
+          [
+            1,
+            null,
+            null
+          ]
+        ]
+      },
+      {
+        "args": [
+          null
+        ],
+        "expected": null
+      }
+    ],
+    "lc_number": 226
+  },
+  "kth-smallest-element-in-a-bst": {
+    "function_name": "kth_smallest",
+    "signature": "(root: list | None, k: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            [
+              1,
+              null,
+              [
+                2,
+                null,
+                null
+              ]
+            ],
+            [
+              4,
+              null,
+              null
+            ]
+          ],
+          1
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            5,
+            [
+              3,
+              [
+                2,
+                [
+                  1,
+                  null,
+                  null
+                ],
+                null
+              ],
+              [
+                4,
+                null,
+                null
+              ]
+            ],
+            [
+              6,
+              null,
+              null
+            ]
+          ],
+          3
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          [
+            1,
+            null,
+            [
+              2,
+              null,
+              [
+                3,
+                null,
+                null
+              ]
+            ]
+          ],
+          3
+        ],
+        "expected": 3
+      }
+    ],
+    "lc_number": 230
+  },
+  "lowest-common-ancestor-of-a-binary-search-tree": {
+    "function_name": "lowest_common_ancestor",
+    "signature": "(root: list | None, p: int, q: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            6,
+            [
+              2,
+              [
+                0,
+                null,
+                null
+              ],
+              [
+                4,
+                [
+                  3,
+                  null,
+                  null
+                ],
+                [
+                  5,
+                  null,
+                  null
+                ]
+              ]
+            ],
+            [
+              8,
+              [
+                7,
+                null,
+                null
+              ],
+              [
+                9,
+                null,
+                null
+              ]
+            ]
+          ],
+          2,
+          8
+        ],
+        "expected": 6
+      },
+      {
+        "args": [
+          [
+            6,
+            [
+              2,
+              [
+                0,
+                null,
+                null
+              ],
+              [
+                4,
+                [
+                  3,
+                  null,
+                  null
+                ],
+                [
+                  5,
+                  null,
+                  null
+                ]
+              ]
+            ],
+            [
+              8,
+              [
+                7,
+                null,
+                null
+              ],
+              [
+                9,
+                null,
+                null
+              ]
+            ]
+          ],
+          2,
+          4
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            2,
+            [
+              1,
+              null,
+              null
+            ],
+            null
+          ],
+          2,
+          1
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            6,
+            [
+              2,
+              [
+                0,
+                null,
+                null
+              ],
+              [
+                4,
+                [
+                  3,
+                  null,
+                  null
+                ],
+                [
+                  5,
+                  null,
+                  null
+                ]
+              ]
+            ],
+            [
+              8,
+              [
+                7,
+                null,
+                null
+              ],
+              [
+                9,
+                null,
+                null
+              ]
+            ]
+          ],
+          3,
+          5
+        ],
+        "expected": 4
+      }
+    ],
+    "lc_number": 235
+  },
+  "serialize-and-deserialize-binary-tree": {
+    "function_name": "serialize",
+    "signature": {
+      "functions": {
+        "serialize": "(root: list | None) -> str",
+        "deserialize": "(data: str) -> list | None"
+      }
+    },
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            [
+              3,
+              [
+                4,
+                null,
+                null
+              ],
+              [
+                5,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          [
+            2,
+            null,
+            null
+          ],
+          [
+            3,
+            [
+              4,
+              null,
+              null
+            ],
+            [
+              5,
+              null,
+              null
+            ]
+          ]
+        ],
+        "predicate": "tree_codec_roundtrip"
+      },
+      {
+        "args": [
+          null
+        ],
+        "expected": null,
+        "predicate": "tree_codec_roundtrip"
+      },
+      {
+        "args": [
+          [
+            -1000,
+            null,
+            null
+          ]
+        ],
+        "expected": [
+          -1000,
+          null,
+          null
+        ],
+        "predicate": "tree_codec_roundtrip"
+      },
+      {
+        "args": [
+          [
+            7,
+            [
+              7,
+              null,
+              null
+            ],
+            null
+          ]
+        ],
+        "expected": [
+          7,
+          [
+            7,
+            null,
+            null
+          ],
+          null
+        ],
+        "predicate": "tree_codec_roundtrip"
+      }
+    ],
+    "lc_number": 297,
+    "scale_compare": "none"
+  },
+  "subtree-of-another-tree": {
+    "function_name": "is_subtree",
+    "signature": "(root: list | None, sub_root: list | None) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            [
+              4,
+              [
+                1,
+                null,
+                null
+              ],
+              [
+                2,
+                null,
+                null
+              ]
+            ],
+            [
+              5,
+              null,
+              null
+            ]
+          ],
+          [
+            4,
+            [
+              1,
+              null,
+              null
+            ],
+            [
+              2,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            3,
+            [
+              4,
+              [
+                1,
+                null,
+                null
+              ],
+              [
+                2,
+                [
+                  0,
+                  null,
+                  null
+                ],
+                null
+              ]
+            ],
+            [
+              5,
+              null,
+              null
+            ]
+          ],
+          [
+            4,
+            [
+              1,
+              null,
+              null
+            ],
+            [
+              2,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            null
+          ],
+          [
+            1,
+            [
+              2,
+              null,
+              null
+            ],
+            null
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            1,
+            null,
+            null
+          ],
+          [
+            2,
+            null,
+            null
+          ]
+        ],
+        "expected": false
+      }
+    ],
+    "lc_number": 572,
+    "probe_max_n": 2000
+  },
+  "count-good-nodes-in-binary-tree": {
+    "function_name": "good_nodes",
+    "signature": "(root: list | None) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            [
+              1,
+              [
+                3,
+                null,
+                null
+              ],
+              null
+            ],
+            [
+              4,
+              [
+                1,
+                null,
+                null
+              ],
+              [
+                5,
+                null,
+                null
+              ]
+            ]
+          ]
+        ],
+        "expected": 4
+      },
+      {
+        "args": [
+          [
+            3,
+            [
+              3,
+              [
+                4,
+                null,
+                null
+              ],
+              [
+                2,
+                null,
+                null
+              ]
+            ],
+            null
+          ]
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          [
+            1,
+            null,
+            null
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            2,
+            [
+              2,
+              [
+                2,
+                null,
+                null
+              ],
+              null
+            ],
+            null
+          ]
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          [
+            -10000,
+            [
+              -10000,
+              null,
+              null
+            ],
+            [
+              10000,
+              null,
+              null
+            ]
+          ]
+        ],
+        "expected": 3
+      }
+    ],
+    "lc_number": 1448
+  },
+  "kth-largest-element-in-an-array": {
+    "function_name": "find_kth_largest",
+    "signature": "(nums: list[int], k: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            2,
+            1,
+            5,
+            6,
+            4
+          ],
+          2
+        ],
+        "expected": 5
+      },
+      {
+        "args": [
+          [
+            3,
+            2,
+            3,
+            1,
+            2,
+            4,
+            5,
+            5,
+            6
+          ],
+          4
+        ],
+        "expected": 4
+      },
+      {
+        "args": [
+          [
+            3,
+            2,
+            3,
+            1,
+            2,
+            4,
+            5,
+            5,
+            6
+          ],
+          9
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            7,
+            7,
+            7,
+            1
+          ],
+          3
+        ],
+        "expected": 7
+      }
+    ],
+    "lc_number": 215
+  },
+  "design-twitter": {
+    "function_name": "Twitter",
+    "signature": {
+      "methods": {
+        "postTweet": "(self, userId: int, tweetId: int) -> None",
+        "getNewsFeed": "(self, userId: int) -> list[int]",
+        "follow": "(self, followerId: int, followeeId: int) -> None",
+        "unfollow": "(self, followerId: int, followeeId: int) -> None"
+      }
+    },
+    "visible_tests": [
+      {
+        "ops": [
+          [
+            "postTweet",
+            1,
+            5
+          ],
+          [
+            "getNewsFeed",
+            1
+          ],
+          [
+            "follow",
+            1,
+            2
+          ],
+          [
+            "postTweet",
+            2,
+            6
+          ],
+          [
+            "getNewsFeed",
+            1
+          ],
+          [
+            "unfollow",
+            1,
+            2
+          ],
+          [
+            "getNewsFeed",
+            1
+          ]
+        ],
+        "expected": [
+          null,
+          [
+            5
+          ],
+          null,
+          null,
+          [
+            6,
+            5
+          ],
+          null,
+          [
+            5
+          ]
+        ]
+      },
+      {
+        "ops": [
+          [
+            "postTweet",
+            1,
+            5
+          ],
+          [
+            "postTweet",
+            1,
+            11
+          ],
+          [
+            "postTweet",
+            1,
+            3
+          ],
+          [
+            "postTweet",
+            1,
+            8
+          ],
+          [
+            "postTweet",
+            1,
+            12
+          ],
+          [
+            "postTweet",
+            1,
+            1
+          ],
+          [
+            "postTweet",
+            1,
+            9
+          ],
+          [
+            "postTweet",
+            1,
+            4
+          ],
+          [
+            "postTweet",
+            1,
+            7
+          ],
+          [
+            "postTweet",
+            1,
+            13
+          ],
+          [
+            "postTweet",
+            1,
+            2
+          ],
+          [
+            "postTweet",
+            1,
+            6
+          ],
+          [
+            "getNewsFeed",
+            1
+          ]
+        ],
+        "expected": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          [
+            6,
+            2,
+            13,
+            7,
+            4,
+            9,
+            1,
+            12,
+            8,
+            3
+          ]
+        ]
+      },
+      {
+        "ops": [
+          [
+            "getNewsFeed",
+            3
+          ],
+          [
+            "postTweet",
+            1,
+            10
+          ],
+          [
+            "postTweet",
+            2,
+            11
+          ],
+          [
+            "follow",
+            3,
+            1
+          ],
+          [
+            "follow",
+            3,
+            2
+          ],
+          [
+            "postTweet",
+            1,
+            12
+          ],
+          [
+            "getNewsFeed",
+            3
+          ],
+          [
+            "postTweet",
+            4,
+            13
+          ],
+          [
+            "unfollow",
+            3,
+            4
+          ],
+          [
+            "getNewsFeed",
+            3
+          ]
+        ],
+        "expected": [
+          [],
+          null,
+          null,
+          null,
+          null,
+          null,
+          [
+            12,
+            11,
+            10
+          ],
+          null,
+          null,
+          [
+            12,
+            11,
+            10
+          ]
+        ]
+      }
+    ],
+    "lc_number": 355
+  },
+  "task-scheduler": {
+    "function_name": "least_interval",
+    "signature": "(tasks: list[str], n: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            "A",
+            "A",
+            "A",
+            "B",
+            "B",
+            "B"
+          ],
+          2
+        ],
+        "expected": 8
+      },
+      {
+        "args": [
+          [
+            "A",
+            "C",
+            "A",
+            "B",
+            "D",
+            "B"
+          ],
+          1
+        ],
+        "expected": 6
+      },
+      {
+        "args": [
+          [
+            "A",
+            "A",
+            "A",
+            "B",
+            "B",
+            "B"
+          ],
+          3
+        ],
+        "expected": 10
+      },
+      {
+        "args": [
+          [
+            "A",
+            "A",
+            "A",
+            "B",
+            "B",
+            "B"
+          ],
+          0
+        ],
+        "expected": 6
+      },
+      {
+        "args": [
+          [
+            "A",
+            "A",
+            "A",
+            "B",
+            "B",
+            "B",
+            "C",
+            "C",
+            "C",
+            "D",
+            "D",
+            "D"
+          ],
+          1
+        ],
+        "expected": 12
+      }
+    ],
+    "lc_number": 621
+  },
+  "kth-largest-element-in-a-stream": {
+    "function_name": "KthLargest",
+    "signature": {
+      "methods": {
+        "add": "(self, val: int) -> int"
+      },
+      "ctor": "(self, k: int, nums: list[int])"
+    },
+    "visible_tests": [
+      {
+        "ops": [
+          [
+            "__init__",
+            3,
+            [
+              4,
+              5,
+              8,
+              2
+            ]
+          ],
+          [
+            "add",
+            3
+          ],
+          [
+            "add",
+            5
+          ],
+          [
+            "add",
+            10
+          ],
+          [
+            "add",
+            9
+          ],
+          [
+            "add",
+            4
+          ]
+        ],
+        "ctor_args": [
+          3,
+          [
+            4,
+            5,
+            8,
+            2
+          ]
+        ],
+        "expected": [
+          null,
+          4,
+          5,
+          5,
+          8,
+          8
+        ]
+      },
+      {
+        "ops": [
+          [
+            "__init__",
+            4,
+            [
+              7,
+              7,
+              7,
+              7,
+              8,
+              3
+            ]
+          ],
+          [
+            "add",
+            2
+          ],
+          [
+            "add",
+            10
+          ],
+          [
+            "add",
+            9
+          ],
+          [
+            "add",
+            9
+          ]
+        ],
+        "ctor_args": [
+          4,
+          [
+            7,
+            7,
+            7,
+            7,
+            8,
+            3
+          ]
+        ],
+        "expected": [
+          null,
+          7,
+          7,
+          7,
+          8
+        ]
+      },
+      {
+        "ops": [
+          [
+            "__init__",
+            1,
+            []
+          ],
+          [
+            "add",
+            -3
+          ]
+        ],
+        "ctor_args": [
+          1,
+          []
+        ],
+        "expected": [
+          null,
+          -3
+        ]
+      },
+      {
+        "ops": [
+          [
+            "__init__",
+            3,
+            [
+              7,
+              7
+            ]
+          ],
+          [
+            "add",
+            7
+          ]
+        ],
+        "ctor_args": [
+          3,
+          [
+            7,
+            7
+          ]
+        ],
+        "expected": [
+          null,
+          7
+        ]
+      }
+    ],
+    "lc_number": 703
+  },
+  "k-closest-points-to-origin": {
+    "function_name": "k_closest",
+    "signature": "(k: int, points: list[list[int]]) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          1,
+          [
+            [
+              1,
+              3
+            ],
+            [
+              -2,
+              2
+            ]
+          ]
+        ],
+        "expected": true,
+        "predicate": "k_closest_valid"
+      },
+      {
+        "args": [
+          2,
+          [
+            [
+              3,
+              3
+            ],
+            [
+              5,
+              -1
+            ],
+            [
+              -2,
+              4
+            ]
+          ]
+        ],
+        "expected": true,
+        "predicate": "k_closest_valid"
+      },
+      {
+        "args": [
+          3,
+          [
+            [
+              1,
+              1
+            ],
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ],
+            [
+              -1,
+              -1
+            ]
+          ]
+        ],
+        "expected": true,
+        "predicate": "k_closest_valid"
+      }
+    ],
+    "lc_number": 973,
+    "scale_compare": "none"
+  },
+  "last-stone-weight": {
+    "function_name": "last_stone_weight",
+    "signature": "(stones: list[int]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            2,
+            7,
+            4,
+            1,
+            8,
+            1
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            1
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            1,
+            1
+          ]
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            10,
+            10,
+            10
+          ]
+        ],
+        "expected": 10
+      }
+    ],
+    "lc_number": 1046
+  },
+  "letter-combinations-of-a-phone-number": {
+    "function_name": "letter_combinations",
+    "signature": "(digits: str) -> list[str]",
+    "visible_tests": [
+      {
+        "args": [
+          "23"
+        ],
+        "expected": [
+          "ad",
+          "ae",
+          "af",
+          "bd",
+          "be",
+          "bf",
+          "cd",
+          "ce",
+          "cf"
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          "2"
+        ],
+        "expected": [
+          "a",
+          "b",
+          "c"
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          "79"
+        ],
+        "expected": [
+          "pw",
+          "px",
+          "py",
+          "pz",
+          "qw",
+          "qx",
+          "qy",
+          "qz",
+          "rw",
+          "rx",
+          "ry",
+          "rz",
+          "sw",
+          "sx",
+          "sy",
+          "sz"
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          "2345"
+        ],
+        "expected": [
+          "adgj",
+          "adgk",
+          "adgl",
+          "adhj",
+          "adhk",
+          "adhl",
+          "adij",
+          "adik",
+          "adil",
+          "aegj",
+          "aegk",
+          "aegl",
+          "aehj",
+          "aehk",
+          "aehl",
+          "aeij",
+          "aeik",
+          "aeil",
+          "afgj",
+          "afgk",
+          "afgl",
+          "afhj",
+          "afhk",
+          "afhl",
+          "afij",
+          "afik",
+          "afil",
+          "bdgj",
+          "bdgk",
+          "bdgl",
+          "bdhj",
+          "bdhk",
+          "bdhl",
+          "bdij",
+          "bdik",
+          "bdil",
+          "begj",
+          "begk",
+          "begl",
+          "behj",
+          "behk",
+          "behl",
+          "beij",
+          "beik",
+          "beil",
+          "bfgj",
+          "bfgk",
+          "bfgl",
+          "bfhj",
+          "bfhk",
+          "bfhl",
+          "bfij",
+          "bfik",
+          "bfil",
+          "cdgj",
+          "cdgk",
+          "cdgl",
+          "cdhj",
+          "cdhk",
+          "cdhl",
+          "cdij",
+          "cdik",
+          "cdil",
+          "cegj",
+          "cegk",
+          "cegl",
+          "cehj",
+          "cehk",
+          "cehl",
+          "ceij",
+          "ceik",
+          "ceil",
+          "cfgj",
+          "cfgk",
+          "cfgl",
+          "cfhj",
+          "cfhk",
+          "cfhl",
+          "cfij",
+          "cfik",
+          "cfil"
+        ],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 17,
+    "scale_compare": "sorted"
+  },
+  "combination-sum": {
+    "function_name": "combination_sum",
+    "signature": "(candidates: list[int], target: int) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            2,
+            3,
+            6,
+            7
+          ],
+          7
+        ],
+        "expected": [
+          [
+            2,
+            2,
+            3
+          ],
+          [
+            7
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            2,
+            3,
+            5
+          ],
+          8
+        ],
+        "expected": [
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            3,
+            3
+          ],
+          [
+            3,
+            5
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            2
+          ],
+          1
+        ],
+        "expected": [],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 39,
+    "scale_compare": "sorted"
+  },
+  "combination-sum-ii": {
+    "function_name": "combination_sum2",
+    "signature": "(candidates: list[int], target: int) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            10,
+            1,
+            2,
+            7,
+            6,
+            1,
+            5
+          ],
+          8
+        ],
+        "expected": [
+          [
+            1,
+            1,
+            6
+          ],
+          [
+            1,
+            2,
+            5
+          ],
+          [
+            1,
+            7
+          ],
+          [
+            2,
+            6
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            2,
+            5,
+            2,
+            1,
+            2
+          ],
+          5
+        ],
+        "expected": [
+          [
+            1,
+            2,
+            2
+          ],
+          [
+            5
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            3,
+            3
+          ],
+          4
+        ],
+        "expected": [],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 40,
+    "scale_compare": "sorted"
+  },
+  "permutations": {
+    "function_name": "permutations",
+    "signature": "(nums: list[int]) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            1,
+            3
+          ],
+          [
+            2,
+            3,
+            1
+          ],
+          [
+            3,
+            1,
+            2
+          ],
+          [
+            3,
+            2,
+            1
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            0,
+            1
+          ]
+        ],
+        "expected": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            1
+          ]
+        ],
+        "expected": [
+          [
+            1
+          ]
+        ],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 46,
+    "scale_compare": "sorted"
+  },
+  "n-queens": {
+    "function_name": "solve_n_queens",
+    "signature": "(n: int) -> list[list[str]]",
+    "visible_tests": [
+      {
+        "args": [
+          4
+        ],
+        "expected": [
+          [
+            ".Q..",
+            "...Q",
+            "Q...",
+            "..Q."
+          ],
+          [
+            "..Q.",
+            "Q...",
+            "...Q",
+            ".Q.."
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          1
+        ],
+        "expected": [
+          [
+            "Q"
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          2
+        ],
+        "expected": [],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          3
+        ],
+        "expected": [],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 51,
+    "scale_compare": "sorted"
+  },
+  "subsets": {
+    "function_name": "subsets",
+    "signature": "(nums: list[int]) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "expected": [
+          [],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            3
+          ],
+          [
+            1,
+            3
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            0
+          ]
+        ],
+        "expected": [
+          [],
+          [
+            0
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            -1,
+            0
+          ]
+        ],
+        "expected": [
+          [],
+          [
+            -1
+          ],
+          [
+            0
+          ],
+          [
+            -1,
+            0
+          ]
+        ],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 78,
+    "scale_compare": "sorted"
+  },
+  "word-search": {
+    "function_name": "exist",
+    "signature": "(board: list[list[str]], word: str) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              "A",
+              "B",
+              "C",
+              "E"
+            ],
+            [
+              "S",
+              "F",
+              "C",
+              "S"
+            ],
+            [
+              "A",
+              "D",
+              "E",
+              "E"
+            ]
+          ],
+          "ABCCED"
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            [
+              "A",
+              "B",
+              "C",
+              "E"
+            ],
+            [
+              "S",
+              "F",
+              "C",
+              "S"
+            ],
+            [
+              "A",
+              "D",
+              "E",
+              "E"
+            ]
+          ],
+          "SEE"
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            [
+              "A",
+              "B",
+              "C",
+              "E"
+            ],
+            [
+              "S",
+              "F",
+              "C",
+              "S"
+            ],
+            [
+              "A",
+              "D",
+              "E",
+              "E"
+            ]
+          ],
+          "ABCB"
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            [
+              "a",
+              "a"
+            ]
+          ],
+          "aaa"
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            [
+              "a"
+            ]
+          ],
+          "a"
+        ],
+        "expected": true
+      }
+    ],
+    "lc_number": 79,
+    "probe_max_n": 40
+  },
+  "subsets-ii": {
+    "function_name": "subsets_with_dup",
+    "signature": "(nums: list[int]) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            2
+          ]
+        ],
+        "expected": [
+          [],
+          [
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            2,
+            2
+          ],
+          [
+            2
+          ],
+          [
+            2,
+            2
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            0
+          ]
+        ],
+        "expected": [
+          [],
+          [
+            0
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            2,
+            1,
+            2
+          ]
+        ],
+        "expected": [
+          [],
+          [
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            2,
+            2
+          ],
+          [
+            2
+          ],
+          [
+            2,
+            2
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            -3,
+            -3
+          ]
+        ],
+        "expected": [
+          [],
+          [
+            -3
+          ],
+          [
+            -3,
+            -3
+          ]
+        ],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 90,
+    "scale_compare": "sorted"
+  },
+  "palindrome-partitioning": {
+    "function_name": "partition",
+    "signature": "(s: str) -> list[list[str]]",
+    "visible_tests": [
+      {
+        "args": [
+          "aab"
+        ],
+        "expected": [
+          [
+            "a",
+            "a",
+            "b"
+          ],
+          [
+            "aa",
+            "b"
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          "a"
+        ],
+        "expected": [
+          [
+            "a"
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          "aaa"
+        ],
+        "expected": [
+          [
+            "a",
+            "a",
+            "a"
+          ],
+          [
+            "a",
+            "aa"
+          ],
+          [
+            "aa",
+            "a"
+          ],
+          [
+            "aaa"
+          ]
+        ],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 131,
+    "scale_compare": "sorted"
+  },
+  "reverse-integer": {
+    "function_name": "reverse",
+    "signature": "(x: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          123
+        ],
+        "expected": 321
+      },
+      {
+        "args": [
+          -123
+        ],
+        "expected": -321
+      },
+      {
+        "args": [
+          120
+        ],
+        "expected": 21
+      },
+      {
+        "args": [
+          1534236469
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          -2147483412
+        ],
+        "expected": -2143847412
+      }
+    ],
+    "lc_number": 7
+  },
+  "single-number": {
+    "function_name": "single_number",
+    "signature": "(nums: list[int]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            2,
+            2,
+            1
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            4,
+            1,
+            2,
+            1,
+            2
+          ]
+        ],
+        "expected": 4
+      },
+      {
+        "args": [
+          [
+            1
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            -1,
+            -1,
+            -2
+          ]
+        ],
+        "expected": -2
+      }
+    ],
+    "lc_number": 136
+  },
+  "reverse-bits": {
+    "function_name": "reverse_bits",
+    "signature": "(n: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          43261596
+        ],
+        "expected": 964176192
+      },
+      {
+        "args": [
+          2147483644
+        ],
+        "expected": 1073741822
+      },
+      {
+        "args": [
+          0
+        ],
+        "expected": 0
+      }
+    ],
+    "lc_number": 190
+  },
+  "number-of-1-bits": {
+    "function_name": "hamming_weight",
+    "signature": "(n: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          11
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          128
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          2147483645
+        ],
+        "expected": 30
+      },
+      {
+        "args": [
+          1
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          2147483647
+        ],
+        "expected": 31
+      }
+    ],
+    "lc_number": 191
+  },
+  "missing-number": {
+    "function_name": "missing_number",
+    "signature": "(nums: list[int]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            3,
+            0,
+            1
+          ]
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            0,
+            1
+          ]
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            9,
+            6,
+            4,
+            2,
+            3,
+            5,
+            7,
+            0,
+            1
+          ]
+        ],
+        "expected": 8
+      },
+      {
+        "args": [
+          [
+            1
+          ]
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            2,
+            3,
+            0
+          ]
+        ],
+        "expected": 1
+      }
+    ],
+    "lc_number": 268
+  },
+  "counting-bits": {
+    "function_name": "count_bits",
+    "signature": "(n: int) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          2
+        ],
+        "expected": [
+          0,
+          1,
+          1
+        ]
+      },
+      {
+        "args": [
+          5
+        ],
+        "expected": [
+          0,
+          1,
+          1,
+          2,
+          1,
+          2
+        ]
+      },
+      {
+        "args": [
+          0
+        ],
+        "expected": [
+          0
+        ]
+      }
+    ],
+    "lc_number": 338
+  },
+  "sum-of-two-integers": {
+    "function_name": "get_sum",
+    "signature": "(a: int, b: int) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          1,
+          2
+        ],
+        "expected": 3
+      },
+      {
+        "args": [
+          2,
+          3
+        ],
+        "expected": 5
+      },
+      {
+        "args": [
+          -1000,
+          -1000
+        ],
+        "expected": -2000
+      },
+      {
+        "args": [
+          1000,
+          -1000
+        ],
+        "expected": 0
+      }
+    ],
+    "lc_number": 371
+  },
+  "multiply-strings": {
+    "function_name": "multiply",
+    "signature": "(num1: str, num2: str) -> str",
+    "visible_tests": [
+      {
+        "args": [
+          "2",
+          "3"
+        ],
+        "expected": "6"
+      },
+      {
+        "args": [
+          "123",
+          "456"
+        ],
+        "expected": "56088"
+      },
+      {
+        "args": [
+          "0",
+          "0"
+        ],
+        "expected": "0"
+      },
+      {
+        "args": [
+          "100",
+          "100"
+        ],
+        "expected": "10000"
+      }
+    ],
+    "lc_number": 43,
+    "probe_max_n": 400
+  },
+  "rotate-image": {
+    "function_name": "rotate",
+    "signature": "(matrix: list[list[int]]) -> None",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              2,
+              3
+            ],
+            [
+              4,
+              5,
+              6
+            ],
+            [
+              7,
+              8,
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              7,
+              4,
+              1
+            ],
+            [
+              8,
+              5,
+              2
+            ],
+            [
+              9,
+              6,
+              3
+            ]
+          ]
+        ],
+        "compare": "mutates"
+      },
+      {
+        "args": [
+          [
+            [
+              5,
+              1,
+              9,
+              11
+            ],
+            [
+              2,
+              4,
+              8,
+              10
+            ],
+            [
+              13,
+              3,
+              6,
+              7
+            ],
+            [
+              15,
+              14,
+              12,
+              16
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              15,
+              13,
+              2,
+              5
+            ],
+            [
+              14,
+              3,
+              4,
+              1
+            ],
+            [
+              12,
+              6,
+              8,
+              9
+            ],
+            [
+              16,
+              7,
+              10,
+              11
+            ]
+          ]
+        ],
+        "compare": "mutates"
+      },
+      {
+        "args": [
+          [
+            [
+              7
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              7
+            ]
+          ]
+        ],
+        "compare": "mutates"
+      }
+    ],
+    "lc_number": 48,
+    "probe_max_n": 400,
+    "scale_compare": "mutates"
+  },
+  "powx-n": {
+    "function_name": "my_pow",
+    "signature": "(x: float, n: int) -> float",
+    "visible_tests": [
+      {
+        "args": [
+          2.0,
+          10
+        ],
+        "expected": 1024.0,
+        "compare": "approx:1e-5"
+      },
+      {
+        "args": [
+          2.1,
+          3
+        ],
+        "expected": 9.261000000000001,
+        "compare": "approx:1e-5"
+      },
+      {
+        "args": [
+          2.0,
+          -2
+        ],
+        "expected": 0.25,
+        "compare": "approx:1e-5"
+      },
+      {
+        "args": [
+          2.5,
+          0
+        ],
+        "expected": 1.0,
+        "compare": "approx:1e-5"
+      },
+      {
+        "args": [
+          -2.0,
+          3
+        ],
+        "expected": -8.0,
+        "compare": "approx:1e-5"
+      }
+    ],
+    "lc_number": 50,
+    "probe_max_n": 1000
+  },
+  "spiral-matrix": {
+    "function_name": "spiral_order",
+    "signature": "(matrix: list[list[int]]) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              2,
+              3
+            ],
+            [
+              4,
+              5,
+              6
+            ],
+            [
+              7,
+              8,
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          2,
+          3,
+          6,
+          9,
+          8,
+          7,
+          4,
+          5
+        ]
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              2,
+              3,
+              4
+            ],
+            [
+              5,
+              6,
+              7,
+              8
+            ],
+            [
+              9,
+              10,
+              11,
+              12
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          2,
+          3,
+          4,
+          8,
+          12,
+          11,
+          10,
+          9,
+          5,
+          6,
+          7
+        ]
+      },
+      {
+        "args": [
+          [
+            [
+              7
+            ]
+          ]
+        ],
+        "expected": [
+          7
+        ]
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              2,
+              3,
+              4
+            ]
+          ]
+        ],
+        "expected": [
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    ],
+    "lc_number": 54,
+    "probe_max_n": 100
+  },
+  "plus-one": {
+    "function_name": "plus_one",
+    "signature": "(digits: list[int]) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "expected": [
+          1,
+          2,
+          4
+        ]
+      },
+      {
+        "args": [
+          [
+            4,
+            3,
+            2,
+            1
+          ]
+        ],
+        "expected": [
+          4,
+          3,
+          2,
+          2
+        ]
+      },
+      {
+        "args": [
+          [
+            9
+          ]
+        ],
+        "expected": [
+          1,
+          0
+        ]
+      },
+      {
+        "args": [
+          [
+            9,
+            9,
+            9
+          ]
+        ],
+        "expected": [
+          1,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "args": [
+          [
+            2,
+            9,
+            9
+          ]
+        ],
+        "expected": [
+          3,
+          0,
+          0
+        ]
+      }
+    ],
+    "lc_number": 66
+  },
+  "set-matrix-zeroes": {
+    "function_name": "set_zeroes",
+    "signature": "(matrix: list[list[int]]) -> None",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              1,
+              1
+            ],
+            [
+              1,
+              0,
+              1
+            ],
+            [
+              1,
+              1,
+              1
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              1,
+              0,
+              1
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              1
+            ]
+          ]
+        ],
+        "compare": "mutates"
+      },
+      {
+        "args": [
+          [
+            [
+              0,
+              1,
+              2,
+              0
+            ],
+            [
+              3,
+              4,
+              5,
+              2
+            ],
+            [
+              1,
+              3,
+              1,
+              5
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              0,
+              0,
+              0,
+              0
+            ],
+            [
+              0,
+              4,
+              5,
+              0
+            ],
+            [
+              0,
+              3,
+              1,
+              0
+            ]
+          ]
+        ],
+        "compare": "mutates"
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              3
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              2,
+              0
+            ]
+          ]
+        ],
+        "compare": "mutates"
+      }
+    ],
+    "lc_number": 73,
+    "scale_compare": "mutates"
+  },
+  "happy-number": {
+    "function_name": "is_happy",
+    "signature": "(n: int) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          19
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          2
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          1
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          4
+        ],
+        "expected": false
+      }
+    ],
+    "lc_number": 202
+  },
+  "detect-squares": {
+    "function_name": "DetectSquares",
+    "signature": {
+      "methods": {
+        "add": "(self, point: list[int]) -> None",
+        "count": "(self, point: list[int]) -> int"
+      }
+    },
+    "visible_tests": [
+      {
+        "ops": [
+          [
+            "add",
+            [
+              3,
+              10
+            ]
+          ],
+          [
+            "add",
+            [
+              11,
+              2
+            ]
+          ],
+          [
+            "add",
+            [
+              3,
+              2
+            ]
+          ],
+          [
+            "count",
+            [
+              11,
+              10
+            ]
+          ],
+          [
+            "count",
+            [
+              14,
+              8
+            ]
+          ],
+          [
+            "add",
+            [
+              11,
+              2
+            ]
+          ],
+          [
+            "count",
+            [
+              11,
+              10
+            ]
+          ]
+        ],
+        "expected": [
+          null,
+          null,
+          null,
+          1,
+          0,
+          null,
+          2
+        ]
+      },
+      {
+        "ops": [
+          [
+            "add",
+            [
+              0,
+              0
+            ]
+          ],
+          [
+            "add",
+            [
+              2,
+              0
+            ]
+          ],
+          [
+            "add",
+            [
+              0,
+              3
+            ]
+          ],
+          [
+            "count",
+            [
+              2,
+              3
+            ]
+          ]
+        ],
+        "expected": [
+          null,
+          null,
+          null,
+          0
+        ]
+      },
+      {
+        "ops": [
+          [
+            "count",
+            [
+              5,
+              5
+            ]
+          ]
+        ],
+        "expected": [
+          0
+        ]
+      }
+    ],
+    "lc_number": 2013
+  },
+  "merge-intervals": {
+    "function_name": "merge",
+    "signature": "(intervals: list[list[int]]) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              3
+            ],
+            [
+              2,
+              6
+            ],
+            [
+              8,
+              10
+            ],
+            [
+              15,
+              18
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              4
+            ],
+            [
+              4,
+              5
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            5
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            [
+              4,
+              7
+            ],
+            [
+              1,
+              4
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            7
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            [
+              5,
+              5
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            5,
+            5
+          ]
+        ],
+        "compare": "sorted"
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              2,
+              5
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            5
+          ]
+        ],
+        "compare": "sorted"
+      }
+    ],
+    "lc_number": 56,
+    "scale_compare": "sorted"
+  },
+  "insert-interval": {
+    "function_name": "insert",
+    "signature": "(intervals: list[list[int]], newInterval: list[int]) -> list[list[int]]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              3
+            ],
+            [
+              6,
+              9
+            ]
+          ],
+          [
+            2,
+            5
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            5
+          ],
+          [
+            6,
+            9
+          ]
+        ]
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              3,
+              5
+            ],
+            [
+              6,
+              7
+            ],
+            [
+              8,
+              10
+            ],
+            [
+              12,
+              16
+            ]
+          ],
+          [
+            4,
+            8
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            10
+          ],
+          [
+            12,
+            16
+          ]
+        ]
+      },
+      {
+        "args": [
+          [],
+          [
+            5,
+            7
+          ]
+        ],
+        "expected": [
+          [
+            5,
+            7
+          ]
+        ]
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              5,
+              5
+            ]
+          ],
+          [
+            5,
+            6
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            2
+          ],
+          [
+            5,
+            6
+          ]
+        ]
+      }
+    ],
+    "lc_number": 57
+  },
+  "meeting-rooms": {
+    "function_name": "can_attend_meetings",
+    "signature": "(intervals: list[list[int]]) -> bool",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              0,
+              30
+            ],
+            [
+              5,
+              10
+            ],
+            [
+              15,
+              20
+            ]
+          ]
+        ],
+        "expected": false
+      },
+      {
+        "args": [
+          [
+            [
+              7,
+              10
+            ],
+            [
+              2,
+              4
+            ]
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          []
+        ],
+        "expected": true
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              5
+            ],
+            [
+              5,
+              10
+            ]
+          ]
+        ],
+        "expected": true
+      }
+    ],
+    "lc_number": 252
+  },
+  "meeting-rooms-ii": {
+    "function_name": "min_meeting_rooms",
+    "signature": "(intervals: list[list[int]]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              0,
+              30
+            ],
+            [
+              5,
+              10
+            ],
+            [
+              15,
+              20
+            ]
+          ]
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            [
+              7,
+              10
+            ],
+            [
+              2,
+              4
+            ]
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              5
+            ],
+            [
+              5,
+              10
+            ]
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            [
+              0,
+              10
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              3,
+              4
+            ]
+          ]
+        ],
+        "expected": 2
+      }
+    ],
+    "lc_number": 253
+  },
+  "non-overlapping-intervals": {
+    "function_name": "erase_overlap_intervals",
+    "signature": "(intervals: list[list[int]]) -> int",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              4
+            ],
+            [
+              1,
+              3
+            ]
+          ]
+        ],
+        "expected": 1
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              1,
+              2
+            ]
+          ]
+        ],
+        "expected": 2
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              3
+            ]
+          ]
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              2
+            ]
+          ]
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              4
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              4
+            ]
+          ]
+        ],
+        "expected": 1
+      }
+    ],
+    "lc_number": 435
+  },
+  "minimum-interval-to-include-each-query": {
+    "function_name": "min_interval",
+    "signature": "(intervals: list[list[int]], queries: list[int]) -> list[int]",
+    "visible_tests": [
+      {
+        "args": [
+          [
+            [
+              1,
+              4
+            ],
+            [
+              2,
+              4
+            ],
+            [
+              3,
+              6
+            ],
+            [
+              4,
+              4
+            ]
+          ],
+          [
+            2,
+            3,
+            4,
+            5
+          ]
+        ],
+        "expected": [
+          3,
+          3,
+          1,
+          4
+        ]
+      },
+      {
+        "args": [
+          [
+            [
+              2,
+              3
+            ],
+            [
+              2,
+              5
+            ],
+            [
+              1,
+              8
+            ],
+            [
+              20,
+              25
+            ]
+          ],
+          [
+            2,
+            19,
+            5,
+            22
+          ]
+        ],
+        "expected": [
+          2,
+          -1,
+          4,
+          6
+        ]
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              10
+            ],
+            [
+              2,
+              3
+            ]
+          ],
+          [
+            5,
+            5,
+            3
+          ]
+        ],
+        "expected": [
+          10,
+          10,
+          2
+        ]
+      }
+    ],
+    "lc_number": 1851
   }
 }

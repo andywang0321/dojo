@@ -10,4 +10,9 @@ Input: root = [1,null,2]
 Output: 2
 Constraints:
 * The number of nodes in the tree is in the range [0, 10^4].
-* -100 <= Node.val <= 100"""
+* -100 <= Node.val <= 100
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the number of nodes in the tree.
+
+Input format: dojo has no TreeNode — the tree arrives as a nested list [value, left, right] where left and right are either None or nested lists, and the function returns an int. An empty tree is None, and its depth is 0. The statement's examples are written in LeetCode's level-order array form (root = [3,9,20,null,null,15,7], null for a missing child); that array and the nested form describe the same tree, and the visible tests give the input in the nested form.
+"""

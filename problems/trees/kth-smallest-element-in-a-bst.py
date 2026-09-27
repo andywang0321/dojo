@@ -11,4 +11,9 @@ Constraints:
 * The number of nodes in the tree is n.
 * 1 <= k <= n <= 10^4
 * 0 <= Node.val <= 10^4
-Follow up: If the BST is modified often (i.e., we can do insert and delete operations) and you need to find the kth smallest frequently, how would you optimize?"""
+Follow up: If the BST is modified often (i.e., we can do insert and delete operations) and you need to find the kth smallest frequently, how would you optimize?
+
+You should aim for a solution as good or better than O(n) time and O(h) space, where n is the number of nodes in the tree and h is the height of the tree.
+
+Input format: dojo has no TreeNode — the tree arrives as a nested list [value, left, right], where None is a missing child (and None alone is the empty tree), and k arrives as a separate int argument. The function receives both and returns the k-th smallest value as an int.
+"""

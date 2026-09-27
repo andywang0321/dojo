@@ -13,4 +13,9 @@ Constraints:
 * The number of nodes in the list is n.
 * 1 <= k <= n <= 5000
 * 0 <= Node.val <= 1000
-Follow-up: Can you solve the problem in O(1) extra memory space?"""
+Follow-up: Can you solve the problem in O(1) extra memory space?
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the number of nodes in the list: the follow-up's O(1) extra memory means reversing the blocks in place rather than copying the list.
+
+Input format: dojo has no ListNode, so head arrives as a plain Python list of node values — head[0] is the first node's value, head[-1] the last — and the function returns the reordered values in the same form, e.g. [1, 2, 3, 4, 5] with k = 2 -> [2, 1, 4, 3, 5]. Relinking nodes and reordering values are the same operation on this representation, so the statement's "you may not alter the values in the list's nodes" rule is graded as the order of the values you return: leave the leftover nodes' values where they are and reverse each complete group of k by position.
+"""

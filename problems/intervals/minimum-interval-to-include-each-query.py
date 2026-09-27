@@ -24,4 +24,7 @@ Constraints:
 * 1 <= queries.length <= 10^5
 * intervals[i].length == 2
 * 1 <= lefti <= righti <= 10^7
-* 1 <= queries[j] <= 10^7"""
+* 1 <= queries[j] <= 10^7
+
+You should aim for a solution as good or better than O(n log n) time and O(n) space, where n is the total number of intervals and queries.
+"""

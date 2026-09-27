@@ -16,4 +16,9 @@ Constraints:
 Follow up:
 * A straightforward solution using O(mn) space is probably a bad idea.
 * A simple improvement uses O(m + n) space, but still not the best solution.
-* Could you devise a constant space solution?"""
+* Could you devise a constant space solution?
+
+You should aim for a solution as good or better than O(m * n) time and O(1) space, where m and n are the number of rows and columns of the matrix: the follow-up's constant-space marking keeps its flags in the matrix's own first row and column instead of in a second structure.
+
+Input format: dojo passes the matrix as a plain list of lists of ints — matrix: list[list[int]] — and grades the zeroing by the state of THAT matrix after the call, not by a returned value: the function returns nothing (None), and a solution that builds a new matrix and rebinds the name (or returns it) leaves everything the judge can see unchanged, so it fails. Set [[1, 0], [2, 3]] by writing into that same matrix to get [[0, 0], [2, 0]].
+"""

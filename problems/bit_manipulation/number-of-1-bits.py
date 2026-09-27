@@ -18,4 +18,7 @@ Explanation:
 The input binary string 1111111111111111111111111111101 has a total of thirty set bits.
 Constraints:
 * 1 <= n <= 2^31 - 1
-Follow up: If this function is called many times, how would you optimize it?"""
+Follow up: If this function is called many times, how would you optimize it?
+
+You should aim for a solution as good or better than O(1) time and O(1) space, where n is the input integer: its width is fixed at 32 bits, so even a loop that visits every bit is a bounded 32 steps and neither cost grows with the value of n.
+"""

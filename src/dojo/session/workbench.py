@@ -253,9 +253,16 @@ def render_template(problem, venv_python=VENV_PYTHON) -> str:
     statement = _field(problem, "statement", "")
     header = f"#!{venv_python}\n\n{statement_literal(statement)}\n\n\n"
     if isinstance(signature, dict) and "methods" in signature:
+        # The constructor's parameters live in `signature["ctor"]` — a design
+        # problem whose constructor takes arguments (LRUCache(capacity),
+        # KthLargest(k, nums)) otherwise rendered `def __init__(self):` and a
+        # student who filled the stub as written met a TypeError on the first
+        # check (v0.14; `min_stack`, the corpus's only class problem before, took
+        # no arguments, which is why the hard-coded form survived so long).
+        ctor = signature.get("ctor") or "(self)"
         lines = [
             f"class {_field(problem, 'function_name')}:",
-            "    def __init__(self):",
+            f"    def __init__{ctor}:",
             f"        {STUB_COMMENT}",
             "        raise NotImplementedError",
         ]

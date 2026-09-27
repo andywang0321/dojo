@@ -27,4 +27,7 @@ Constraints:
 * 0 <= tweetId <= 10^4
 * All the tweets have unique IDs.
 * At most 3 * 10^4 calls will be made to postTweet, getNewsFeed, follow, and unfollow.
-* A user cannot follow himself."""
+* A user cannot follow himself.
+
+You should aim for a solution as good or better than O(f) time and O(n) space, where f is the number of users the feed's owner follows and n is the number of tweets posted: postTweet, follow and unfollow are each O(1) against per-user lists, and getNewsFeed pays O(f) to look at the newest tweet of the owner and of each followee and O(log f) per tweet popped off that size-f heap (at most 10 pops).
+"""

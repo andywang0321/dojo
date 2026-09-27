@@ -21,4 +21,7 @@ Constraints:
 * 1 <= n <= 10^4
 * 0 <= nums[i] <= n
 * All the numbers of nums are unique.
-Follow up: Could you implement a solution using only O(1) extra space complexity and O(n) runtime complexity?"""
+Follow up: Could you implement a solution using only O(1) extra space complexity and O(n) runtime complexity?
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the nums array: the statement's own follow-up asks for O(n) runtime and O(1) extra space.
+"""

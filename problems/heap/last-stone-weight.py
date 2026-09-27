@@ -19,4 +19,7 @@ Input: stones = [1]
 Output: 1
 Constraints:
 * 1 <= stones.length <= 30
-* 1 <= stones[i] <= 1000"""
+* 1 <= stones[i] <= 1000
+
+You should aim for a solution as good or better than O(n log n) time and O(n) space, where n is the number of stones: each turn pops the two heaviest and pushes at most one remnant.
+"""

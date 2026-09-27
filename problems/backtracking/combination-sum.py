@@ -20,4 +20,7 @@ Constraints:
 * 1 <= candidates.length <= 30
 * 2 <= candidates[i] <= 40
 * All elements of candidates are distinct.
-* 1 <= target <= 40"""
+* 1 <= target <= 40
+
+You should aim for a solution as good or better than O(2^n) time and O(n) space, where n is the target and m is the number of candidates: a candidate may be reused, so the intended DFS explores every distinct combination whose sum fits the target and prunes a branch as soon as the running sum passes it — its cost is that search tree, exponential in the target rather than in m (the usual O(m^(n/k + 1)) bound, with k the smallest candidate), and its recursion depth is at most n/2 because every candidate is at least 2. The returned combinations are not counted.
+"""

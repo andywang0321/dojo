@@ -17,4 +17,7 @@ Constraints:
 * 1 <= m, n <= 6
 * 1 <= word.length <= 15
 * board and word consists of only lowercase and uppercase English letters.
-Follow up: Could you use search pruning to make your solution faster with a larger board?"""
+Follow up: Could you use search pruning to make your solution faster with a larger board?
+
+You should aim for a solution as good or better than O(m * n * 3^L) time and O(L) space, where m x n is the board and L is the length of the word: every cell is tried as the start of the word, and from there each step branches into at most three new cells (the cell you came from is excluded), so the cost is exponential in the word's length rather than in the board, and the search's own state is the L-deep recursion plus the cells on the current path.
+"""

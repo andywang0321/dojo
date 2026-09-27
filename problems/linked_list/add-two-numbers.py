@@ -15,4 +15,9 @@ Output: [8,9,9,9,0,0,0,1]
 Constraints:
 * The number of nodes in each linked list is in the range [1, 100].
 * 0 <= Node.val <= 9
-* It is guaranteed that the list represents a number that does not have leading zeros."""
+* It is guaranteed that the list represents a number that does not have leading zeros.
+
+You should aim for a solution as good or better than O(m + n) time and O(1) space, where m and n are the lengths of the two lists.
+
+Input format: dojo has no ListNode. Each list arrives as a plain list[int] of the node values, least-significant digit first (l1[0] is the head, and the value it holds is the units digit), and the function returns the sum in the same form. Node counts are list lengths.
+"""

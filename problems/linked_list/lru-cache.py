@@ -27,4 +27,9 @@ Constraints:
 * 1 <= capacity <= 3000
 * 0 <= key <= 10^4
 * 0 <= value <= 10^5
-* At most 2 * 10^5 calls will be made to get and put."""
+* At most 2 * 10^5 calls will be made to get and put.
+
+You should aim for a solution as good or better than O(1) time and O(n) space, where n is the cache's capacity: each get and put must run in O(1) average time and the cache holds at most n entries, so the recency order has to be maintained by pointers rather than by scanning.
+
+Input format: dojo grades the class itself. Each case builds a fresh LRUCache from the constructor's arguments (the example's capacity of 2) and then replays a list of [method, ...args] calls, comparing the list of return values — null for every call that returns nothing, which includes the constructor. The constructor is replayed as an explicit ["__init__", capacity] call, so the op list and the expected output line up with the statement's own Input/Output one for one; put returns nothing, and get returns the value or -1.
+"""

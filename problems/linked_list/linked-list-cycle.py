@@ -19,4 +19,9 @@ Constraints:
 * The number of the nodes in the list is in the range [0, 10^4].
 * -10^5 <= Node.val <= 10^5
 * pos is -1 or a valid index in the linked-list.
-Follow up: Can you solve it using O(1) (i.e. constant) memory?"""
+Follow up: Can you solve it using O(1) (i.e. constant) memory?
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the number of nodes in the list.
+
+Input format: dojo has no ListNode and a JSON list cannot contain a cycle, so the list arrives in index form as next_node: list[int] — next_node[i] is the index of node i's successor and -1 means null. The head is node 0, and the statement's pos is expressed by the last node's successor: next_node[n - 1] is pos (or -1 for no cycle). The function receives only next_node and returns a bool.
+"""

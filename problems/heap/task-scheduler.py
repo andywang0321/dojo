@@ -20,4 +20,7 @@ There are only two types of tasks, A and B, which need to be separated by 3 inte
 Constraints:
 * 1 <= tasks.length <= 10^4
 * tasks[i] is an uppercase English letter.
-* 0 <= n <= 100"""
+* 0 <= n <= 100
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the length of the tasks array (the statement's own n is the cooldown between two equal labels, at most 100, so a constant here rather than a size): counting the 26 labels settles the answer in closed form, and a greedy simulation spends one interval per task at most 101 times over.
+"""

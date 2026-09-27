@@ -29,4 +29,7 @@ detectSquares.count([11, 10]); // return 2. You can choose:
 Constraints:
 * point.length == 2
 * 0 <= x, y <= 1000
-* At most 3000 calls in total will be made to add and count."""
+* At most 3000 calls in total will be made to add and count.
+
+You should aim for a solution as good or better than O(n) time and O(n) space, where n is the number of points added (at most 3000 add and count calls in all): each add is O(1) into a multiplicity map and each count makes at most one pass over the distinct points stored, so no operation ever scans the fixed 1001 x 1001 coordinate grid.
+"""

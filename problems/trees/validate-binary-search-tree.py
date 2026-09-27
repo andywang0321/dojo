@@ -14,4 +14,9 @@ Output: false
 Explanation: The root node's value is 5 but its right child's value is 4.
 Constraints:
 * The number of nodes in the tree is in the range [1, 10^4].
-* -2^31 <= Node.val <= 2^31 - 1"""
+* -2^31 <= Node.val <= 2^31 - 1
+
+You should aim for a solution as good or better than O(n) time and O(h) space, where n is the number of nodes in the tree and h is the height of the tree.
+
+Input format: dojo has no TreeNode — the tree arrives as a nested list [value, left, right], where None is a missing child (and None alone is the empty tree). The function receives that list and returns a bool.
+"""

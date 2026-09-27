@@ -13,6 +13,8 @@ and the reflection.
 
 from __future__ import annotations
 
+import copy
+
 import random
 import sqlite3
 import tempfile
@@ -418,7 +420,20 @@ def _oracle_confirms(slug: str, n: int) -> bool:
         return False
     args = generator(n, random.Random(f"confirm-{n}"))
     try:
-        return check_equal(reference(*args), oracle(*args), compare)
+        # Each side gets its OWN copy of the arguments: an in-place reference
+        # (reorder-list, rotate-image, walls-and-gates) would otherwise hand the
+        # oracle the already-mutated input.
+        ref_args = copy.deepcopy(args)
+        got = reference(*ref_args)
+        oracle_args = copy.deepcopy(args)
+        want = oracle(*oracle_args)
+        if compare == "mutates":
+            # The contract is the effect on the arguments and the return value is
+            # None, so `check_equal(got, want, "mutates")` compared two Nones and
+            # confirmed ANY student mismatch — including one a broken reference
+            # caused (v0.14 follow-up). Compare what each side left behind.
+            return check_equal(ref_args, oracle_args, "strict")
+        return check_equal(got, want, compare)
     except Exception:  # noqa: BLE001 - the anchor could not run at this size
         return False
 

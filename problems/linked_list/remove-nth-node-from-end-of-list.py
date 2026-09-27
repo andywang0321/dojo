@@ -15,4 +15,9 @@ Constraints:
 * 1 <= sz <= 30
 * 0 <= Node.val <= 100
 * 1 <= n <= sz
-Follow up: Could you do this in one pass?"""
+Follow up: Could you do this in one pass?
+
+You should aim for a solution as good or better than O(n) time and O(1) space, where n is the number of nodes in the list: the intended solution finds the node with two pointers a gap of n apart in one pass over the nodes.
+
+Input format: dojo has no ListNode, so the list arrives as a plain Python list of node values, head: list[int], where head[0] is the first node, and n is a separate int argument. The function returns the surviving values in the same form, e.g. head = [1, 2, 3, 4, 5] with n = 2 -> [1, 2, 3, 5]. Counting from the end means counting back from head[-1].
+"""

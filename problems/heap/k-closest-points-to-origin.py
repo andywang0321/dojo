@@ -17,4 +17,7 @@ Output: [[3,3],[-2,4]]
 Explanation: The answer [[-2,4],[3,3]] would also be accepted.
 Constraints:
 * 1 <= k <= points.length <= 10^4
-* -10^4 <= xi, yi <= 10^4"""
+* -10^4 <= xi, yi <= 10^4
+
+You should aim for a solution as good or better than O(n log n) time and O(n) space, where n is the number of points: a full sort is the straightforward bound, and a size-k heap selects the k closest in O(n log k) time and O(k) space.
+"""

@@ -61,6 +61,16 @@ def test_every_curated_slug_has_complete_infrastructure():
         assert has_oracle or all_predicate, (
             f"{slug}: no oracle and its visible tests are not all predicate-checked"
         )
+        # A class problem whose cases pass constructor arguments must declare the
+        # constructor's parameters: the workbench stub is rendered from the
+        # signature, and a hard-coded `def __init__(self):` gave LC 146/703 stubs
+        # of the wrong arity (v0.14).
+        if isinstance(entry.signature, dict) and "methods" in entry.signature:
+            ctor_args = [c.get("ctor_args") for c in entry.visible_tests]
+            if any(ctor_args) and not entry.signature.get("ctor"):
+                raise AssertionError(
+                    f"{slug}: cases pass ctor_args but the signature declares no 'ctor'"
+                )
 
 
 def _module_view():

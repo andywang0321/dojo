@@ -10,4 +10,7 @@ Input: digits = "2"
 Output: ["a","b","c"]
 Constraints:
 * 1 <= digits.length <= 4
-* digits[i] is a digit in the range ['2', '9']."""
+* digits[i] is a digit in the range ['2', '9'].
+
+You should aim for a solution as good or better than O(4^n * n) time and O(n) space, where n is the number of digits: a key carries at most four letters, so the answer holds at most 4^n combinations and each one costs n characters to build, and the backtracking recursion that produces them is n deep (the returned list of combinations is not counted, as elsewhere in this corpus).
+"""
