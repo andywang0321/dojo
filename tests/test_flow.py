@@ -2064,3 +2064,53 @@ def test_an_offline_backend_never_ends_a_warmup_session(db, fake_console, monkey
     assert still_due["reps"] == card["reps"] and still_due["lapses"] == card["lapses"]
     assert still_due["due_at"] == card["due_at"] and still_due["last_review_at"] is None
     assert db.execute("SELECT * FROM attempts").fetchall() == []
+
+
+def test_a_full_session_on_a_curated_class_problem(db, fake_console, monkeypatch, tmp_path):
+    """A curated ops problem (a `{"methods": ...}` signature) end to end.
+
+    This is the shape most of the 126-problem curation added: the template renders
+    a class stub, the judge instantiates it and replays the op sequence on a fresh
+    instance per case, and there is no profiler input — the probe pairs functions,
+    not classes — so the submit must report the measurement as unavailable rather
+    than failing it. Asserted through `run_day`, not through its pieces.
+    """
+    from dojo.bank import seed_problems
+
+    seed_problems(db)  # the real corpus rows, overrides and all
+    monkeypatch.setattr("dojo.session.flow.WORKBENCH_DIR", tmp_path / "workbench")
+    monkeypatch.setattr("dojo.session.state.WORKBENCH_DIR", tmp_path / "workbench")
+    workbench = tmp_path / "workbench"
+    workbench.mkdir(parents=True)
+
+    slug = "time-based-key-value-store"
+    solution = textwrap.dedent(
+        """
+        class TimeMap:
+            def __init__(self):
+                self.store = {}
+
+            def set(self, key: str, value: str, timestamp: int) -> None:
+                self.store.setdefault(key, []).append((timestamp, value))
+
+            def get(self, key: str, timestamp: int) -> str:
+                best = ""
+                for ts, value in self.store.get(key, []):
+                    if ts <= timestamp:
+                        best = value
+                return best
+        """
+    )
+    answers = [
+        "submit", "O(log n) per get", "O(n) store", "", "binary search per key", "done",
+    ]
+    console = fake_console(
+        answers,
+        actions={"submit": lambda: (workbench / f"{slug}.py").write_text(solution)},
+    )
+
+    assert run_day(db, console, MockBackend(), slug, "andy", open_editor=False) == "solved"
+    row = db.execute("SELECT * FROM attempts WHERE status = 'correct'").fetchone()
+    assert row is not None and row["kind"] == "solve"
+    assert row["measured_time_class"] is None, "no profiler input: measurement is skipped"
+    assert "skipping the scale probe" in console.text

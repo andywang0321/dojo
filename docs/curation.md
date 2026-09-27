@@ -113,3 +113,18 @@ A predicate checker receives `(module, got, args)` and must accept **every** cor
 ### The gate
 
 `tests/test_registry.py` is the contract, and it is corpus-wide: overrides ↔ generators ↔ oracles ↔ references must agree, visible and generated cases must match their oracle, and every reference must pass `reference_findings`. Run `uv run pytest tests/test_registry.py` after every batch; a batch that leaves it red has not landed. With an API key, `dojo report <slug>` re-audits a curated problem through a fresh curator run plus the audit agent.
+
+Three of its checks exist because the 126-problem batch needed them:
+
+- **any** registered predicate checker is exercised on the oracle's own answer (the dispatch used to be a hardcoded `if/elif` chain, so a new checker name fell through to strict equality and was never run at all);
+- **every** `@profiler_input` is executed at small n and its args must survive `json.dumps` — the generators otherwise run only inside a live session, where a raising one degrades to "no measurement" and says nothing (LC 74's called `math.isqrt` without importing `math`);
+- **every** curated problem must render a template that compiles *and* an examples block, since `template_for` refuses to write a file that does not compile and the failure would reach the student as a session that will not start.
+
+### Curating a batch offline, without an API key
+
+The 126 remaining ladder problems were curated without a provider key: the same recipe, authored by hand (or by an agent) instead of by the curator model. The machinery is scratch tooling, not product code — it lived in the gitignored `data/curation/offline/` and is described here so the next corpus does not have to reinvent it:
+
+1. **One fragment per problem** (`<group>/<slug>.json`): the statement additions (complexity line, representation note, or a full authored `body` for the six premium problems), the overrides entry, the registry block, the reference, and prose `notes` recording the judgement calls. Parallel authors never touch a shared file.
+2. **An assembler** merges fragments into `problems/**`, `data/problem_overrides.json` and `judge/registry.py` idempotently — registry blocks are located through the AST by their decorators, references through their `# --- canonical reference (<slug>) ---` marker — and validates each fragment first (schema, roadmap group, decorator presence, no import of the injected decorators). Two of its rules came from bugs: a section scan that did not stop at the references header inserted blocks past the end of the file and then truncated them, and stripping the complexity line before the representation note duplicated the line on a second merge.
+3. **A per-problem probe smoke** runs the oracle as the student against the reference across the probe's own ladder (the two must agree on the output, neither may fail), then exercises the reference alone at the largest measured size. `tests/test_registry.py` only proves agreement on *small* cases; this is where "the reference cannot handle n=6400" surfaces. Run it when the tree is quiet — it imports the registry, so a concurrent edit produces stale-source failures that look like reference bugs.
+4. **Independent verification per batch**: an agent that did not write the fragments attacks the anchor (are the visible tests transcriptions of the statement's examples?), the contract, the oracle, the generator's constraints, the profiler input's shape, and any predicate checker in both directions, and writes findings as JSON. Its whole value is that the author's own self-check cannot catch a misunderstanding the oracle and the reference share.
